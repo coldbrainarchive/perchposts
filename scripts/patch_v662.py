@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+"""Patch v661 -> v662:
+Fix black sidebars on desktop portrait videos/images.
+Cause: width:100% + objectFit:contain letterboxes portrait content.
+Fix: desktop uses width:auto + maxWidth:100% so the element only takes
+the natural width it needs. maxHeight:500 still caps the height.
+"""
+import sys
+
+src = '_deploy/assets/index-DUcNPOLc-v661.js'
+dst = '_deploy/assets/index-DUcNPOLc-v662.js'
+
+content = open(src, encoding='utf-8').read()
+errors = []
+q = chr(0x60)
+
+def patch(old, new, label):
+    global content
+    n = content.count(old)
+    if n == 0:
+        errors.append('FAIL (' + label + '): not found')
+    elif n > 1:
+        errors.append('FAIL (' + label + '): ' + str(n) + ' matches')
+    else:
+        content = content.replace(old, new)
+        print('OK: ' + label)
+
+desktop = 'window.innerWidth>=768'
+
+# Video element
+patch(
+    ('style:{width:' + q + '100%' + q
+     + ',maxHeight:' + desktop + '?500:_mh'
+     + ',objectFit:' + desktop + '?' + q + 'contain' + q + ':' + q + 'cover' + q
+     + ',borderRadius:10,display:' + q + 'block' + q + ',marginTop:10}'),
+    ('style:{width:' + desktop + '?' + q + 'auto' + q + ':' + q + '100%' + q
+     + ',maxWidth:' + q + '100%' + q
+     + ',maxHeight:' + desktop + '?500:_mh'
+     + ',borderRadius:10,display:' + q + 'block' + q + ',marginTop:10}'),
+    'video: width:auto on desktop, drop objectFit (no black bars)'
+)
+
+# Image element
+patch(
+    ('style:{width:' + q + '100%' + q
+     + ',borderRadius:10,display:' + q + 'block' + q
+     + ',maxHeight:' + desktop + '?500:_mh'
+     + ',objectFit:' + desktop + '?' + q + 'contain' + q + ':' + q + 'cover' + q
+     + ',cursor:' + q + 'zoom-in' + q + '}'),
+    ('style:{width:' + desktop + '?' + q + 'auto' + q + ':' + q + '100%' + q
+     + ',maxWidth:' + q + '100%' + q
+     + ',borderRadius:10,display:' + q + 'block' + q
+     + ',maxHeight:' + desktop + '?500:_mh'
+     + ',objectFit:' + desktop + '?' + q + 'contain' + q + ':' + q + 'cover' + q
+     + ',cursor:' + q + 'zoom-in' + q + '}'),
+    'image: width:auto on desktop (no black bars)'
+)
+
+if errors:
+    print('\nERRORS:')
+    for e in errors:
+        print(' ', e)
+    sys.exit(1)
+
+base = open(src, encoding='utf-8').read()
+p_delta = (content.count('(') - content.count(')')) - (base.count('(') - base.count(')'))
+b_delta = (content.count('{') - content.count('}')) - (base.count('{') - base.count('}'))
+print('Paren delta: ' + str(p_delta) + ', Brace delta: ' + str(b_delta))
+
+open(dst, 'w', encoding='utf-8').write(content)
+print('Wrote ' + dst)

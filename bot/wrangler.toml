@@ -1,0 +1,14 @@
+name = "daboysforumbot"
+main = "cf-worker.js"
+compatibility_date = "2024-01-01"
+
+[triggers]
+crons = ["0 * * * *"]
+
+[[services]]
+binding = "FORUM_WORKER"
+service = "daboysforumip"
+
+[vars]
+FORUM_WORKER_URL = "https://daboysforumip.coldbrainarchive.workers.dev"
+GITHUB_REPO = "coldbrainarchive/Daboysforum"

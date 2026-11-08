@@ -1,0 +1,19 @@
+name = "daboysforumip"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+[triggers]
+crons = ["5 * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "daboysforum-db"
+database_id = "e35f001b-d7d2-47cb-8ac2-ee6c556a4a16"
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "daboysforum-media"
+
+[vars]
+GITHUB_REPO = "coldbrainarchive/Daboysforum"
+TURNSTILE_HOSTNAMES = "perchposts.com"

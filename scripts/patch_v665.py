@@ -1,0 +1,56 @@
+#!/usr/bin/env python3
+"""Patch v664 -> v665:
+Desktop images: switch to width:auto so they sit left-aligned matching videos.
+Mobile images unchanged: width:100% + objectFit:cover fills the postcard.
+"""
+import sys
+
+src = '_deploy/assets/index-DUcNPOLc-v664.js'
+dst = '_deploy/assets/index-DUcNPOLc-v665.js'
+
+content = open(src, encoding='utf-8').read()
+errors = []
+q = chr(0x60)
+
+def patch(old, new, label):
+    global content
+    n = content.count(old)
+    if n == 0:
+        errors.append('FAIL (' + label + '): not found')
+    elif n > 1:
+        errors.append('FAIL (' + label + '): ' + str(n) + ' matches')
+    else:
+        content = content.replace(old, new)
+        print('OK: ' + label)
+
+desktop = 'window.innerWidth>=768'
+
+# Image element (unique context: cursor:zoom-in)
+patch(
+    ('style:{width:' + q + '100%' + q
+     + ',borderRadius:10,display:' + q + 'block' + q
+     + ',maxHeight:' + desktop + '?500:_mh'
+     + ',objectFit:' + desktop + '?' + q + 'contain' + q + ':' + q + 'cover' + q
+     + ',cursor:' + q + 'zoom-in' + q + '}'),
+    ('style:{width:' + desktop + '?' + q + 'auto' + q + ':' + q + '100%' + q
+     + ',maxWidth:' + q + '100%' + q
+     + ',borderRadius:10,display:' + q + 'block' + q
+     + ',maxHeight:' + desktop + '?500:_mh'
+     + ',objectFit:' + desktop + '?' + q + 'contain' + q + ':' + q + 'cover' + q
+     + ',cursor:' + q + 'zoom-in' + q + '}'),
+    'image desktop: width:auto left-aligned, mobile unchanged'
+)
+
+if errors:
+    print('\nERRORS:')
+    for e in errors:
+        print(' ', e)
+    sys.exit(1)
+
+base = open(src, encoding='utf-8').read()
+p_delta = (content.count('(') - content.count(')')) - (base.count('(') - base.count(')'))
+b_delta = (content.count('{') - content.count('}')) - (base.count('{') - base.count('}'))
+print('Paren delta: ' + str(p_delta) + ', Brace delta: ' + str(b_delta))
+
+open(dst, 'w', encoding='utf-8').write(content)
+print('Wrote ' + dst)
