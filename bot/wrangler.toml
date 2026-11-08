@@ -11,4 +11,4 @@ service = "daboysforumip"
 
 [vars]
 FORUM_WORKER_URL = "https://daboysforumip.coldbrainarchive.workers.dev"
-GITHUB_REPO = "coldbrainarchive/Daboysforum"
+GITHUB_REPO = "coldbrainarchive/perchposts"

@@ -389,7 +389,7 @@ async function run(env) {
 
 async function dispatchGitHubAction(env) {
   const pat = env.GITHUB_PAT;
-  const repo = env.GITHUB_REPO || "coldbrainarchive/Daboysforum";
+  const repo = env.GITHUB_REPO || "coldbrainarchive/perchposts";
   if (!pat) { console.error("GITHUB_PAT not set — cannot dispatch"); return; }
   const res = await fetch(`https://api.github.com/repos/${repo}/actions/workflows/news-bot.yml/dispatches`, {
     method: "POST",

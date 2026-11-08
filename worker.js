@@ -2373,7 +2373,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     if (!isAdmin) return json({ error: "Unauthorized" }, 401);
     const ghPat = env.GITHUB_PAT;
     if (!ghPat) return json({ error: "GITHUB_PAT not configured" }, 500);
-    const ghRepo = env.GITHUB_REPO || "coldbrainarchive/Daboysforum";
+    const ghRepo = env.GITHUB_REPO || "coldbrainarchive/perchposts";
     ctx.waitUntil(
       fetch(`https://api.github.com/repos/${ghRepo}/actions/workflows/news-bot.yml/dispatches`, {
         method: "POST",

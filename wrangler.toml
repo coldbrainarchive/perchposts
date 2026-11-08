@@ -15,5 +15,5 @@ binding = "MEDIA"
 bucket_name = "daboysforum-media"
 
 [vars]
-GITHUB_REPO = "coldbrainarchive/Daboysforum"
+GITHUB_REPO = "coldbrainarchive/perchposts"
 TURNSTILE_HOSTNAMES = "perchposts.com"
