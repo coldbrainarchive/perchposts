@@ -794,7 +794,8 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const isHuddle = body.is_huddle === true || body.is_huddle === 1;
       if (!isHuddle && !body.content) return json({ error: "Missing fields" }, 400);
       if (isHuddle && !body.huddle_members) return json({ error: "Missing huddle_members" }, 400);
-      if (!isBot && !isModerator && await isJailed()) {
+      const caged = !isBot && !isModerator && await isJailed();
+      if (caged) {
         body.board = "The Cage";
         body.category = "The Cage";
         body.community_id = "cage";
@@ -810,6 +811,10 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       // Only the admin and mods post in Announcements (bot feeds are set up by the admin)
       if (!isModerator && !isBot && [body.board, body.category, body.community_id].some(v => String(v || "").trim().toLowerCase() === "announcements")) {
         return json({ error: "Only mods can post in Announcements" }, 403);
+      }
+      // The Cage is for caged birds (and mods); everyone else can still chirp on Cage posts
+      if (!caged && !isModerator && !isBot && [body.board, body.category, body.community_id].some(v => ["cage", "the cage"].includes(String(v || "").trim().toLowerCase()))) {
+        return json({ error: "Only caged birds can post in The Cage" }, 403);
       }
       // Bots can't post an article twice
       let botClaim = null;
@@ -1177,8 +1182,8 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       if (target?.locked || target?.frozen) return json({ error: target.frozen ? "This post is archived" : "This post is locked" }, 403);
       if (target?.is_huddle && !isModerator && !isHuddleMember(target, username)) return json({ error: "Not a member of this huddle" }, 403);
       if (!isModerator && await isJailed()) {
-        const post = await env.DB.prepare(`SELECT board FROM posts WHERE id = ?`).bind(body.post_id).first();
-        const postBoard = (post.board || post.community_id || "").toLowerCase();
+        const post = await env.DB.prepare(`SELECT board, community_id FROM posts WHERE id = ?`).bind(body.post_id).first();
+        const postBoard = (post?.board || post?.community_id || "").toLowerCase();
         if (!post || (postBoard !== "cage" && postBoard !== "the cage")) return json({ error: "Caged" }, 403);
       }
       const parentCommentId = typeof body.parent_comment_id === "string" && body.parent_comment_id.trim()
