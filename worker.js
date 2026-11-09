@@ -2110,13 +2110,39 @@ async function handleRequest(request, env, ctx, corsHeaders) {
 
   // ── /notif-count ──────────────────────────────────────────────────────────────
 
+  // ── /notif-read, /notif-read-all: notification read state on the account ───────
+
+  if (url.pathname === "/notif-read" && request.method === "POST") {
+    if (!authUser?.username) return signInRequired();
+    const id = String(body.id || "").slice(0, 200), t = String(body.time || now).slice(0, 40);
+    if (!id) return json({ error: "Missing id" }, 400);
+    await env.DB.prepare(`INSERT OR IGNORE INTO notif_reads (user_key, notif_id, notif_time) VALUES (?, ?, ?)`).bind(authUser.username, id, t).run();
+    return json({ success: true });
+  }
+
+  if (url.pathname === "/notif-read-all" && request.method === "POST") {
+    if (!authUser?.username) return signInRequired();
+    await env.DB.prepare(`INSERT INTO notif_state (user_key, seen_at) VALUES (?, ?) ON CONFLICT(user_key) DO UPDATE SET seen_at = excluded.seen_at`).bind(authUser.username, now).run();
+    await env.DB.prepare(`DELETE FROM notif_reads WHERE user_key = ?`).bind(authUser.username).run();
+    return json({ success: true, seen_at: now });
+  }
+
   if (url.pathname === "/notif-count") {
     try {
       const browser_id = url.searchParams.get("browser_id") || "";
-      const since = url.searchParams.get("since") || new Date(0).toISOString();
       if (!authUser?.username) return signInRequired();
       const mod_user_id = isModerator ? authUser.sub : null;
       const uname = isModerator ? null : authUser.username;
+      // Read state lives on the account (syncs across devices). First time: seed it from this device.
+      const nk = authUser.username;
+      let since = url.searchParams.get("since") || new Date(0).toISOString();
+      const nst = await env.DB.prepare(`SELECT seen_at FROM notif_state WHERE user_key = ?`).bind(nk).first();
+      if (nst) since = nst.seen_at;
+      else await env.DB.prepare(`INSERT OR IGNORE INTO notif_state (user_key, seen_at) VALUES (?, ?)`).bind(nk, since).run();
+      const finish = async total => {
+        const { results: rd = [] } = await env.DB.prepare(`SELECT notif_id, notif_time FROM notif_reads WHERE user_key = ? AND notif_time > ? LIMIT 500`).bind(nk, since).all();
+        return json({ count: Math.max(0, total - rd.length), seen_at: since, read: rd.map(r => r.notif_id) });
+      };
 
       let postIds = [], commentIds = [];
 
@@ -2144,7 +2170,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         const rHuddleSys = await env.DB.prepare(`SELECT COUNT(*) as c FROM system_notifications WHERE user_id = ? AND message != '__cleared__' AND created_at > ?`).bind(notifUname, since).first();
         count += (rHuddleSys?.c || 0);
       }
-      if (!postIds.length && !commentIds.length) return json({ count });
+      if (!postIds.length && !commentIds.length) return finish(count);
 
       if (postIds.length) {
         const ph = ID_LIST;
@@ -2159,7 +2185,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         count += (r3?.c || 0) + (r4?.c || 0);
       }
 
-      return json({ count });
+      return finish(count);
     } catch (err) {
       return json({ error: err.message }, 500);
     }
