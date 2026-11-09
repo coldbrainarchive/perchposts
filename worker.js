@@ -976,6 +976,35 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const until = url.searchParams.get("until") || null;
       const before = url.searchParams.get("before") || null;
 
+      // Most flaps: this week's posts ranked by flaps. post_votes is small, so rank there, then load those posts.
+      if (url.searchParams.get("sort") === "flaps") {
+        const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+        const { results: top = [] } = await env.DB.prepare(
+          `SELECT post_id, SUM(value) AS flaps FROM post_votes GROUP BY post_id HAVING flaps > 0 ORDER BY flaps DESC LIMIT 500`
+        ).all();
+        const flapsOf = new Map(top.map(r => [r.post_id, r.flaps]));
+        const ids = [...flapsOf.keys()];
+        const rows = [];
+        for (let i = 0; i < ids.length; i += 90) {
+          const chunk = ids.slice(i, i + 90);
+          const { results = [] } = await env.DB.prepare(
+            `SELECT rowid AS _rid, * FROM posts WHERE id IN (${chunk.map(() => "?").join(",")}) AND ${LIVE_POSTS} AND created_at >= ?`
+          ).bind(...chunk, weekAgo).all();
+          rows.push(...results);
+        }
+        rows.sort((a, b) => (flapsOf.get(b.id) || 0) - (flapsOf.get(a.id) || 0));
+        const posts = await publicRows(await addCommentCounts(env, rows.map(p => ({ ...boolify(p, POST_BOOL_FIELDS), flaps: flapsOf.get(p.id) || 0 }))));
+        return json({ posts, next_before: null });
+      }
+
+      // Hide bots: every post by a person (a small set, read through the partial index)
+      if (url.searchParams.get("people") === "1") {
+        const { results = [] } = await env.DB.prepare(
+          `SELECT rowid AS _rid, * FROM posts INDEXED BY idx_posts_human_activity WHERE ${HUMAN_POSTS} AND ${LIVE_POSTS} ORDER BY last_activity DESC LIMIT 500`
+        ).all();
+        return json({ posts: await publicRows(await addCommentCounts(env, results.map(p => boolify(p, POST_BOOL_FIELDS)))), next_before: null });
+      }
+
       // Filtered views and "load older" pages read one page at a time instead of scanning every post
       if (!search && !since && !until && !isHuddleBoard && (activityFilter || board || continent || country || username || before)) {
         const pageLimit = Math.min(parseInt(url.searchParams.get("limit") || "50") || 50, 100);
