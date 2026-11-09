@@ -110,13 +110,16 @@ CREATE TABLE IF NOT EXISTS bans (
 );
 
 -- jailed
+-- browser_id optional: accounts are caged by username (see migrations/2026-11-09_jailed_by_username.sql)
 CREATE TABLE IF NOT EXISTS jailed (
   id         TEXT PRIMARY KEY,
-  browser_id TEXT NOT NULL UNIQUE,
+  browser_id TEXT,
   username   TEXT,
   ip_hash    TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jailed_username ON jailed(username) WHERE username IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jailed_browser_id ON jailed(browser_id) WHERE browser_id IS NOT NULL;
 
 -- bot_seen
 CREATE TABLE IF NOT EXISTS bot_seen (
