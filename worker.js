@@ -976,9 +976,11 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const until = url.searchParams.get("until") || null;
       const before = url.searchParams.get("before") || null;
 
-      // Most flaps: this week's posts ranked by flaps. post_votes is small, so rank there, then load those posts.
+      // Most flaps: posts from the last day / week / all time ranked by flaps (range=day|week|all, default week).
+      // post_votes is small, so rank there, then load those posts.
       if (url.searchParams.get("sort") === "flaps") {
-        const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+        const range = url.searchParams.get("range");
+        const weekAgo = range === "all" ? "" : new Date(Date.now() - (range === "day" ? 1 : 7) * 86400000).toISOString();
         const { results: top = [] } = await env.DB.prepare(
           `SELECT post_id, SUM(value) AS flaps FROM post_votes GROUP BY post_id HAVING flaps > 0 ORDER BY flaps DESC LIMIT 500`
         ).all();
