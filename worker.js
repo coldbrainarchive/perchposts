@@ -2137,9 +2137,11 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         const rSys = await env.DB.prepare(`SELECT COUNT(*) as c FROM system_notifications WHERE user_id = ? AND message != '__cleared__' AND created_at > ?`).bind(mod_user_id, since).first();
         count += (rSys?.c || 0);
       }
-      // Count huddle/system notifications for regular users by username
-      if (uname) {
-        const rHuddleSys = await env.DB.prepare(`SELECT COUNT(*) as c FROM system_notifications WHERE user_id = ? AND message != '__cleared__' AND created_at > ?`).bind(uname, since).first();
+      // Huddle/system notifications stored by username, for everyone (mods and admins too, matching
+      // the /notifications list); before, staff accounts never counted these, so no red bubble for them
+      const notifUname = uname || authUser?.username || null;
+      if (notifUname) {
+        const rHuddleSys = await env.DB.prepare(`SELECT COUNT(*) as c FROM system_notifications WHERE user_id = ? AND message != '__cleared__' AND created_at > ?`).bind(notifUname, since).first();
         count += (rHuddleSys?.c || 0);
       }
       if (!postIds.length && !commentIds.length) return json({ count });
