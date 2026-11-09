@@ -2441,13 +2441,18 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   // ── /get-ban-lists ────────────────────────────────────────────────────────────
 
   if (url.pathname === "/get-ban-lists") {
-    const [bansRes, jailedRes] = await Promise.all([
+    const [bansRes, jailedRes, staffRes] = await Promise.all([
       env.DB.prepare(`SELECT DISTINCT username FROM bans WHERE username IS NOT NULL`).all(),
-      env.DB.prepare(`SELECT DISTINCT username FROM jailed WHERE username IS NOT NULL`).all()
+      env.DB.prepare(`SELECT DISTINCT username FROM jailed WHERE username IS NOT NULL`).all(),
+      // Staff names (already public on their tags), so mod purple / admin white show on every tag, old posts included
+      env.DB.prepare(`SELECT username, role FROM mod_users WHERE role IN ('mod','admin') AND deleted_at IS NULL AND username IS NOT NULL`).all()
     ]);
+    const staff = staffRes.results || [];
     return json({
       banned: (bansRes.results || []).map(r => r.username),
-      jailed: (jailedRes.results || []).map(r => r.username)
+      jailed: (jailedRes.results || []).map(r => r.username),
+      mods: staff.filter(r => r.role === "mod").map(r => r.username),
+      admins: staff.filter(r => r.role === "admin").map(r => r.username)
     });
   }
 
