@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Patch v917 -> v918: sending a chirp launches your own bird (its emoji, colour filter and sparkles, cloned
+"""REPLACED by v919 (user preferred the message itself flying, not a bird). Patch v917 -> v918: sending a chirp launches your own bird (its emoji, colour filter and sparkles, cloned
 from the header pill) from the send button up to where the chirp lands. It flaps (quick squash/stretch)
 along a small arc; as it arrives the chirp bubble pops in (hidden while the bird flies, even if the server's
 copy replaces the instant one mid-flight) and a couple of feathers drift off. ~0.6s. Skipped for
