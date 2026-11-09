@@ -629,8 +629,9 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   async function isBanned() {
     if (isAdmin) return false; // nothing can lock an admin out, including a shared browser or IP
     const bid = (body.browser_id || "").trim();
-    const conditions = ["ip_hash = ?", "username = ?"];
-    const params = [ip_hash, username];
+    // Mods are only banned by their own account or browser, never by someone else's IP ban
+    const conditions = isModerator ? ["username = ?"] : ["ip_hash = ?", "username = ?"];
+    const params = isModerator ? [username] : [ip_hash, username];
     if (bid) { conditions.push("browser_id = ?"); params.push(bid); }
     const row = await env.DB.prepare(
       `SELECT 1 FROM bans WHERE ${conditions.join(" OR ")} LIMIT 1`
@@ -1660,8 +1661,10 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         if (body.username)   await env.DB.prepare(`DELETE FROM jailed WHERE username = ?`).bind(body.username).run();
         if (body.browser_id) await env.DB.prepare(`DELETE FROM jailed WHERE browser_id = ?`).bind(body.browser_id).run();
         if (body.ip_hash)    await env.DB.prepare(`DELETE FROM jailed WHERE ip_hash = ?`).bind(body.ip_hash).run();
+        // A ban is for the account (and its browser). The IP is only banned when asked for explicitly:
+        // it blocks everyone on that network (school, cafe, mobile carrier), like a 4chan-style ban.
         await env.DB.prepare(`INSERT INTO bans (id, username, browser_id, ip_hash, created_at) VALUES (?, ?, ?, ?, ?)`)
-          .bind(crypto.randomUUID(), body.username || null, body.browser_id || null, body.ip_hash || null, now).run();
+          .bind(crypto.randomUUID(), body.username || null, body.browser_id || null, body.ban_ip === true ? (body.ip_hash || null) : null, now).run();
       }
       if (t === "unban") {
         if (body.username)   await env.DB.prepare(`DELETE FROM bans WHERE username = ?`).bind(body.username).run();
