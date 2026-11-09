@@ -976,26 +976,29 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const until = url.searchParams.get("until") || null;
       const before = url.searchParams.get("before") || null;
 
-      // Most flaps: posts from the last day / week / all time ranked by flaps (range=day|week|all, default week).
-      // post_votes is small, so rank there, then load those posts.
-      if (url.searchParams.get("sort") === "flaps") {
+      // Most flaps / Most chirps: posts from the last day / week / all time ranked by flaps or chirps
+      // (sort=flaps|chirps, range=day|week|all, default week). post_votes and comments are small, so rank
+      // there, then load those posts. Each post gets a "rank" field with its count.
+      const rankSort = url.searchParams.get("sort");
+      if (rankSort === "flaps" || rankSort === "chirps") {
         const range = url.searchParams.get("range");
-        const weekAgo = range === "all" ? "" : new Date(Date.now() - (range === "day" ? 1 : 7) * 86400000).toISOString();
-        const { results: top = [] } = await env.DB.prepare(
-          `SELECT post_id, SUM(value) AS flaps FROM post_votes GROUP BY post_id HAVING flaps > 0 ORDER BY flaps DESC LIMIT 500`
+        const since = range === "all" ? "" : new Date(Date.now() - (range === "day" ? 1 : 7) * 86400000).toISOString();
+        const { results: top = [] } = await env.DB.prepare(rankSort === "flaps"
+          ? `SELECT post_id, SUM(value) AS n FROM post_votes GROUP BY post_id HAVING n > 0 ORDER BY n DESC LIMIT 500`
+          : `SELECT post_id, COUNT(*) AS n FROM comments WHERE deleted = 0 AND (username IS NULL OR username != '__system__') GROUP BY post_id ORDER BY n DESC LIMIT 500`
         ).all();
-        const flapsOf = new Map(top.map(r => [r.post_id, r.flaps]));
-        const ids = [...flapsOf.keys()];
+        const countOf = new Map(top.map(r => [r.post_id, r.n]));
+        const ids = [...countOf.keys()];
         const rows = [];
         for (let i = 0; i < ids.length; i += 90) {
           const chunk = ids.slice(i, i + 90);
           const { results = [] } = await env.DB.prepare(
             `SELECT rowid AS _rid, * FROM posts WHERE id IN (${chunk.map(() => "?").join(",")}) AND ${LIVE_POSTS} AND created_at >= ?`
-          ).bind(...chunk, weekAgo).all();
+          ).bind(...chunk, since).all();
           rows.push(...results);
         }
-        rows.sort((a, b) => (flapsOf.get(b.id) || 0) - (flapsOf.get(a.id) || 0));
-        const posts = await publicRows(await addCommentCounts(env, rows.map(p => ({ ...boolify(p, POST_BOOL_FIELDS), flaps: flapsOf.get(p.id) || 0 }))));
+        rows.sort((a, b) => (countOf.get(b.id) || 0) - (countOf.get(a.id) || 0));
+        const posts = await publicRows(await addCommentCounts(env, rows.map(p => ({ ...boolify(p, POST_BOOL_FIELDS), rank: countOf.get(p.id) || 0 }))));
         return json({ posts, next_before: null });
       }
 
