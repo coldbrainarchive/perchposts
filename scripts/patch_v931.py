@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Patch v930 -> v931: no more one-frame jump when a chirp arrives (seen in the user's iPhone recording at
+"""ROLLED BACK (user preferred v930; real cause was the timestamp). Patch v930 -> v931: no more one-frame jump when a chirp arrives (seen in the user's iPhone recording at
 6.33s -> 6.40s: every chirp above jumped up a whole chirp's height in one frame while the new one appeared).
 When a new chirp is added at the bottom while you're at the bottom, the older chirps now glide up into place
 (~0.26s) while the new chirp materializes / your sent chirp lands in the space. Only when the previous
