@@ -605,8 +605,9 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     const token = authHeader.slice(7);
     const user = await verifyJWT(token, env.JWT_SECRET);
     if (user?.sub) {
-      const account = await env.DB.prepare(`SELECT deleted_at FROM mod_users WHERE id = ?`).bind(user.sub).first();
+      const account = await env.DB.prepare(`SELECT deleted_at, see_all_huddles FROM mod_users WHERE id = ?`).bind(user.sub).first();
       if (!account || account.deleted_at) return null;
+      user.see_all_huddles = !!account.see_all_huddles;
       const now = new Date().toISOString();
       ctx.waitUntil(
         env.DB.prepare("UPDATE mod_users SET last_active = ? WHERE id = ?")
@@ -622,6 +623,8 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   const authUser = await getAuthUser();
   const isAdmin = authUser?.role === "admin";
   const isModerator = authUser?.role === "mod" || authUser?.role === "admin";
+  // Only admins who switched it on in the mod panel can see and open huddles they aren't in; mods can't
+  const seeAllHuddles = isAdmin && !!authUser?.see_all_huddles;
   const isMember = false; // members are anonymous for now
 
   // Who is asking comes from the login token only, never from a name or browser id in the request:
@@ -924,7 +927,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       if ((post.archived || post.deleted) && !isModerator) return json({ error: "Not found" }, 404);
       // Huddle access control
       if (post.is_huddle) {
-        if (!isModerator && !isHuddleMember(post, username)) {
+        if (!seeAllHuddles && !isHuddleMember(post, username)) {
           return json({ error: "not_member", huddle: true }, 403);
         }
       }
@@ -1088,7 +1091,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         // Huddles board: only is_huddle posts, filtered by JWT-authenticated username only (no spoofable query param)
         q += ` AND is_huddle = 1`;
         const huddleUsername = authUser?.username || null;
-        if (!isModerator) {
+        if (!seeAllHuddles) {
           if (huddleUsername) {
             q += ` AND (LOWER(username) = LOWER(?) OR (huddle_members IS NOT NULL AND LOWER(huddle_members) LIKE LOWER(?)))`;
             params.push(huddleUsername, `%"${huddleUsername}"%`);
@@ -1235,7 +1238,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       if (await isBanned()) return json({ error: "Banned" }, 403);
       const target = await env.DB.prepare(`SELECT is_huddle, huddle_members, username AS owner, locked, frozen FROM posts WHERE id = ?`).bind(body.post_id).first();
       if (target?.locked || target?.frozen) return json({ error: target.frozen ? "This post is archived" : "This post is locked" }, 403);
-      if (target?.is_huddle && !isModerator && !isHuddleMember(target, username)) return json({ error: "Not a member of this huddle" }, 403);
+      if (target?.is_huddle && !seeAllHuddles && !isHuddleMember(target, username)) return json({ error: "Not a member of this huddle" }, 403);
       if (!isModerator && await isJailed()) {
         const post = await env.DB.prepare(`SELECT board, community_id FROM posts WHERE id = ?`).bind(body.post_id).first();
         const postBoard = (post?.board || post?.community_id || "").toLowerCase();
@@ -1288,7 +1291,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       if (!post || !post.is_huddle) return json({ error: "Not found" }, 404);
       if (post.frozen) return json({ error: "This huddle is archived" }, 403);
       const members = JSON.parse(post.huddle_members || "[]");
-      if (!isModerator && !isHuddleMember(post, username)) return json({ error: "Unauthorized" }, 403);
+      if (!seeAllHuddles && !isHuddleMember(post, username)) return json({ error: "Unauthorized" }, 403);
       const normInvUser = normMember(invite_username);
       if ((await extinctNames()).has(normInvUser)) return json({ error: "That bird is extinct" }, 404);
       if (members.map(normMember).includes(normInvUser)) return json({ error: "Already a member" }, 400);
@@ -2188,13 +2191,24 @@ async function handleRequest(request, env, ctx, corsHeaders) {
 
   // ── /notif-read, /notif-read-all: notification read state on the account ───────
 
+  // ── /admin-huddle-view: an admin's "see all huddles" switch (mod panel) ──
+  if (url.pathname === "/admin-huddle-view") {
+    if (!isAdmin) return json({ error: "Unauthorized" }, 403);
+    if (request.method === "POST") {
+      const on = body.on === true ? 1 : 0;
+      await env.DB.prepare(`UPDATE mod_users SET see_all_huddles = ? WHERE id = ?`).bind(on, authUser.sub).run();
+      return json({ on: !!on });
+    }
+    return json({ on: !!authUser.see_all_huddles });
+  }
+
   // ── /huddle-read: how far you've read a huddle, kept on the account so every device agrees ──
   if (url.pathname === "/huddle-read" && request.method === "POST") {
     if (!authUser?.username) return signInRequired();
     const postId = String(body.post_id || "").slice(0, 80), at = String(body.at || "");
     if (!postId || !/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/.test(at)) return json({ error: "Bad request" }, 400);
     const post = await env.DB.prepare(`SELECT id, username, huddle_members, is_huddle FROM posts WHERE id = ?`).bind(postId).first();
-    if (!post || !post.is_huddle || !isHuddleMember(post, authUser.username)) return json({ error: "Not found" }, 404);
+    if (!post || !post.is_huddle || (!seeAllHuddles && !isHuddleMember(post, authUser.username))) return json({ error: "Not found" }, 404);
     const t = at > now ? now : at.slice(0, 40);
     await env.DB.prepare(`INSERT INTO huddle_reads (username, post_id, read_at) VALUES (?, ?, ?) ON CONFLICT(username, post_id) DO UPDATE SET read_at = MAX(read_at, excluded.read_at)`)
       .bind(authUser.username.toLowerCase(), postId, t).run();
