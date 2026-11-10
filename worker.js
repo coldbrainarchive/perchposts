@@ -1003,18 +1003,20 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       if (rankSort === "flaps" || rankSort === "chirps") {
         const range = url.searchParams.get("range");
         const since = range === "all" ? "" : new Date(Date.now() - (range === "day" ? 1 : 7) * 86400000).toISOString();
+        // Count the flaps / chirps made in the range (on posts of any age): "Most chirps today" = the posts
+        // that got the most chirps today. Before, it only looked at posts created in the range.
         const { results: top = [] } = await env.DB.prepare(rankSort === "flaps"
-          ? `SELECT post_id, SUM(value) AS n FROM post_votes GROUP BY post_id HAVING n > 0 ORDER BY n DESC LIMIT 500`
-          : `SELECT post_id, COUNT(*) AS n FROM comments WHERE deleted = 0 AND (username IS NULL OR username != '__system__') GROUP BY post_id ORDER BY n DESC LIMIT 500`
-        ).all();
+          ? `SELECT post_id, SUM(value) AS n FROM post_votes WHERE created_at >= ? GROUP BY post_id HAVING n > 0 ORDER BY n DESC LIMIT 500`
+          : `SELECT post_id, COUNT(*) AS n FROM comments WHERE deleted = 0 AND (username IS NULL OR username != '__system__') AND created_at >= ? GROUP BY post_id ORDER BY n DESC LIMIT 500`
+        ).bind(since).all();
         const countOf = new Map(top.map(r => [r.post_id, r.n]));
         const ids = [...countOf.keys()];
         const rows = [];
         for (let i = 0; i < ids.length; i += 90) {
           const chunk = ids.slice(i, i + 90);
           const { results = [] } = await env.DB.prepare(
-            `SELECT rowid AS _rid, * FROM posts WHERE id IN (${chunk.map(() => "?").join(",")}) AND ${LIVE_POSTS} AND created_at >= ?`
-          ).bind(...chunk, since).all();
+            `SELECT rowid AS _rid, * FROM posts WHERE id IN (${chunk.map(() => "?").join(",")}) AND ${LIVE_POSTS}`
+          ).bind(...chunk).all();
           rows.push(...results);
         }
         rows.sort((a, b) => (countOf.get(b.id) || 0) - (countOf.get(a.id) || 0));
