@@ -929,7 +929,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       // Here rather than a separate request: listing every chirp id in a URL fails on long chats,
       // and this keeps huddle reactions behind the member check above
       const { results: reactions } = await env.DB.prepare(
-        `SELECT comment_id, browser_id, emoji FROM comment_reactions WHERE comment_id IN (${ID_LIST})`
+        `SELECT comment_id, browser_id, emoji, username FROM comment_reactions WHERE comment_id IN (${ID_LIST})`
       ).bind(JSON.stringify(comments.map(c => c.id))).all();
       const payload = {
         post: (await publicRows([boolify(post, POST_BOOL_FIELDS)]))[0],
@@ -1479,6 +1479,12 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     try {
       if (!username) return signInRequired();
       if (!body.comment_id || !body.browser_id || !body.emoji) return json({ error: "Missing fields" }, 400);
+      // One emoji only: any emoji works (picker or keyboard), but no text smuggled in as a "reaction"
+      const em = String(body.emoji);
+      if (em.length > 32 || !/\p{Extended_Pictographic}|\p{Regional_Indicator}|⃣/u.test(em)
+          || /[\p{L}\s<>]/u.test(em) || /\p{N}/u.test(em.replace(/[0-9#*]️?⃣/gu, ""))) {
+        return json({ error: "Not an emoji" }, 400);
+      }
       if (await isBanned()) return json({ error: "Banned" }, 403);
       const reactedPost = await env.DB.prepare(`SELECT p.frozen FROM comments c JOIN posts p ON p.id = c.post_id WHERE c.id = ?`).bind(body.comment_id).first();
       if (reactedPost?.frozen) return json({ error: "This post is archived" }, 403);
