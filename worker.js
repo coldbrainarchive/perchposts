@@ -157,6 +157,7 @@ async function addHuddleInbox(env, rows, name) {
       p.hx = {
         unread: fr.reduce((a, r) => a + r.n, 0),
         fresh: fr.map(r => r.username),
+        nt: fr.length ? fr[0].t : null, // newest unread chirp, so a device that already read past it can clear the badge
         last: last ? { u: last.username, c: String(last.content || "").slice(0, 400), t: last.created_at } : null
       };
     });
