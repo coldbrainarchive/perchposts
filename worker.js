@@ -2135,7 +2135,9 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     if (!authUser?.username) return signInRequired();
     const id = String(body.id || "").slice(0, 200), t = String(body.time || now).slice(0, 40);
     if (!id) return json({ error: "Missing id" }, 400);
-    await env.DB.prepare(`INSERT OR IGNORE INTO notif_reads (user_key, notif_id, notif_time) VALUES (?, ?, ?)`).bind(authUser.username, id, t).run();
+    // Upsert: some notifications are reused and bumped when there's new activity (huddle chirps, comments on a
+    // post), so the read record keeps the newest time you've seen for that notification
+    await env.DB.prepare(`INSERT INTO notif_reads (user_key, notif_id, notif_time) VALUES (?, ?, ?) ON CONFLICT(user_key, notif_id) DO UPDATE SET notif_time = MAX(notif_time, excluded.notif_time)`).bind(authUser.username, id, t).run();
     return json({ success: true });
   }
 
@@ -2159,10 +2161,13 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       if (nst) since = nst.seen_at;
       else await env.DB.prepare(`INSERT OR IGNORE INTO notif_state (user_key, seen_at) VALUES (?, ?)`).bind(nk, since).run();
       const list = await buildNotifs(browser_id);
-      const { results: rd = [] } = await env.DB.prepare(`SELECT notif_id FROM notif_reads WHERE user_key = ? AND notif_time > ? LIMIT 500`).bind(nk, since).all();
-      const readSet = new Set(rd.map(r => r.notif_id)), sinceMs = new Date(since).getTime();
-      const count = list.filter(n => n.time && new Date(n.time).getTime() > sinceMs && !readSet.has(n.id)).length;
-      return json({ count, seen_at: since, read: [...readSet] });
+      // A notification is read only if you've seen its latest version: a reused notification that got new
+      // activity after you tapped it is unread again (glows, counts) until you tap it again
+      const { results: rd = [] } = await env.DB.prepare(`SELECT notif_id, notif_time FROM notif_reads WHERE user_key = ? ORDER BY notif_time DESC LIMIT 500`).bind(nk).all();
+      const readAt = new Map(rd.map(r => [r.notif_id, new Date(r.notif_time).getTime() || 0])), sinceMs = new Date(since).getTime();
+      const isRead = n => readAt.has(n.id) && readAt.get(n.id) >= (new Date(n.time).getTime() || 0);
+      const count = list.filter(n => n.time && new Date(n.time).getTime() > sinceMs && !isRead(n)).length;
+      return json({ count, seen_at: since, read: list.filter(isRead).map(n => n.id) });
     } catch (err) {
       return json({ error: err.message }, 500);
     }
