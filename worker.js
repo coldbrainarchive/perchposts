@@ -1110,7 +1110,12 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const chipSearch = !!search && !!country && search.toLowerCase() === country.toLowerCase();
       const cw = country && countryWhere(country);
       if (!isHuddleBoard && country && !chipSearch) { q += ` AND ${cw.sql}`; params.push(...cw.params); }
-      if (username)  { q += ` AND LOWER(username) = ?`;  params.push(username.toLowerCase()); }
+      if (username && isHuddleBoard) {
+        // In Huddles, a bird pill finds every huddle that bird is in (owner or member, "name" or "name:role")
+        const un = username.toLowerCase();
+        q += ` AND (LOWER(username) = ? OR (huddle_members IS NOT NULL AND (LOWER(huddle_members) LIKE ? OR LOWER(huddle_members) LIKE ?)))`;
+        params.push(un, `%"${un}"%`, `%"${un}:%`);
+      } else if (username)  { q += ` AND LOWER(username) = ?`;  params.push(username.toLowerCase()); }
       // A country pill: its tagged posts, plus posts naming the country by the region tabs' rule
       if (chipSearch) { q += ` AND (${MAYBE_NAMES} OR ${cw.sql})`; params.push(JSON.stringify(countryTerms(country)), ...cw.params); }
       else if (search) { q += ` AND (title LIKE ? OR content LIKE ?)`; params.push(`%${search}%`, `%${search}%`); }
