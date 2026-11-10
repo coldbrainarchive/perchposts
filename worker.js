@@ -130,6 +130,42 @@ async function passesBotCheck(env, token, ip, action) {
 }
 
 // Chirp counts for just the posts being returned, so feeds never need to fetch every chirp on the site
+// Huddles inbox: for each huddle, the last chirp, and how many chirps (and from whom) arrived since you last read
+// it. "Last read" is the later of your saved read spot (huddle_reads) and your own last chirp there.
+async function addHuddleInbox(env, rows, name) {
+  if (!rows.length || !name) return rows;
+  const me = name.toLowerCase(), ids = rows.map(p => p.id);
+  try {
+    const { results: rd = [] } = await env.DB.prepare(
+      `SELECT post_id, read_at FROM huddle_reads WHERE username = ? AND post_id IN (${ids.map(() => "?").join(",")})`
+    ).bind(me, ...ids).all();
+    const readAt = new Map(rd.map(r => [r.post_id, r.read_at]));
+    const first = await env.DB.batch(ids.flatMap(id => [
+      env.DB.prepare(`SELECT username, content, created_at FROM comments WHERE post_id = ? AND deleted = 0 ORDER BY created_at DESC LIMIT 1`).bind(id),
+      env.DB.prepare(`SELECT MAX(created_at) AS t FROM comments WHERE post_id = ? AND deleted = 0 AND LOWER(username) = ?`).bind(id, me)
+    ]));
+    const base = ids.map((id, i) => {
+      const mine = first[2 * i + 1].results?.[0]?.t || null, r = readAt.get(id) || null;
+      return (r && (!mine || r > mine) ? r : mine) || "";
+    });
+    const fresh = await env.DB.batch(ids.map((id, i) => env.DB.prepare(
+      `SELECT username, COUNT(*) AS n, MAX(created_at) AS t FROM comments WHERE post_id = ? AND deleted = 0 AND created_at > ?
+         AND username IS NOT NULL AND username != '__system__' AND LOWER(username) != ? GROUP BY username`
+    ).bind(id, base[i], me)));
+    rows.forEach((p, i) => {
+      const last = first[2 * i].results?.[0] || null, fr = (fresh[i].results || []).sort((a, b) => (a.t < b.t ? 1 : -1));
+      p.hx = {
+        unread: fr.reduce((a, r) => a + r.n, 0),
+        fresh: fr.map(r => r.username),
+        last: last ? { u: last.username, c: String(last.content || "").slice(0, 400), t: last.created_at } : null
+      };
+    });
+  } catch (err) {
+    console.error("huddle inbox unavailable:", err.message);
+  }
+  return rows;
+}
+
 async function addCommentCounts(env, posts) {
   if (!posts.length) return posts;
   try {
@@ -1098,6 +1134,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
           if (!have.has(p.id)) { have.add(p.id); rows.push(p); }
         }
       }
+      if (isHuddleBoard && authUser?.username) await addHuddleInbox(env, rows, authUser.username);
       return json({
         posts: await publicRows(await addCommentCounts(env, rows.map(p => boolify(p, POST_BOOL_FIELDS)))),
         next_before: nextBefore
@@ -2149,6 +2186,19 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   // ── /notif-count ──────────────────────────────────────────────────────────────
 
   // ── /notif-read, /notif-read-all: notification read state on the account ───────
+
+  // ── /huddle-read: how far you've read a huddle, kept on the account so every device agrees ──
+  if (url.pathname === "/huddle-read" && request.method === "POST") {
+    if (!authUser?.username) return signInRequired();
+    const postId = String(body.post_id || "").slice(0, 80), at = String(body.at || "");
+    if (!postId || !/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/.test(at)) return json({ error: "Bad request" }, 400);
+    const post = await env.DB.prepare(`SELECT id, username, huddle_members, is_huddle FROM posts WHERE id = ?`).bind(postId).first();
+    if (!post || !post.is_huddle || !isHuddleMember(post, authUser.username)) return json({ error: "Not found" }, 404);
+    const t = at > now ? now : at.slice(0, 40);
+    await env.DB.prepare(`INSERT INTO huddle_reads (username, post_id, read_at) VALUES (?, ?, ?) ON CONFLICT(username, post_id) DO UPDATE SET read_at = MAX(read_at, excluded.read_at)`)
+      .bind(authUser.username.toLowerCase(), postId, t).run();
+    return json({ success: true });
+  }
 
   if (url.pathname === "/notif-read" && request.method === "POST") {
     if (!authUser?.username) return signInRequired();
