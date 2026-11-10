@@ -1382,10 +1382,16 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       if (!post_id || !comment_id || pinned === undefined) return json({ error: "Missing fields" }, 400);
       const effectiveUsername = username;
       const post = await env.DB.prepare(`SELECT * FROM posts WHERE id = ? AND deleted = 0`).bind(post_id).first();
-      if (!post || !post.is_huddle) return json({ error: "Not a huddle" }, 404);
-      if (post.frozen) return json({ error: "This huddle is archived" }, 403);
+      if (!post) return json({ error: "Post not found" }, 404);
+      if (post.frozen) return json({ error: "This post is archived" }, 403);
+      // The post's creator (OP) may pin/unpin their own chirps on their own post; mods use mod-action
       const isCreator = effectiveUsername.toLowerCase() === (post.username || "").toLowerCase();
       if (!isCreator && !isModerator) return json({ error: "Unauthorized" }, 403);
+      if (!isModerator) {
+        const cm = await env.DB.prepare(`SELECT username FROM comments WHERE id = ? AND post_id = ? AND deleted = 0`).bind(comment_id, post_id).first();
+        if (!cm) return json({ error: "Chirp not found" }, 404);
+        if ((cm.username || "").toLowerCase() !== effectiveUsername.toLowerCase()) return json({ error: "You can only pin your own chirps" }, 403);
+      }
       await env.DB.prepare(`UPDATE comments SET pinned = ? WHERE id = ? AND post_id = ?`).bind(pinned ? 1 : 0, comment_id, post_id).run();
       return json({ success: true });
     } catch (err) {
