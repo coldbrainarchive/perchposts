@@ -928,13 +928,21 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       }
       // Here rather than a separate request: listing every chirp id in a URL fails on long chats,
       // and this keeps huddle reactions behind the member check above
+      // Top chirps of the whole conversation (2+ reactions, most reacted first, max 5) for the post page
+      // preview; they may be older than the loaded page, so their reactions ride along below
+      const { results: topRows } = await env.DB.prepare(
+        `SELECT c.*, COUNT(r.id) AS rx_count FROM comments c JOIN comment_reactions r ON r.comment_id = c.id WHERE c.post_id = ? AND c.deleted = 0 GROUP BY c.id HAVING COUNT(r.id) >= 2 ORDER BY rx_count DESC, c.created_at DESC LIMIT 5`
+      ).bind(id).all();
+      const top = topRows || [];
+      const rxIds = [...new Set([...comments.map(c => c.id), ...top.map(c => c.id)])];
       const { results: reactions } = await env.DB.prepare(
         `SELECT comment_id, browser_id, emoji, username FROM comment_reactions WHERE comment_id IN (${ID_LIST})`
-      ).bind(JSON.stringify(comments.map(c => c.id))).all();
+      ).bind(JSON.stringify(rxIds)).all();
       const payload = {
         post: (await publicRows([boolify(post, POST_BOOL_FIELDS)]))[0],
         comments: await publicRows(comments.map(c => boolify(c, COMMENT_BOOL_FIELDS))),
-        reactions: reactions || []
+        reactions: reactions || [],
+        top: await publicRows(top.map(c => boolify(c, COMMENT_BOOL_FIELDS)))
       };
       // Open pages poll this, so a chat that hasn't changed sends a few bytes instead of every chirp
       const digest = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(JSON.stringify(payload)));
