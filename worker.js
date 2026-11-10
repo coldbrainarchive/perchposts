@@ -1093,8 +1093,9 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         const huddleUsername = authUser?.username || null;
         if (!seeAllHuddles) {
           if (huddleUsername) {
-            q += ` AND (LOWER(username) = LOWER(?) OR (huddle_members IS NOT NULL AND LOWER(huddle_members) LIKE LOWER(?)))`;
-            params.push(huddleUsername, `%"${huddleUsername}"%`);
+            // Members are stored as "name" or, for admins and mods, "name:admin" / "name:mod"
+            q += ` AND (LOWER(username) = LOWER(?) OR (huddle_members IS NOT NULL AND (LOWER(huddle_members) LIKE LOWER(?) OR LOWER(huddle_members) LIKE LOWER(?))))`;
+            params.push(huddleUsername, `%"${huddleUsername}"%`, `%"${huddleUsername}:%`);
           } else {
             q += ` AND 1 = 0`; // not authenticated = no results
           }
