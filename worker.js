@@ -2040,10 +2040,10 @@ async function handleRequest(request, env, ctx, corsHeaders) {
 
   // ── /notifications ────────────────────────────────────────────────────────────
 
-  if (url.pathname === "/notifications") {
-    try {
-      const browser_id = url.searchParams.get("browser_id") || "";
-      if (!authUser?.username) return signInRequired();
+  // One list for both the notifications page and the red bubble, so the bubble only ever counts
+  // things you can see (and mark read) in the list. Your own actions never notify you, from any device.
+  const buildNotifs = async (browser_id) => {
+      const me = authUser.username;
       const mod_user_id = isModerator ? authUser.sub : null;
       const uname = isModerator ? null : authUser.username;
 
@@ -2073,24 +2073,24 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       if (postIds.length) {
         const ph = ID_LIST;
         const { results: comments } = await env.DB.prepare(
-          `SELECT id, content, username, browser_id, post_id, MAX(created_at) as created_at FROM comments WHERE post_id IN (${ph}) AND browser_id != ? AND deleted = 0 AND parent_comment_id IS NULL AND created_at > ? GROUP BY post_id ORDER BY created_at DESC LIMIT 60`
-        ).bind(JSON.stringify(postIds), browser_id, clearedSince).all();
+          `SELECT id, content, username, browser_id, post_id, MAX(created_at) as created_at FROM comments WHERE post_id IN (${ph}) AND browser_id != ? AND (username IS NULL OR username != ?) AND deleted = 0 AND parent_comment_id IS NULL AND created_at > ? GROUP BY post_id ORDER BY created_at DESC LIMIT 60`
+        ).bind(JSON.stringify(postIds), browser_id, me, clearedSince).all();
         (comments || []).forEach(c => results.push({ id: `c-${c.post_id}`, type: "comment", icon: "💬", text: `${c.username || "Someone"} commented on your post`, subtext: `"${(postTitleMap[c.post_id] || "").slice(0, 50)}"`, preview: (c.content || "").slice(0, 80), time: c.created_at, postId: c.post_id, targetId: c.id }));
         const { results: votes } = await env.DB.prepare(
-          `SELECT post_id, value, browser_id, username, created_at FROM post_votes WHERE post_id IN (${ph}) AND browser_id != ? AND created_at > ? ORDER BY created_at DESC LIMIT 60`
-        ).bind(JSON.stringify(postIds), browser_id, clearedSince).all();
-        (votes || []).forEach((v, i) => { const who = v.username || `Anon`; results.push({ id: `v-${v.post_id}-${v.browser_id}-${i}`, type: "vote", icon: "🪽", text: `${who} gave your post a flap`, subtext: `"${(postTitleMap[v.post_id] || "").slice(0, 50)}"`, time: v.created_at, postId: v.post_id }); });
+          `SELECT post_id, value, browser_id, username, created_at FROM post_votes WHERE post_id IN (${ph}) AND browser_id != ? AND (username IS NULL OR username != ?) AND created_at > ? ORDER BY created_at DESC LIMIT 60`
+        ).bind(JSON.stringify(postIds), browser_id, me, clearedSince).all();
+        (votes || []).forEach((v, i) => { const who = v.username || `Anon`; results.push({ id: `v-${v.post_id}-${v.browser_id}`, type: "vote", icon: "🪽", text: `${who} gave your post a flap`, subtext: `"${(postTitleMap[v.post_id] || "").slice(0, 50)}"`, time: v.created_at, postId: v.post_id }); });
       }
       if (commentIds.length) {
         const ph = ID_LIST;
         const { results: replies } = await env.DB.prepare(
-          `SELECT id, content, username, browser_id, post_id, parent_comment_id, MAX(created_at) as created_at FROM comments WHERE parent_comment_id IN (${ph}) AND browser_id != ? AND deleted = 0 AND created_at > ? GROUP BY parent_comment_id ORDER BY created_at DESC LIMIT 60`
-        ).bind(JSON.stringify(commentIds), browser_id, clearedSince).all();
+          `SELECT id, content, username, browser_id, post_id, parent_comment_id, MAX(created_at) as created_at FROM comments WHERE parent_comment_id IN (${ph}) AND browser_id != ? AND (username IS NULL OR username != ?) AND deleted = 0 AND created_at > ? GROUP BY parent_comment_id ORDER BY created_at DESC LIMIT 60`
+        ).bind(JSON.stringify(commentIds), browser_id, me, clearedSince).all();
         (replies || []).forEach(r => results.push({ id: `r-${r.parent_comment_id}`, type: "reply", icon: "↩️", text: `${r.username || "Someone"} replied to your comment`, preview: (r.content || "").slice(0, 80), time: r.created_at, postId: r.post_id, targetId: r.id }));
         const { results: reactions } = await env.DB.prepare(
-          `SELECT comment_id, emoji, browser_id, username, created_at FROM comment_reactions WHERE comment_id IN (${ph}) AND browser_id != ? AND created_at > ? ORDER BY created_at DESC LIMIT 60`
-        ).bind(JSON.stringify(commentIds), browser_id, clearedSince).all();
-        (reactions || []).forEach((r, i) => { const who = r.username || `Anon`; results.push({ id: `rx-${r.comment_id}-${r.browser_id}-${i}`, type: "reaction", icon: r.emoji, text: `${who} reacted ${r.emoji} to your comment`, time: r.created_at, postId: commentPostMap[r.comment_id], targetId: r.comment_id }); });
+          `SELECT comment_id, emoji, browser_id, username, created_at FROM comment_reactions WHERE comment_id IN (${ph}) AND browser_id != ? AND (username IS NULL OR username != ?) AND created_at > ? ORDER BY created_at DESC LIMIT 60`
+        ).bind(JSON.stringify(commentIds), browser_id, me, clearedSince).all();
+        (reactions || []).forEach((r, i) => { const who = r.username || `Anon`; results.push({ id: `rx-${r.comment_id}-${r.browser_id}-${r.emoji}`, type: "reaction", icon: r.emoji, text: `${who} reacted ${r.emoji} to your comment`, time: r.created_at, postId: commentPostMap[r.comment_id], targetId: r.comment_id }); });
       }
       if (mod_user_id) {
         const { results: sysN } = await env.DB.prepare(
@@ -2114,7 +2114,14 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const names = await extinctNames();
       const { results: hiddenPosts } = await env.DB.prepare(`SELECT id FROM posts INDEXED BY idx_posts_frozen_list WHERE frozen = 1 AND deleted = 0 AND archived = 1`).all();
       const hidden = new Set(isModerator ? [] : (hiddenPosts || []).map(p => p.id));
-      return json({ notifs: results.filter(n => !hidden.has(n.postId)).map(n => Object.fromEntries(Object.entries(n).map(([k, v]) => [k, scrubNames(v, names)]))) });
+      return results.filter(n => !hidden.has(n.postId)).map(n => Object.fromEntries(Object.entries(n).map(([k, v]) => [k, scrubNames(v, names)])));
+  };
+
+  if (url.pathname === "/notifications") {
+    try {
+      const browser_id = url.searchParams.get("browser_id") || "";
+      if (!authUser?.username) return signInRequired();
+      return json({ notifs: await buildNotifs(browser_id) });
     } catch (err) {
       return json({ error: err.message }, 500);
     }
@@ -2151,53 +2158,11 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const nst = await env.DB.prepare(`SELECT seen_at FROM notif_state WHERE user_key = ?`).bind(nk).first();
       if (nst) since = nst.seen_at;
       else await env.DB.prepare(`INSERT OR IGNORE INTO notif_state (user_key, seen_at) VALUES (?, ?)`).bind(nk, since).run();
-      const finish = async total => {
-        const { results: rd = [] } = await env.DB.prepare(`SELECT notif_id, notif_time FROM notif_reads WHERE user_key = ? AND notif_time > ? LIMIT 500`).bind(nk, since).all();
-        return json({ count: Math.max(0, total - rd.length), seen_at: since, read: rd.map(r => r.notif_id) });
-      };
-
-      let postIds = [], commentIds = [];
-
-      if (mod_user_id) {
-        const { results: mp } = await env.DB.prepare(`SELECT id FROM posts WHERE mod_user_id = ? AND deleted = 0`).bind(mod_user_id).all();
-        const { results: mc } = await env.DB.prepare(`SELECT id FROM comments WHERE mod_user_id = ? AND deleted = 0`).bind(mod_user_id).all();
-        postIds = (mp || []).map(p => p.id);
-        commentIds = (mc || []).map(c => c.id);
-      } else if (uname) {
-        const { results: mp } = await env.DB.prepare(`SELECT id FROM posts WHERE username = ? AND is_mod = 0 AND deleted = 0`).bind(uname).all();
-        const { results: mc } = await env.DB.prepare(`SELECT id FROM comments WHERE username = ? AND is_mod = 0 AND deleted = 0`).bind(uname).all();
-        postIds = (mp || []).map(p => p.id);
-        commentIds = (mc || []).map(c => c.id);
-      }
-
-      let count = 0;
-      if (mod_user_id) {
-        const rSys = await env.DB.prepare(`SELECT COUNT(*) as c FROM system_notifications WHERE user_id = ? AND message != '__cleared__' AND created_at > ?`).bind(mod_user_id, since).first();
-        count += (rSys?.c || 0);
-      }
-      // Huddle/system notifications stored by username, for everyone (mods and admins too, matching
-      // the /notifications list); before, staff accounts never counted these, so no red bubble for them
-      const notifUname = uname || authUser?.username || null;
-      if (notifUname) {
-        const rHuddleSys = await env.DB.prepare(`SELECT COUNT(*) as c FROM system_notifications WHERE user_id = ? AND message != '__cleared__' AND created_at > ?`).bind(notifUname, since).first();
-        count += (rHuddleSys?.c || 0);
-      }
-      if (!postIds.length && !commentIds.length) return finish(count);
-
-      if (postIds.length) {
-        const ph = ID_LIST;
-        const r1 = await env.DB.prepare(`SELECT COUNT(*) as c FROM comments WHERE post_id IN (${ph}) AND parent_comment_id IS NULL AND browser_id != ? AND deleted = 0 AND created_at > ?`).bind(JSON.stringify(postIds), browser_id, since).first();
-        const r2 = await env.DB.prepare(`SELECT COUNT(*) as c FROM post_votes WHERE post_id IN (${ph}) AND browser_id != ? AND created_at > ?`).bind(JSON.stringify(postIds), browser_id, since).first();
-        count += (r1?.c || 0) + (r2?.c || 0);
-      }
-      if (commentIds.length) {
-        const ph = ID_LIST;
-        const r3 = await env.DB.prepare(`SELECT COUNT(*) as c FROM comments WHERE parent_comment_id IN (${ph}) AND browser_id != ? AND deleted = 0 AND created_at > ?`).bind(JSON.stringify(commentIds), browser_id, since).first();
-        const r4 = await env.DB.prepare(`SELECT COUNT(*) as c FROM comment_reactions WHERE comment_id IN (${ph}) AND browser_id != ? AND created_at > ?`).bind(JSON.stringify(commentIds), browser_id, since).first();
-        count += (r3?.c || 0) + (r4?.c || 0);
-      }
-
-      return finish(count);
+      const list = await buildNotifs(browser_id);
+      const { results: rd = [] } = await env.DB.prepare(`SELECT notif_id FROM notif_reads WHERE user_key = ? AND notif_time > ? LIMIT 500`).bind(nk, since).all();
+      const readSet = new Set(rd.map(r => r.notif_id)), sinceMs = new Date(since).getTime();
+      const count = list.filter(n => n.time && new Date(n.time).getTime() > sinceMs && !readSet.has(n.id)).length;
+      return json({ count, seen_at: since, read: [...readSet] });
     } catch (err) {
       return json({ error: err.message }, 500);
     }
