@@ -931,10 +931,15 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       // Top chirps of the whole conversation (2+ reactions, most reacted first, max 5) for the post page
       // preview; they may be older than the loaded page, so their reactions ride along below
       const { results: topRows } = await env.DB.prepare(
-        `SELECT c.*, COUNT(r.id) AS rx_count FROM comments c JOIN comment_reactions r ON r.comment_id = c.id WHERE c.post_id = ? AND c.deleted = 0 GROUP BY c.id HAVING COUNT(r.id) >= 2 ORDER BY rx_count DESC, c.created_at DESC LIMIT 5`
+        `SELECT c.*, COUNT(r.id) AS rx_count FROM comments c JOIN comment_reactions r ON r.comment_id = c.id WHERE c.post_id = ? AND c.deleted = 0 GROUP BY c.id HAVING COUNT(r.id) >= 2 ORDER BY rx_count DESC, c.created_at DESC LIMIT 6`
       ).bind(id).all();
       const top = topRows || [];
-      const rxIds = [...new Set([...comments.map(c => c.id), ...top.map(c => c.id)])];
+      // Most replied chirps (2+ replies), for the preview's "Most replied" section
+      const { results: repRows } = await env.DB.prepare(
+        `SELECT c.*, COUNT(r.id) AS reply_count FROM comments c JOIN comments r ON r.parent_comment_id = c.id AND r.deleted = 0 WHERE c.post_id = ? AND c.deleted = 0 GROUP BY c.id HAVING COUNT(r.id) >= 2 ORDER BY reply_count DESC, c.created_at DESC LIMIT 9`
+      ).bind(id).all();
+      const replied = repRows || [];
+      const rxIds = [...new Set([...comments.map(c => c.id), ...top.map(c => c.id), ...replied.map(c => c.id)])];
       const { results: reactions } = await env.DB.prepare(
         `SELECT comment_id, browser_id, emoji, username FROM comment_reactions WHERE comment_id IN (${ID_LIST})`
       ).bind(JSON.stringify(rxIds)).all();
@@ -942,7 +947,8 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         post: (await publicRows([boolify(post, POST_BOOL_FIELDS)]))[0],
         comments: await publicRows(comments.map(c => boolify(c, COMMENT_BOOL_FIELDS))),
         reactions: reactions || [],
-        top: await publicRows(top.map(c => boolify(c, COMMENT_BOOL_FIELDS)))
+        top: await publicRows(top.map(c => boolify(c, COMMENT_BOOL_FIELDS))),
+        replied: await publicRows(replied.map(c => boolify(c, COMMENT_BOOL_FIELDS)))
       };
       // Open pages poll this, so a chat that hasn't changed sends a few bytes instead of every chirp
       const digest = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(JSON.stringify(payload)));
@@ -1502,17 +1508,20 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       if (await isBanned()) return json({ error: "Banned" }, 403);
       const reactedPost = await env.DB.prepare(`SELECT p.frozen FROM comments c JOIN posts p ON p.id = c.post_id WHERE c.id = ?`).bind(body.comment_id).first();
       if (reactedPost?.frozen) return json({ error: "This post is archived" }, 403);
-      const existing = await env.DB.prepare(
-        `SELECT id FROM comment_reactions WHERE comment_id = ? AND browser_id = ? AND emoji = ?`
-      ).bind(body.comment_id, body.browser_id, body.emoji).first();
+      // One reaction per bird per chirp (like iMessage): reacting replaces your previous emoji there.
+      // Matched by the signed-in account only (never a client-sent device id), so it holds across your
+      // devices and nobody can remove someone else's reaction.
+      const mine = `comment_id = ? AND username = ?`;
       if (body.action === "remove") {
-        if (existing?.id) await env.DB.prepare(`DELETE FROM comment_reactions WHERE id = ?`).bind(existing.id).run();
+        await env.DB.prepare(`DELETE FROM comment_reactions WHERE ${mine} AND emoji = ?`).bind(body.comment_id, username, em).run();
       } else {
+        await env.DB.prepare(`DELETE FROM comment_reactions WHERE ${mine} AND emoji != ?`).bind(body.comment_id, username, em).run();
+        const existing = await env.DB.prepare(`SELECT id FROM comment_reactions WHERE ${mine} AND emoji = ? LIMIT 1`).bind(body.comment_id, username, em).first();
         if (!existing) {
           await env.DB.prepare(`
             INSERT INTO comment_reactions (id, comment_id, browser_id, emoji, username, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
-          `).bind(crypto.randomUUID(), body.comment_id, body.browser_id, body.emoji, username, now).run();
+          `).bind(crypto.randomUUID(), body.comment_id, body.browser_id, em, username, now).run();
         }
       }
       return json({ success: true });
