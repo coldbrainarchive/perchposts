@@ -539,6 +539,19 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   // add / remove: a member asks the owner to invite or remove someone (the owner approves or denies).
   // Nothing changes until it's answered; unanswered requests expire after 7 days.
   const REQUEST_DAYS = 7;
+  // Notification rows (ids) for invitations / requests this bird still has to answer
+  const waitingOn = async name => {
+    const { results: rows = [] } = await env.DB.prepare(`SELECT id, message FROM system_notifications WHERE user_id = ? AND message LIKE '%"req":"%'`).bind(name).all();
+    const byReq = new Map();
+    for (const r of rows) { try { const q = JSON.parse(r.message).req; if (q) byReq.set(r.id, q); } catch {} }
+    if (!byReq.size) return [];
+    const { results: rqs = [] } = await env.DB.prepare(
+      `SELECT r.id, r.kind, r.target, p.username AS owner FROM huddle_requests r JOIN posts p ON p.id = r.post_id AND p.deleted = 0 WHERE r.id IN (${ID_LIST}) AND r.status = 'pending' AND r.created_at > ?`
+    ).bind(JSON.stringify([...new Set(byReq.values())]), requestCutoff()).all();
+    const lower = name.toLowerCase();
+    const live = new Set(rqs.filter(r => (r.kind === "invite" ? r.target : r.owner || "").toLowerCase() === lower).map(r => r.id));
+    return [...byReq].filter(([, q]) => live.has(q)).map(([id]) => id);
+  };
   function requestCutoff() { return new Date(Date.now() - REQUEST_DAYS * 864e5).toISOString(); }
   function requestMessage(rq, post) {
     const title = post.title || "Huddle";
@@ -2210,8 +2223,9 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     try {
       const clearUserId = authUser?.username || null;
       if (!clearUserId) return signInRequired();
-      // Delete all non-watermark notifications for this user
-      await env.DB.prepare(`DELETE FROM system_notifications WHERE user_id = ? AND message != '__cleared__'`).bind(clearUserId).run();
+      // Delete all non-watermark notifications for this user, except invitations / requests still waiting on them
+      const keep = await waitingOn(clearUserId);
+      await env.DB.prepare(`DELETE FROM system_notifications WHERE user_id = ? AND message != '__cleared__' AND id NOT IN (${ID_LIST})`).bind(clearUserId, JSON.stringify(keep)).run();
       // Upsert a cleared watermark so future fetches know the cutoff time
       const existing = await env.DB.prepare(`SELECT id FROM system_notifications WHERE user_id = ? AND message = '__cleared__' LIMIT 1`).bind(clearUserId).first();
       if (existing) {
@@ -2291,12 +2305,18 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         const { results: huddleN } = await env.DB.prepare(
           `SELECT id, message, created_at FROM system_notifications WHERE user_id = ? AND message != '__cleared__' AND created_at > ? ORDER BY created_at DESC LIMIT 30`
         ).bind(notifUname, clearedSince).all();
+        // Invitations / requests are listed even from before a Clear all (only ones still waiting survive it)
+        const { results: reqN = [] } = await env.DB.prepare(
+          `SELECT id, message, created_at FROM system_notifications WHERE user_id = ? AND message LIKE '%"req":"%' ORDER BY created_at DESC LIMIT 40`
+        ).bind(notifUname).all();
+        const seenRows = new Set((huddleN || []).map(n => n.id));
+        for (const n of reqN) if (!seenRows.has(n.id)) { n.preClear = n.created_at <= clearedSince; huddleN.push(n); }
         const reqIds = [];
         (huddleN || []).forEach(n => {
           let text = n.message, postId = undefined, req = undefined;
           try { const parsed = JSON.parse(n.message); text = parsed.text || text; postId = parsed.postId; req = parsed.req; } catch {}
           if (req) reqIds.push(req);
-          results.push({ id: `hsys-${n.id}`, type: "system", icon: req ? "📨" : "👥", text, postId, time: n.created_at, req });
+          results.push({ id: `hsys-${n.id}`, type: "system", icon: req ? "📨" : "👥", text, postId, time: n.created_at, req, preClear: n.preClear || undefined });
         });
         // Invitations and requests carry their state, and whether this bird is the one who answers them
         if (reqIds.length) {
@@ -2311,7 +2331,12 @@ async function handleRequest(request, env, ctx, corsHeaders) {
             const status = r.status === "pending" && (r.created_at < cut || r.gone || r.owner == null) ? "expired" : r.status;
             const act = r.kind === "invite" ? r.target.toLowerCase() === lower : (r.owner || "").toLowerCase() === lower;
             n.req = { id: r.id, kind: r.kind, status, act: status === "pending" && act };
+            if (n.req.act) n.need = true; // waiting on you: pinned, counted and not clearable until answered
           }
+        }
+        for (let i = results.length - 1; i >= 0; i--) {
+          if (results[i].preClear && !results[i].need) results.splice(i, 1);
+          else delete results[i].preClear;
         }
       }
       results.sort((a, b) => (a.time && b.time) ? new Date(b.time) - new Date(a.time) : a.time ? -1 : 1);
@@ -2394,7 +2419,8 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const { results: rd = [] } = await env.DB.prepare(`SELECT notif_id, notif_time FROM notif_reads WHERE user_key = ? ORDER BY notif_time DESC LIMIT 500`).bind(nk).all();
       const readAt = new Map(rd.map(r => [r.notif_id, new Date(r.notif_time).getTime() || 0])), sinceMs = new Date(since).getTime();
       const isRead = n => readAt.has(n.id) && readAt.get(n.id) >= (new Date(n.time).getTime() || 0);
-      const count = list.filter(n => n.time && new Date(n.time).getTime() > sinceMs && !isRead(n)).length;
+      // Invitations / requests waiting on you keep the bubble lit until you answer them
+      const count = list.filter(n => n.need || (n.time && new Date(n.time).getTime() > sinceMs && !isRead(n))).length;
       return json({ count, seen_at: since, read: list.filter(isRead).map(n => n.id) });
     } catch (err) {
       return json({ error: err.message }, 500);
