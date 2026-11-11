@@ -4,7 +4,7 @@
   on a card styled like the huddle cards.
 - "Invite birds · they'll get an invite to accept"; "Opening message · optional, gets pinned".
 - The opening message box starts short (3 lines) and grows as you type.
-- "📎 Photo / video" and a "Start huddle" button."""
+- "📎 Media" and a "Start huddle" button."""
 import sys
 src = '_deploy/assets/index-DUcNPOLc-v1006.js'
 dst = '_deploy/assets/index-DUcNPOLc-v1007.js'
@@ -27,7 +27,7 @@ patch('children:`Opening message (optional, it gets pinned):`',
 patch('disabled:l,rows:5,style:{width:`100%`',
       'disabled:l,rows:_isHuddle?3:5,onInput:_isHuddle?_ev=>{const _t=_ev.currentTarget;_t.style.height=`auto`;_t.style.height=Math.min(_t.scrollHeight,360)+`px`}:void 0,className:_isHuddle?`nh-msg`:void 0,style:{width:`100%`',
       'short growing message box')
-patch('` Attach`]})', '_isHuddle?` Photo / video`:` Attach`]})', 'photo/video label')
+patch('` Attach`]})', '_isHuddle?` Media`:` Attach`]})', 'photo/video label')
 patch('children:l?`Sending…`:`Post`', 'children:l?`Sending…`:_isHuddle?`Start huddle`:`Post`', 'Start huddle')
 c += r'''
 ;(()=>{try{const s=document.createElement(`style`);s.textContent=`
