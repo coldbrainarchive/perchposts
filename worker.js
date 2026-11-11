@@ -558,8 +558,17 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     const text = rq.kind === "invite" ? `${rq.from_user} invited you to "${title}"`
       : rq.kind === "add" ? `${rq.from_user} wants to invite ${rq.target} to "${title}"`
       : `${rq.from_user} wants to remove ${rq.target} from "${title}"`;
-    return JSON.stringify({ text, postId: post.id, req: rq.id });
+    return JSON.stringify({ text, postId: post.id, req: rq.id, ...(rq.preview ? { preview: rq.preview } : {}) });
   }
+  // First line of the huddle's opening (oldest pinned) chirp, for invites
+  const huddlePreview = async postId => {
+    const row = await env.DB.prepare(`SELECT content FROM comments WHERE post_id = ? AND pinned = 1 AND deleted = 0 AND username != '__system__' ORDER BY created_at LIMIT 1`).bind(postId).first().catch(() => null);
+    if (!row) return null;
+    const raw = String(row.content || ""), cut = raw.search(/\n\n\[ATTACH/);
+    let text = (cut >= 0 ? raw.slice(0, cut) : raw).replace(/\s+/g, " ").trim();
+    if (!text && cut >= 0) text = /"type":"video"/.test(raw.slice(cut)) ? "🎬 Video" : "📷 Photo";
+    return text ? (text.length > 80 ? text.slice(0, 79).trimEnd() + "…" : text) : null;
+  };
   const accountRole = async name => {
     const row = await env.DB.prepare(`SELECT role FROM mod_users WHERE LOWER(username) = ? AND deleted_at IS NULL LIMIT 1`).bind(String(name).toLowerCase()).first();
     return row && (row.role === "admin" || row.role === "mod") ? row.role : null;
@@ -569,6 +578,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   ).bind(postId, kind, String(target).toLowerCase(), requestCutoff()).first();
   const newRequest = async (post, kind, from, target, role) => {
     const rq = { id: crypto.randomUUID(), post_id: post.id, kind, from_user: from, target, target_role: role || null, status: "pending", created_at: now };
+    if (kind === "invite") rq.preview = await huddlePreview(post.id);
     await env.DB.prepare(`INSERT INTO huddle_requests (id, post_id, kind, from_user, target, target_role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`)
       .bind(rq.id, post.id, kind, from, target, rq.target_role, now).run();
     await upsertNotif(kind === "invite" ? target : post.username, requestMessage(rq, post), post.id);
@@ -949,6 +959,12 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         }
         throw err;
       });
+      // The huddle's opening message: the owner's first chirp, pinned
+      const first = isHuddle && typeof body.first_chirp === "string" && body.first_chirp.trim() ? body.first_chirp.slice(0, 8000) : null;
+      if (first) {
+        await env.DB.prepare(`INSERT INTO comments (id, content, post_id, parent_comment_id, username, ip_hash, browser_id, is_mod, is_admin, moderator, mod_user_id, created_at, pinned) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 1)`)
+          .bind(crypto.randomUUID(), first, id, username, ip_hash, body.browser_id || null, isModerator ? 1 : 0, isAdmin ? 1 : 0, isModerator ? 1 : 0, isModerator ? (authUser.sub ?? null) : null, now).run();
+      }
       // Invite the birds picked for the huddle
       if (isHuddle && invitees.length) {
         const extinct = await extinctNames();
@@ -2314,9 +2330,10 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         const reqIds = [];
         (huddleN || []).forEach(n => {
           let text = n.message, postId = undefined, req = undefined;
-          try { const parsed = JSON.parse(n.message); text = parsed.text || text; postId = parsed.postId; req = parsed.req; } catch {}
+          let preview;
+          try { const parsed = JSON.parse(n.message); text = parsed.text || text; postId = parsed.postId; req = parsed.req; preview = parsed.preview; } catch {}
           if (req) reqIds.push(req);
-          results.push({ id: `hsys-${n.id}`, type: "system", icon: req ? "📨" : "👥", text, postId, time: n.created_at, req, preClear: n.preClear || undefined });
+          results.push({ id: `hsys-${n.id}`, type: "system", icon: req ? "📨" : "👥", text, postId, time: n.created_at, req, preview, preClear: n.preClear || undefined });
         });
         // Invitations and requests carry their state, and whether this bird is the one who answers them
         if (reqIds.length) {
