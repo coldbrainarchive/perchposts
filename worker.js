@@ -526,7 +526,45 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       .bind(next, JSON.stringify(members.slice(1)), post.id).run();
     await huddleLine(post.id, `👑 ${next} now runs the huddle`, when);
     await upsertNotif(next, JSON.stringify({ text: `You now run "${post.title || "Huddle"}"`, postId: post.id }), post.id);
+    // Requests waiting on the old owner now wait on the new one
+    const { results: waiting = [] } = await env.DB.prepare(
+      `SELECT * FROM huddle_requests WHERE post_id = ? AND status = 'pending' AND kind IN ('add', 'remove') AND created_at > ?`
+    ).bind(post.id, requestCutoff()).all().catch(() => ({ results: [] }));
+    for (const rq of waiting) await upsertNotif(next, requestMessage(rq, post), post.id);
     return next;
+  };
+
+  // ── Huddle invitations and requests ──
+  // invite: someone is asked to join (they accept or decline).
+  // add / remove: a member asks the owner to invite or remove someone (the owner approves or denies).
+  // Nothing changes until it's answered; unanswered requests expire after 7 days.
+  const REQUEST_DAYS = 7;
+  function requestCutoff() { return new Date(Date.now() - REQUEST_DAYS * 864e5).toISOString(); }
+  function requestMessage(rq, post) {
+    const title = post.title || "Huddle";
+    const text = rq.kind === "invite" ? `${rq.from_user} invited you to "${title}"`
+      : rq.kind === "add" ? `${rq.from_user} wants to invite ${rq.target} to "${title}"`
+      : `${rq.from_user} wants to remove ${rq.target} from "${title}"`;
+    return JSON.stringify({ text, postId: post.id, req: rq.id });
+  }
+  const accountRole = async name => {
+    const row = await env.DB.prepare(`SELECT role FROM mod_users WHERE LOWER(username) = ? AND deleted_at IS NULL LIMIT 1`).bind(String(name).toLowerCase()).first();
+    return row && (row.role === "admin" || row.role === "mod") ? row.role : null;
+  };
+  const pendingRequest = (postId, kind, target) => env.DB.prepare(
+    `SELECT * FROM huddle_requests WHERE post_id = ? AND kind = ? AND LOWER(target) = ? AND status = 'pending' AND created_at > ? LIMIT 1`
+  ).bind(postId, kind, String(target).toLowerCase(), requestCutoff()).first();
+  const newRequest = async (post, kind, from, target, role) => {
+    const rq = { id: crypto.randomUUID(), post_id: post.id, kind, from_user: from, target, target_role: role || null, status: "pending", created_at: now };
+    await env.DB.prepare(`INSERT INTO huddle_requests (id, post_id, kind, from_user, target, target_role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`)
+      .bind(rq.id, post.id, kind, from, target, rq.target_role, now).run();
+    await upsertNotif(kind === "invite" ? target : post.username, requestMessage(rq, post), post.id);
+    return rq;
+  };
+  // Invite someone (no-op if they're already in or already invited)
+  const sendInvite = async (post, from, target) => {
+    if (isHuddleMember(post, target) || await pendingRequest(post.id, "invite", target)) return null;
+    return newRequest(post, "invite", from, target, await accountRole(target));
   };
   // Deleting keeps the password and the list of huddles left, so an admin can bring the account back
   const retireAccount = async (account, when, by) => {
@@ -863,7 +901,9 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         botClaim = await claimBotPost(env, botPostKeys(body.content), now);
         if (botClaim.duplicate) return json({ success: false, duplicate: true }, 409);
       }
-      const huddleMembers = isHuddle ? JSON.stringify(Array.isArray(body.huddle_members) ? body.huddle_members : []) : null;
+      // A new huddle starts with just its owner; the birds picked get invites to accept or decline
+      const invitees = isHuddle ? [...new Set((Array.isArray(body.huddle_members) ? body.huddle_members : []).map(normMember).filter(n => n && n.toLowerCase() !== username.toLowerCase()))] : [];
+      const huddleMembers = isHuddle ? "[]" : null;
       const id = crypto.randomUUID();
       await env.DB.prepare(`
         INSERT INTO posts (id, title, content, username, ip_hash, browser_id, last_activity,
@@ -896,15 +936,11 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         }
         throw err;
       });
-      // Notify huddle members
-      if (isHuddle && huddleMembers) {
-        const members = JSON.parse(huddleMembers);
-        const huddleTitle = body.title || "Huddle";
-        for (const memberUsername of members.map(normMember)) {
-          if (memberUsername === username) continue;
-          const notifMsg = JSON.stringify({ text: `${username} added you to a huddle: "${huddleTitle}"`, postId: id });
-          await upsertNotif(memberUsername, notifMsg, id);
-        }
+      // Invite the birds picked for the huddle
+      if (isHuddle && invitees.length) {
+        const extinct = await extinctNames();
+        const newPost = { id, title: body.title || null, username, huddle_members: "[]" };
+        for (const name of invitees) if (!extinct.has(name)) await sendInvite(newPost, username, name);
       }
       const post = await env.DB.prepare(`SELECT * FROM posts WHERE id = ?`).bind(id).first();
       return json({ success: true, post: boolify(post, POST_BOOL_FIELDS) });
@@ -930,6 +966,10 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         if (!seeAllHuddles && !isHuddleMember(post, username)) {
           return json({ error: "not_member", huddle: true }, 403);
         }
+        const { results: pend = [] } = await env.DB.prepare(
+          `SELECT id, from_user, target, created_at FROM huddle_requests WHERE post_id = ? AND kind = 'invite' AND status = 'pending' AND created_at > ? ORDER BY created_at`
+        ).bind(post.id, requestCutoff()).all().catch(() => ({ results: [] }));
+        post.huddle_pending = pend;
       }
       const sp = url.searchParams;
       const pageSize = Math.min(parseInt(sp.get("limit") || "0") || 0, 200);
@@ -1296,36 +1336,107 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const post = await env.DB.prepare(`SELECT * FROM posts WHERE id = ? AND deleted = 0`).bind(post_id).first();
       if (!post || !post.is_huddle) return json({ error: "Not found" }, 404);
       if (post.frozen) return json({ error: "This huddle is archived" }, 403);
-      const members = JSON.parse(post.huddle_members || "[]");
       if (!seeAllHuddles && !isHuddleMember(post, username)) return json({ error: "Unauthorized" }, 403);
-      const normInvUser = normMember(invite_username);
-      if ((await extinctNames()).has(normInvUser)) return json({ error: "That bird is extinct" }, 404);
-      if (members.map(normMember).includes(normInvUser)) return json({ error: "Already a member" }, 400);
-      members.push(invite_username); // store with role suffix for frontend display
-      await env.DB.prepare(`UPDATE posts SET huddle_members = ?, last_activity = ? WHERE id = ?`)
-        .bind(JSON.stringify(members), now, post_id).run();
-      const sysCommentId = crypto.randomUUID();
-      const sysContent = `👥 ${normInvUser} was added to the huddle`;
-      await env.DB.prepare(`INSERT INTO comments (id, content, post_id, parent_comment_id, username, ip_hash, browser_id, is_mod, is_admin, moderator, mod_user_id, created_at) VALUES (?, ?, ?, NULL, '__system__', NULL, NULL, 0, 0, 0, NULL, ?)`)
-        .bind(sysCommentId, sysContent, post_id, now).run().catch(() => {});
-      const huddleTitle = post.title || "Huddle";
-      // Notify the invited person
-      const inviteMsg = JSON.stringify({ text: `${username} invited you to "${huddleTitle}"`, postId: post_id });
-      await upsertNotif(normInvUser, inviteMsg, post_id);
-      // Notify all existing members that someone was invited
-      const existingMembers = [...members.map(normMember), post.username].filter(Boolean);
-      for (const mu of existingMembers) {
-        if (!mu || mu === username || mu === normInvUser) continue;
-        const broadcastMsg = JSON.stringify({ text: `${username} invited ${normInvUser} to "${huddleTitle}"`, postId: post_id });
-        await upsertNotif(mu, broadcastMsg, post_id);
+      const target = normMember(invite_username);
+      if (!target) return json({ error: "Missing fields" }, 400);
+      if ((await extinctNames()).has(target)) return json({ error: "That bird is extinct" }, 404);
+      const exists = await env.DB.prepare(`SELECT username FROM mod_users WHERE LOWER(username) = ? AND deleted_at IS NULL LIMIT 1`).bind(target.toLowerCase()).first();
+      if (!exists) return json({ error: "No bird by that name" }, 404);
+      if (isHuddleMember(post, target)) return json({ error: "Already in the huddle" }, 400);
+      if (await pendingRequest(post_id, "invite", target)) return json({ error: `${target} already has an invite` }, 400);
+      const isOwner = username.toLowerCase() === (post.username || "").toLowerCase();
+      // The owner (and mods) invite straight away; anyone else asks the owner first
+      if (isOwner || isModerator) {
+        await sendInvite(post, username, target);
+        return json({ success: true, pending: true, kind: "invite", message: `Invite sent to ${target}` });
       }
-      // Notify the actor (inviter) so they see it in their own panel
-      if (username) {
-        await upsertNotif(username, JSON.stringify({ text: `You invited ${normInvUser} to "${huddleTitle}"`, postId: post_id }), post_id);
+      if (await pendingRequest(post_id, "add", target)) return json({ error: `Someone already asked to invite ${target}` }, 400);
+      await newRequest(post, "add", username, target, null);
+      return json({ success: true, pending: true, kind: "add", message: `Asked ${post.username} to invite ${target}` });
+    } catch (err) {
+      return json({ error: err.message }, 500);
+    }
+  }
+
+  // ── /huddle-respond: accept / decline an invite, or approve / deny a member's request ──
+  if (url.pathname === "/huddle-respond" && request.method === "POST") {
+    try {
+      if (!username) return signInRequired();
+      const rq = await env.DB.prepare(`SELECT * FROM huddle_requests WHERE id = ?`).bind(String(body.req_id || "")).first();
+      if (!rq) return json({ error: "Not found" }, 404);
+      const me = username.toLowerCase();
+      const post = await env.DB.prepare(`SELECT * FROM posts WHERE id = ? AND deleted = 0`).bind(rq.post_id).first();
+      const owner = (post?.username || "").toLowerCase();
+      const mine = rq.kind === "invite" ? rq.target.toLowerCase() === me : owner === me;
+      if (!mine) return json({ error: rq.kind === "invite" ? "This invite isn't for you" : "Only the huddle's owner can answer this" }, 403);
+      if (rq.status !== "pending") return json({ success: true, status: rq.status });
+      const settle = st => env.DB.prepare(`UPDATE huddle_requests SET status = ?, decided_at = ? WHERE id = ?`).bind(st, now, rq.id).run();
+      if (!post || !post.is_huddle) { await settle("expired"); return json({ error: "This huddle doesn't exist anymore", status: "expired" }, 410); }
+      if (post.frozen) return json({ error: "This huddle is archived" }, 403);
+      if (rq.created_at < requestCutoff()) { await settle("expired"); return json({ error: "This request expired", status: "expired" }, 410); }
+      const yes = body.accept === true, title = post.title || "Huddle";
+      const tell = (who, text) => who && who.toLowerCase() !== me ? upsertNotif(who, JSON.stringify({ text, postId: post.id }), post.id) : null;
+      let status;
+      if (rq.kind === "invite") {
+        if (yes) {
+          if (!isHuddleMember(post, rq.target)) {
+            const members = JSON.parse(post.huddle_members || "[]");
+            members.push(rq.target_role ? `${rq.target}:${rq.target_role}` : rq.target);
+            await env.DB.prepare(`UPDATE posts SET huddle_members = ?, last_activity = ? WHERE id = ?`).bind(JSON.stringify(members), now, post.id).run();
+          }
+          await huddleLine(post.id, `👋 ${rq.target} joined the huddle`, now);
+          await tell(rq.from_user, `${rq.target} accepted your invite to "${title}"`);
+          if (owner !== rq.from_user.toLowerCase()) await tell(post.username, `${rq.target} joined "${title}"`);
+          status = "accepted";
+        } else {
+          await huddleLine(post.id, `🚫 ${rq.target} declined the invite`, now);
+          await tell(rq.from_user, `${rq.target} declined your invite to "${title}"`);
+          if (owner !== rq.from_user.toLowerCase()) await tell(post.username, `${rq.target} declined the invite to "${title}"`);
+          status = "declined";
+        }
+      } else if (rq.kind === "add") {
+        if (yes) {
+          await sendInvite(post, rq.from_user, rq.target);
+          await tell(rq.from_user, `${post.username} approved inviting ${rq.target} to "${title}"`);
+          status = "approved";
+        } else {
+          await tell(rq.from_user, `${post.username} said no to inviting ${rq.target} to "${title}"`);
+          status = "denied";
+        }
+      } else {
+        if (yes) {
+          const members = JSON.parse(post.huddle_members || "[]");
+          const rest = members.filter(m => normMember(m).toLowerCase() !== rq.target.toLowerCase());
+          if (rest.length !== members.length) {
+            await env.DB.prepare(`UPDATE posts SET huddle_members = ? WHERE id = ?`).bind(JSON.stringify(rest), post.id).run();
+            await huddleLine(post.id, `💨 ${rq.target} was removed from the huddle`, now);
+            await tell(rq.target, `You were removed from "${title}"`);
+          }
+          await tell(rq.from_user, `${post.username} removed ${rq.target} from "${title}" as you asked`);
+          status = "approved";
+        } else {
+          await tell(rq.from_user, `${post.username} kept ${rq.target} in "${title}"`);
+          status = "denied";
+        }
       }
-      // Construct updated post from known data — avoids D1 read-after-write stale reads
-      const updatedPost = { ...post, huddle_members: JSON.stringify(members), last_activity: now };
-      return json({ success: true, post: boolify(updatedPost, POST_BOOL_FIELDS), systemComment: { id: sysCommentId, content: sysContent, username: '__system__', created_at: now, parent_comment_id: null, browser_id: null, is_mod: 0 } });
+      await settle(status);
+      return json({ success: true, status, postId: post.id });
+    } catch (err) {
+      return json({ error: err.message }, 500);
+    }
+  }
+
+  // ── /huddle-cancel: the owner (or whoever sent it) takes back a pending invite ──
+  if (url.pathname === "/huddle-cancel" && request.method === "POST") {
+    try {
+      if (!username) return signInRequired();
+      const rq = await env.DB.prepare(`SELECT * FROM huddle_requests WHERE id = ?`).bind(String(body.req_id || "")).first();
+      if (!rq || rq.status !== "pending") return json({ error: "Not found" }, 404);
+      const post = await env.DB.prepare(`SELECT username FROM posts WHERE id = ?`).bind(rq.post_id).first();
+      const me = username.toLowerCase();
+      if (me !== rq.from_user.toLowerCase() && me !== (post?.username || "").toLowerCase() && !isModerator) return json({ error: "Unauthorized" }, 403);
+      await env.DB.prepare(`UPDATE huddle_requests SET status = 'cancelled', decided_at = ? WHERE id = ?`).bind(now, rq.id).run();
+      return json({ success: true });
     } catch (err) {
       return json({ error: err.message }, 500);
     }
@@ -1404,10 +1515,20 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       if (!post || !post.is_huddle) return json({ error: "Not found" }, 404);
       if (post.frozen) return json({ error: "This huddle is archived" }, 403);
       const isCreator = effectiveUsername.toLowerCase() === (post.username || "").toLowerCase();
-      if (!isCreator && !isModerator) return json({ error: "Unauthorized" }, 403);
       const members = JSON.parse(post.huddle_members || "[]");
       const targetMember = members.find(m => normMember(m).toLowerCase() === remove_username.toLowerCase());
       if (!targetMember) return json({ error: "Not a member" }, 404);
+      if (!isCreator && !isModerator) {
+        // Members ask the owner, who approves or denies it
+        if (!isHuddleMember(post, effectiveUsername)) return json({ error: "Unauthorized" }, 403);
+        const target = normMember(targetMember);
+        if (target.toLowerCase() === effectiveUsername.toLowerCase()) return json({ error: "Use Leave to leave the huddle" }, 400);
+        const r = targetMember.slice(targetMember.lastIndexOf(":") + 1);
+        if (targetMember.includes(":") && (r === "admin" || r === "mod")) return json({ error: "Cannot remove mods or admins" }, 403);
+        if (await pendingRequest(post_id, "remove", target)) return json({ error: `Someone already asked to remove ${target}` }, 400);
+        await newRequest(post, "remove", effectiveUsername, target, null);
+        return json({ success: true, pending: true, kind: "remove", message: `Asked ${post.username} to remove ${target}` });
+      }
       // OP cannot remove mods or admins
       if (isCreator && !isModerator) {
         const lastColon = targetMember.lastIndexOf(":");
@@ -2170,11 +2291,28 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         const { results: huddleN } = await env.DB.prepare(
           `SELECT id, message, created_at FROM system_notifications WHERE user_id = ? AND message != '__cleared__' AND created_at > ? ORDER BY created_at DESC LIMIT 30`
         ).bind(notifUname, clearedSince).all();
+        const reqIds = [];
         (huddleN || []).forEach(n => {
-          let text = n.message, postId = undefined;
-          try { const parsed = JSON.parse(n.message); text = parsed.text || text; postId = parsed.postId; } catch {}
-          results.push({ id: `hsys-${n.id}`, type: "system", icon: "👥", text, postId, time: n.created_at });
+          let text = n.message, postId = undefined, req = undefined;
+          try { const parsed = JSON.parse(n.message); text = parsed.text || text; postId = parsed.postId; req = parsed.req; } catch {}
+          if (req) reqIds.push(req);
+          results.push({ id: `hsys-${n.id}`, type: "system", icon: req ? "📨" : "👥", text, postId, time: n.created_at, req });
         });
+        // Invitations and requests carry their state, and whether this bird is the one who answers them
+        if (reqIds.length) {
+          const { results: rqs = [] } = await env.DB.prepare(
+            `SELECT r.id, r.kind, r.status, r.target, r.created_at, p.username AS owner, p.deleted AS gone FROM huddle_requests r LEFT JOIN posts p ON p.id = r.post_id WHERE r.id IN (${ID_LIST})`
+          ).bind(JSON.stringify(reqIds)).all();
+          const byId = new Map(rqs.map(r => [r.id, r])), cut = requestCutoff(), lower = me.toLowerCase();
+          for (const n of results) {
+            if (!n.req) continue;
+            const r = byId.get(n.req);
+            if (!r) { delete n.req; continue; }
+            const status = r.status === "pending" && (r.created_at < cut || r.gone || r.owner == null) ? "expired" : r.status;
+            const act = r.kind === "invite" ? r.target.toLowerCase() === lower : (r.owner || "").toLowerCase() === lower;
+            n.req = { id: r.id, kind: r.kind, status, act: status === "pending" && act };
+          }
+        }
       }
       results.sort((a, b) => (a.time && b.time) ? new Date(b.time) - new Date(a.time) : a.time ? -1 : 1);
       const names = await extinctNames();
