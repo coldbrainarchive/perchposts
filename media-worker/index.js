@@ -45,6 +45,8 @@ export default {
       h.set("accept-ranges", "bytes");
       h.set("access-control-allow-origin", "*");
       h.set("access-control-expose-headers", "content-range, content-length, accept-ranges");
+      h.set("x-content-type-options", "nosniff");
+      h.set("content-security-policy", "default-src 'none'; sandbox");
       h.set("cache-control", "public, max-age=31536000, immutable");
       if (start >= size || end < start) { h.set("content-range", `bytes */${size}`); return new Response(null, { status: 416, headers: h }); }
       h.set("content-range", `bytes ${start}-${end}/${size}`);
@@ -67,6 +69,8 @@ export default {
     headers.set("accept-ranges", "bytes");
     headers.set("access-control-allow-origin", "*");
     headers.set("access-control-expose-headers", "content-range, content-length, accept-ranges");
+    headers.set("x-content-type-options", "nosniff");
+    headers.set("content-security-policy", "default-src 'none'; sandbox");
     return new Response(request.method === "HEAD" ? null : obj.body, { headers });
   },
 };

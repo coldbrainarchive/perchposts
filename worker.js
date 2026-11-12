@@ -11,7 +11,8 @@ export default {
     try {
       return await handleRequest(request, env, ctx, corsHeaders);
     } catch (err) {
-      return new Response(JSON.stringify({ error: err.message, stack: err.stack }), {
+      console.error("unhandled:", err && (err.stack || err.message));
+      return new Response(JSON.stringify({ error: "Something went wrong. Please try again." }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" }
       });
@@ -674,6 +675,22 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       .bind(crypto.randomUUID(), userId, message).run();
   }
 
+  // Other people's browser IDs go out scrambled (same scramble each time, so grouping still works);
+  // your own (sent as ?bid=) comes back as is, so the page can tell which votes/reactions are yours.
+  async function maskBid(id, mine) {
+    if (!id) return id;
+    if (mine && id === mine) return id;
+    const k = await crypto.subtle.importKey("raw", new TextEncoder().encode(env.IP_HASH_KEY || env.JWT_SECRET || "pp"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const s = new Uint8Array(await crypto.subtle.sign("HMAC", k, new TextEncoder().encode("bid:" + id)));
+    return "x" + Array.from(s.slice(0, 12)).map(b => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  // Unexpected errors: details go to the server log, people just see a plain message
+  function serverError(err) {
+    console.error("server error:", err && (err.stack || err.message));
+    return json({ error: "Something went wrong. Please try again." }, 500);
+  }
+
   function json(data, status = 200) {
     return new Response(JSON.stringify(data), {
       status,
@@ -689,8 +706,12 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     const token = authHeader.slice(7);
     const user = await verifyJWT(token, env.JWT_SECRET);
     if (user?.sub) {
-      const account = await env.DB.prepare(`SELECT deleted_at, see_all_huddles FROM mod_users WHERE id = ?`).bind(user.sub).first();
+      const account = await env.DB.prepare(`SELECT deleted_at, see_all_huddles, role, password_changed_at FROM mod_users WHERE id = ?`).bind(user.sub).first();
       if (!account || account.deleted_at) return null;
+      // A password change signs out every login made before it
+      if (account.password_changed_at && (!user.iat || user.iat * 1000 < Date.parse(account.password_changed_at))) return null;
+      // The role always comes from the account, so promotions and demotions apply immediately
+      user.role = account.role || "user";
       user.see_all_huddles = !!account.see_all_huddles;
       const now = new Date().toISOString();
       ctx.waitUntil(
@@ -798,7 +819,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     if (env.MEDIA_SVC && (request.method === "GET" || request.method === "HEAD")) {
       try {
         const res = await env.MEDIA_SVC.fetch(request);
-        if (res.status !== 500) return res;
+        if (res.status < 500) return res;
       } catch (err) {
         console.error("media worker unavailable, serving directly", err.message);
       }
@@ -830,6 +851,8 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       headers.set("access-control-allow-origin", "*");
       headers.set("access-control-expose-headers", "content-range, content-length, accept-ranges");
       headers.set("accept-ranges", "bytes");
+      headers.set("x-content-type-options", "nosniff");
+      headers.set("content-security-policy", "default-src 'none'; sandbox");
       // Already have it? (the file never changes)
       const inm = request.headers.get("if-none-match");
       if (inm && !range && inm.split(",").some(t => t.trim().replace(/^W\//, "") === head.httpEtag)) {
@@ -889,7 +912,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         }
         return json({ url: `${url.origin}/media/${key}` });
       } catch (err) {
-        return json({ error: err.message }, 500);
+        return serverError(err);
       }
     }
     try {
@@ -915,7 +938,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
 
       return json({ url: `${url.origin}/media/${key}` });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -944,12 +967,12 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         await env.DB.prepare(`UPDATE comments SET username = ? WHERE browser_id = ? AND is_mod = 0 AND username IS NULL`).bind(uname.trim(), bid).run();
       }
       const token = await signJWT(
-        { sub: id, role: "user", username: uname.trim(), exp: Math.floor(Date.now() / 1000) + 86400 * 90 },
+        { sub: id, role: "user", username: uname.trim(), iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 86400 * 90 },
         env.JWT_SECRET
       );
       return json({ token, user: { id, role: "user", username: uname.trim() } });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -984,12 +1007,12 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       }
       if (user.failed_logins || user.locked_until) await env.DB.prepare(`UPDATE mod_users SET failed_logins = 0, locked_until = NULL WHERE id = ?`).bind(user.id).run();
       const token = await signJWT(
-        { sub: user.id, role: user.role, username: user.username, exp: Math.floor(Date.now() / 1000) + 86400 * 90 },
+        { sub: user.id, role: user.role, username: user.username, iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 86400 * 90 },
         env.JWT_SECRET
       );
       return json({ token, user: { id: user.id, role: user.role, username: user.username } });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -997,15 +1020,24 @@ async function handleRequest(request, env, ctx, corsHeaders) {
 
   if (url.pathname === "/update-password" && request.method === "POST") {
     if (!authUser) return json({ error: "Unauthorized" }, 401);
-    const { newPassword } = body;
+    const { newPassword, currentPassword } = body;
     if (!newPassword) return json({ error: "Missing newPassword" }, 400);
+    if (!currentPassword) return json({ error: "Enter your current password" }, 400);
+    if (String(newPassword).length < 6) return json({ error: "Password must be at least 6 characters" }, 400);
     try {
+      const acct = await env.DB.prepare(`SELECT id, username, role, password_hash FROM mod_users WHERE id = ? AND deleted_at IS NULL`).bind(authUser.sub).first();
+      if (!acct) return json({ error: "Unauthorized" }, 401);
+      if (!(await verifyPassword(currentPassword, acct.password_hash).catch(() => false))) return json({ error: "Your current password isn't right" }, 403);
       const hash = await hashPassword(newPassword);
-      await env.DB.prepare(`UPDATE mod_users SET password_hash = ? WHERE id = ?`)
-        .bind(hash, authUser.sub).run();
-      return json({ success: true });
+      const changedAt = new Date(Math.floor(Date.now() / 1000) * 1000).toISOString(); // whole seconds, like login times
+      await env.DB.prepare(`UPDATE mod_users SET password_hash = ?, password_changed_at = ?, failed_logins = 0, locked_until = NULL WHERE id = ?`)
+        .bind(hash, changedAt, acct.id).run();
+      // Every other login is now signed out; this device gets a fresh one
+      const t = Math.floor(Date.now() / 1000) + 3;
+      const token = await signJWT({ sub: acct.id, role: acct.role, username: acct.username, iat: t, exp: t + 86400 * 90 }, env.JWT_SECRET);
+      return json({ success: true, token });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -1095,7 +1127,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const post = await env.DB.prepare(`SELECT * FROM posts WHERE id = ?`).bind(id).first();
       return json({ success: true, post: boolify(post, POST_BOOL_FIELDS) });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -1201,7 +1233,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         quoted: await publicRows((quoted.results || []).map(c => boolify(c, COMMENT_BOOL_FIELDS)))
       });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -1340,7 +1372,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         next_before: nextBefore
       });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -1349,11 +1381,12 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   if (url.pathname === "/get-comments-index") {
     try {
       const { results } = await env.DB.prepare(
-        `SELECT id, post_id, parent_comment_id FROM comments WHERE deleted = 0 AND (username IS NULL OR username != '__system__')`
+        `SELECT c.id, c.post_id, c.parent_comment_id FROM comments c JOIN posts p ON p.id = c.post_id
+         WHERE c.deleted = 0 AND (c.username IS NULL OR c.username != '__system__') AND (p.is_huddle = 0 OR p.is_huddle IS NULL)`
       ).all();
       return json(results || []);
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -1374,7 +1407,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         .bind(JSON.stringify(body.config), now).run();
       return json({ success: true });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -1388,7 +1421,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         .bind(body.content, body.post_id).run();
       return json({ success: true });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -1410,7 +1443,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       await env.DB.prepare(`DELETE FROM posts WHERE id IN (${placeholders})`).bind(...ids).run();
       return json({ success: true, purged: ids.length });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -1423,7 +1456,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       await env.DB.prepare(`UPDATE posts SET deleted = 1 WHERE id = ?`).bind(body.post_id).run();
       return json({ success: true });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -1474,7 +1507,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       }
       return json({ success: true });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -1506,7 +1539,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       await newRequest(post, "add", username, target, null);
       return json({ success: true, pending: true, kind: "add", message: `Asked ${post.username} to invite ${target}` });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -1574,7 +1607,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       await settle(status);
       return json({ success: true, status, postId: post.id });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -1590,7 +1623,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       await env.DB.prepare(`UPDATE huddle_requests SET status = 'cancelled', decided_at = ? WHERE id = ?`).bind(now, rq.id).run();
       return json({ success: true });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -1609,7 +1642,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       await env.DB.prepare(`UPDATE posts SET title = ? WHERE id = ?`).bind(title || null, post_id).run();
       return json({ success: true });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -1651,7 +1684,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       await upsertNotif(leavingUser, JSON.stringify({ text: `You left "${leaveTitle}"`, postId: post_id }), post_id);
       return json({ success: true });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -1705,7 +1738,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const updatedPost = { ...post, huddle_members: JSON.stringify(newMembers) };
       return json({ success: true, post: boolify(updatedPost, POST_BOOL_FIELDS), systemComment: { id: sysId, content: sysContent, username: "__system__", created_at: now, parent_comment_id: null, browser_id: null, is_mod: 0 } });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -1731,7 +1764,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       await env.DB.prepare(`UPDATE comments SET pinned = ? WHERE id = ? AND post_id = ?`).bind(pinned ? 1 : 0, comment_id, post_id).run();
       return json({ success: true });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -1748,7 +1781,8 @@ async function handleRequest(request, env, ctx, corsHeaders) {
 
       // Read current state BEFORE write to avoid D1 eventual-consistency race
       const [existing, preSummary] = await Promise.all([
-        env.DB.prepare(`SELECT id, value FROM post_votes WHERE post_id = ? AND browser_id = ?`).bind(body.post_id, body.browser_id).first(),
+        // Your vote is found by your account, never by a device id the request sends (those are visible on posts)
+        env.DB.prepare(`SELECT id, value FROM post_votes WHERE post_id = ? AND username = ?`).bind(body.post_id, username).first(),
         getPostVoteSummary(body.post_id, body.browser_id),
       ]);
       const prevValue = existing?.value || 0;
@@ -1779,7 +1813,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const newCount = existing?.id ? prevCount : prevCount + 1;
       return json({ success: true, score: newScore, myVote: body.value, voteCount: newCount });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -1793,9 +1827,12 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const { results } = await env.DB.prepare(
         `SELECT post_id, value, browser_id FROM post_votes WHERE post_id IN (${placeholders})`
       ).bind(JSON.stringify(postIds)).all();
-      return json({ votes: results || [] });
+      const bid = url.searchParams.get("bid") || "";
+      const votes = [];
+      for (const v of results || []) votes.push({ post_id: v.post_id, value: v.value, browser_id: await maskBid(v.browser_id, bid) });
+      return json({ votes });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -1807,11 +1844,19 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       if (!commentIds.length) return json({ reactions: [] });
       const placeholders = ID_LIST;
       const { results } = await env.DB.prepare(
-        `SELECT comment_id, browser_id, emoji, username, created_at FROM comment_reactions WHERE comment_id IN (${placeholders})`
+        `SELECT cr.comment_id, cr.browser_id, cr.emoji, cr.username, cr.created_at, p.is_huddle, p.huddle_members, p.username AS owner
+         FROM comment_reactions cr LEFT JOIN comments c ON c.id = cr.comment_id LEFT JOIN posts p ON p.id = c.post_id
+         WHERE cr.comment_id IN (${placeholders})`
       ).bind(JSON.stringify(commentIds)).all();
-      return json({ reactions: results || [] });
+      const bid = url.searchParams.get("bid") || "";
+      const out = [];
+      for (const r of results || []) {
+        if (r.is_huddle && !seeAllHuddles && !isHuddleMember({ huddle_members: r.huddle_members, username: r.owner }, username)) continue;
+        out.push({ comment_id: r.comment_id, browser_id: await maskBid(r.browser_id, bid), emoji: r.emoji, username: r.username, created_at: r.created_at });
+      }
+      return json({ reactions: out });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -1848,7 +1893,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       }
       return json({ success: true });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -1866,7 +1911,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       await retireAccount(account, now, "self");
       return json({ success: true });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -1888,7 +1933,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       await restoreAccount(account, now);
       return json({ success: true });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -1903,7 +1948,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       if (account.username) await env.DB.prepare(`DELETE FROM system_notifications WHERE user_id = ?`).bind(account.username).run();
       return json({ success: true });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -1931,7 +1976,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       }));
       return json({ members });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -1968,7 +2013,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       }
       return json({ success: true });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -1985,7 +2030,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       await retireAccount({ id: user_id, username: target.username }, now, "mod");
       return json({ success: true });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -2112,7 +2157,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       }
       return json({ success: true });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -2138,7 +2183,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         archivedPosts:  archivedRes.results  || [],
       });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -2158,7 +2203,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       ).bind(...params).first();
       return json({ jailed: !!row });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -2231,7 +2276,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const role = modRow?.role || null;
       return json({ joined_at, worm_count, role });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -2375,7 +2420,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       if (!user) return json({ role_mismatch: false });
       return json({ role_mismatch: user.role !== authUser.role, current_role: user.role });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -2397,7 +2442,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       }
       return json({ success: true, clearedAt: now });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -2515,7 +2560,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       if (!authUser?.username) return signInRequired();
       return json({ notifs: await buildNotifs(browser_id) });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -2586,7 +2631,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const count = list.filter(n => n.need || (n.time && new Date(n.time).getTime() > sinceMs && !isRead(n))).length;
       return json({ count, seen_at: since, read: list.filter(isRead).map(n => n.id) });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -2608,7 +2653,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       }
       return json({ posts: posts || [] });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -2619,7 +2664,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       // Old cached pages still call this. Every post and chirp has a username now, so there's nothing to do.
       return json({ success: true });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -2634,7 +2679,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       if (result.meta?.changes === 0) return json({ error: "Not authorized or already deleted" }, 403);
       return json({ success: true });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -2649,7 +2694,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       if (result.meta?.changes === 0) return json({ error: "Not authorized or already deleted" }, 403);
       return json({ success: true });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -2680,7 +2725,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         if (result.meta.changes === 0) return json({ success: false, reason: "stale" }, 409);
         return json({ success: true });
       } catch (err) {
-        return json({ error: err.message }, 500);
+        return serverError(err);
       }
     }
   }
@@ -2776,7 +2821,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       `).bind(id, body.run_type || "subsequent").run();
       return json({ id });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -2802,7 +2847,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       ).run();
       return json({ success: true });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -2819,7 +2864,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       `).bind(now).run();
       return json({ success: true });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
@@ -2832,7 +2877,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       await env.DB.prepare(`DELETE FROM bot_logs WHERE id = ?`).bind(body.id).run();
       return json({ success: true });
     } catch (err) {
-      return json({ error: err.message }, 500);
+      return serverError(err);
     }
   }
 
