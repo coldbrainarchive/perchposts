@@ -1,3 +1,5 @@
+import { stripMedia } from "./media-strip.js";
+
 export default {
   async fetch(request, env, ctx) {
     const corsHeaders = {
@@ -501,7 +503,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(ip));
   const ip_hash = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
 
-  const body = (request.method !== "GET" && url.pathname !== "/upload") ? await request.json().catch(() => ({})) : {};
+  const body = (request.method !== "GET" && request.method !== "HEAD" && url.pathname !== "/upload") ? await request.json().catch(() => ({})) : {};
   const now = new Date().toISOString();
   // Strip ":admin"/":mod" role suffix stored by frontend — return plain username
   const normMember = m => { const ci = (m || "").lastIndexOf(":"); if (ci > 0) { const r = m.slice(ci + 1); if (r === "admin" || r === "mod") return m.slice(0, ci); } return m || ""; };
@@ -783,8 +785,13 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   // ── /media/<key> ─────────────────────────────────────────────────────────────
 
   if (url.pathname.startsWith("/media/")) {
-    const key = url.pathname.slice("/media/".length);
+    let key = url.pathname.slice("/media/".length);
     if (!key) return new Response("Not found", { status: 404 });
+    // ?thumb=1 → the small copy of an older photo if one was made, otherwise the photo itself
+    if (url.searchParams.get("thumb") === "1" && !key.startsWith("thumbs/")) {
+      const small = await env.MEDIA.head(`thumbs/${key}.jpg`).catch(() => null);
+      if (small) key = `thumbs/${key}.jpg`;
+    }
     try {
       // Videos on iPhone are fetched in pieces (Range requests); answer with 206 + just that piece.
       const want = (request.headers.get("range") || "").trim();
@@ -853,7 +860,9 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const ext = (file.name || "file").split(".").pop().toLowerCase().replace(/[^a-z0-9]/g, "") || "bin";
       const key = `${crypto.randomUUID()}.${ext}`;
 
-      await env.MEDIA.put(key, buffer, {
+      // No location, phone model, dates etc. leave with the file
+      const clean = stripMedia(new Uint8Array(buffer), file.type).bytes;
+      await env.MEDIA.put(key, clean, {
         httpMetadata: { contentType: file.type, cacheControl: "public, max-age=31536000, immutable" }
       });
 
@@ -1321,6 +1330,8 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   // ── /purge-deleted ────────────────────────────────────────────────────────────
 
   if (url.pathname === "/purge-deleted") {
+    // Switched off: deleted posts (and their photos) are kept unless an admin uses Delete forever.
+    return json({ error: "Disabled: deleted posts are kept. Use Delete forever in the admin controls." }, 410);
     if (!isBot) return json({ error: "Unauthorized" }, 401);
     try {
       const { results } = await env.DB.prepare(
@@ -1985,9 +1996,17 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         if (_pdcIds.length) {
           await env.DB.prepare(`DELETE FROM comment_reactions WHERE comment_id IN (${ID_LIST})`).bind(JSON.stringify(_pdcIds)).run();
         }
+        // Delete forever also removes the photos/videos (and their small copies) from storage
+        const _pdp = await env.DB.prepare(`SELECT content FROM posts WHERE id = ?`).bind(body.post_id).first();
+        const _pdcc = await env.DB.prepare(`SELECT content FROM comments WHERE post_id = ?`).bind(body.post_id).all();
+        const _mediaKeys = new Set();
+        for (const txt of [_pdp?.content, ...(_pdcc.results || []).map(r => r.content)]) {
+          for (const m of String(txt || "").matchAll(/\/media\/([A-Za-z0-9][A-Za-z0-9._-]*)/g)) { _mediaKeys.add(m[1]); _mediaKeys.add(`thumbs/${m[1]}.jpg`); }
+        }
         await env.DB.prepare(`DELETE FROM post_votes WHERE post_id = ?`).bind(body.post_id).run();
         await env.DB.prepare(`DELETE FROM comments WHERE post_id = ?`).bind(body.post_id).run();
         await env.DB.prepare(`DELETE FROM posts WHERE id = ?`).bind(body.post_id).run();
+        if (_mediaKeys.size) await env.MEDIA.delete([..._mediaKeys]).catch(err => console.error("media delete failed", err.message));
       }
       if (t === "delete_comment") {
         const _dc = await env.DB.prepare(`SELECT is_admin FROM comments WHERE id = ?`).bind(body.comment_id).first();

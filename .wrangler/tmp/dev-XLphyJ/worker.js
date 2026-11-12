@@ -27,6 +27,185 @@ globalThis.fetch = new Proxy(globalThis.fetch, {
   }
 });
 
+// media-strip.js
+function stripMedia(bytes, contentType = "") {
+  try {
+    const t = String(contentType).toLowerCase();
+    if (t === "image/jpeg" || isJpeg(bytes)) return stripJpeg(bytes);
+    if (t === "image/png" || isPng(bytes)) return stripPng(bytes);
+    if (t === "image/webp" || isWebp(bytes)) return stripWebp(bytes);
+    if (t.startsWith("video/") || isIsoBmff(bytes)) return stripIsoBmff(bytes);
+  } catch (e) {
+  }
+  return { bytes, changed: false };
+}
+__name(stripMedia, "stripMedia");
+var isJpeg = /* @__PURE__ */ __name((b) => b.length > 3 && b[0] === 255 && b[1] === 216, "isJpeg");
+var isPng = /* @__PURE__ */ __name((b) => b.length > 8 && b[0] === 137 && b[1] === 80 && b[2] === 78 && b[3] === 71, "isPng");
+var isWebp = /* @__PURE__ */ __name((b) => b.length > 12 && str(b, 0, 4) === "RIFF" && str(b, 8, 4) === "WEBP", "isWebp");
+var isIsoBmff = /* @__PURE__ */ __name((b) => b.length > 12 && ["ftyp", "moov", "mdat", "wide", "free"].includes(str(b, 4, 4)), "isIsoBmff");
+var str = /* @__PURE__ */ __name((b, o, n) => String.fromCharCode(...b.subarray(o, o + n)), "str");
+function stripJpeg(b) {
+  const keep = [b.subarray(0, 2)];
+  let i = 2, changed = false, orientation = 1;
+  while (i + 4 <= b.length) {
+    if (b[i] !== 255) return { bytes: b, changed: false };
+    const m = b[i + 1];
+    if (m === 255) {
+      i++;
+      continue;
+    }
+    if (m === 216 || m === 1 || m >= 208 && m <= 215) {
+      keep.push(b.subarray(i, i + 2));
+      i += 2;
+      continue;
+    }
+    if (m === 218 || m === 217) {
+      keep.push(b.subarray(i));
+      i = b.length;
+      break;
+    }
+    const len = b[i + 2] << 8 | b[i + 3];
+    const seg = b.subarray(i, i + 2 + len);
+    const isApp = m >= 224 && m <= 239;
+    let drop = false;
+    if (m === 254) drop = true;
+    else if (isApp && m !== 224 && m !== 238) {
+      if (m === 226 && str(seg, 4, 11) === "ICC_PROFILE") drop = false;
+      else {
+        if (m === 225 && str(seg, 4, 4) === "Exif") orientation = readOrientation(seg.subarray(10)) || orientation;
+        drop = true;
+      }
+    }
+    if (drop) changed = true;
+    else keep.push(seg);
+    i += 2 + len;
+  }
+  if (!changed) return { bytes: b, changed: false };
+  if (orientation >= 2 && orientation <= 8) keep.splice(keep[1] && keep[1][1] === 224 ? 2 : 1, 0, orientationExif(orientation));
+  return { bytes: concat(keep), changed: true };
+}
+__name(stripJpeg, "stripJpeg");
+function readOrientation(t) {
+  if (t.length < 8) return 0;
+  const le = t[0] === 73;
+  const u16 = /* @__PURE__ */ __name((o) => le ? t[o] | t[o + 1] << 8 : t[o] << 8 | t[o + 1], "u16");
+  const u32 = /* @__PURE__ */ __name((o) => le ? (t[o] | t[o + 1] << 8 | t[o + 2] << 16 | t[o + 3] << 24) >>> 0 : (t[o] << 24 | t[o + 1] << 16 | t[o + 2] << 8 | t[o + 3]) >>> 0, "u32");
+  const ifd = u32(4);
+  if (ifd + 2 > t.length) return 0;
+  const n = u16(ifd);
+  for (let k = 0; k < n; k++) {
+    const e = ifd + 2 + k * 12;
+    if (e + 12 > t.length) break;
+    if (u16(e) === 274) return u16(e + 8);
+  }
+  return 0;
+}
+__name(readOrientation, "readOrientation");
+function orientationExif(o) {
+  const tiff = [73, 73, 42, 0, 8, 0, 0, 0, 1, 0, 18, 1, 3, 0, 1, 0, 0, 0, o, 0, 0, 0, 0, 0, 0, 0];
+  const body = [69, 120, 105, 102, 0, 0, ...tiff];
+  const len = body.length + 2;
+  return new Uint8Array([255, 225, len >> 8, len & 255, ...body]);
+}
+__name(orientationExif, "orientationExif");
+var PNG_KEEP = /* @__PURE__ */ new Set(["IHDR", "PLTE", "IDAT", "IEND", "tRNS", "gAMA", "cHRM", "sRGB", "iCCP", "sBIT", "pHYs", "acTL", "fcTL", "fdAT"]);
+function stripPng(b) {
+  const keep = [b.subarray(0, 8)];
+  let i = 8, changed = false;
+  while (i + 12 <= b.length) {
+    const len = (b[i] << 24 | b[i + 1] << 16 | b[i + 2] << 8 | b[i + 3]) >>> 0;
+    const type = str(b, i + 4, 4);
+    const end = i + 12 + len;
+    if (end > b.length) return { bytes: b, changed: false };
+    if (PNG_KEEP.has(type)) keep.push(b.subarray(i, end));
+    else changed = true;
+    i = end;
+    if (type === "IEND") break;
+  }
+  return changed ? { bytes: concat(keep), changed: true } : { bytes: b, changed: false };
+}
+__name(stripPng, "stripPng");
+function stripWebp(b) {
+  const keep = [];
+  let i = 12, changed = false;
+  while (i + 8 <= b.length) {
+    const type = str(b, i, 4);
+    const len = (b[i + 4] | b[i + 5] << 8 | b[i + 6] << 16 | b[i + 7] << 24) >>> 0;
+    const end = i + 8 + len + (len & 1);
+    if (end > b.length + 1) return { bytes: b, changed: false };
+    if (type === "EXIF" || type === "XMP ") changed = true;
+    else {
+      const c = b.slice(i, Math.min(end, b.length));
+      if (type === "VP8X") c[8] &= ~(8 | 4);
+      keep.push(c);
+    }
+    i = end;
+  }
+  if (!changed) return { bytes: b, changed: false };
+  const body = concat(keep);
+  const out = new Uint8Array(12 + body.length);
+  out.set(b.subarray(0, 12));
+  const size = 4 + body.length;
+  out[4] = size & 255;
+  out[5] = size >> 8 & 255;
+  out[6] = size >> 16 & 255;
+  out[7] = size >>> 24 & 255;
+  out.set(body, 12);
+  return { bytes: out, changed: true };
+}
+__name(stripWebp, "stripWebp");
+var CONTAINERS = /* @__PURE__ */ new Set(["moov", "trak", "mdia", "minf", "edts"]);
+var WIPE = /* @__PURE__ */ new Set(["udta", "meta", "uuid"]);
+function stripIsoBmff(b) {
+  let changed = false;
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const walk = /* @__PURE__ */ __name((start, end, depth, inMoov) => {
+    let i = start;
+    while (i + 8 <= end) {
+      let size = dv.getUint32(i), hdr = 8;
+      const type = str(b, i + 4, 4);
+      if (size === 1) {
+        if (i + 16 > end) return;
+        size = Number(dv.getBigUint64(i + 8));
+        hdr = 16;
+      } else if (size === 0) size = end - i;
+      if (size < hdr || i + size > end) return;
+      if (inMoov && WIPE.has(type)) {
+        b[i + 4] = 102;
+        b[i + 5] = 114;
+        b[i + 6] = 101;
+        b[i + 7] = 101;
+        b.fill(0, i + hdr, i + size);
+        changed = true;
+      } else if (CONTAINERS.has(type) && depth < 6) {
+        walk(i + hdr, i + size, depth + 1, inMoov || type === "moov");
+      } else if (depth === 0 && (type === "udta" || type === "meta")) {
+        b[i + 4] = 102;
+        b[i + 5] = 114;
+        b[i + 6] = 101;
+        b[i + 7] = 101;
+        b.fill(0, i + hdr, i + size);
+        changed = true;
+      }
+      i += size;
+    }
+  }, "walk");
+  walk(0, b.length, 0, false);
+  return { bytes: b, changed };
+}
+__name(stripIsoBmff, "stripIsoBmff");
+function concat(parts) {
+  const n = parts.reduce((s, p) => s + p.length, 0), out = new Uint8Array(n);
+  let o = 0;
+  for (const p of parts) {
+    out.set(p, o);
+    o += p.length;
+  }
+  return out;
+}
+__name(concat, "concat");
+
 // worker.js
 var worker_default = {
   async fetch(request, env, ctx) {
@@ -640,7 +819,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   const ip = request.headers.get("CF-Connecting-IP") || "0.0.0.0";
   const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(ip));
   const ip_hash = Array.from(new Uint8Array(hashBuffer)).map((b) => b.toString(16).padStart(2, "0")).join("");
-  const body = request.method !== "GET" && url.pathname !== "/upload" ? await request.json().catch(() => ({})) : {};
+  const body = request.method !== "GET" && request.method !== "HEAD" && url.pathname !== "/upload" ? await request.json().catch(() => ({})) : {};
   const now = (/* @__PURE__ */ new Date()).toISOString();
   const normMember = /* @__PURE__ */ __name((m) => {
     const ci = (m || "").lastIndexOf(":");
@@ -912,8 +1091,12 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   }
   __name(getPostVoteSummary, "getPostVoteSummary");
   if (url.pathname.startsWith("/media/")) {
-    const key = url.pathname.slice("/media/".length);
+    let key = url.pathname.slice("/media/".length);
     if (!key) return new Response("Not found", { status: 404 });
+    if (url.searchParams.get("thumb") === "1" && !key.startsWith("thumbs/")) {
+      const small = await env.MEDIA.head(`thumbs/${key}.jpg`).catch(() => null);
+      if (small) key = `thumbs/${key}.jpg`;
+    }
     try {
       const want = (request.headers.get("range") || "").trim();
       const rm = /^bytes=(\d*)-(\d*)$/.exec(want);
@@ -973,7 +1156,8 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       if (buffer.byteLength > MAX_SIZE) return json({ error: "File too large (max 50 MB)" }, 400);
       const ext = (file.name || "file").split(".").pop().toLowerCase().replace(/[^a-z0-9]/g, "") || "bin";
       const key = `${crypto.randomUUID()}.${ext}`;
-      await env.MEDIA.put(key, buffer, {
+      const clean = stripMedia(new Uint8Array(buffer), file.type).bytes;
+      await env.MEDIA.put(key, clean, {
         httpMetadata: { contentType: file.type, cacheControl: "public, max-age=31536000, immutable" }
       });
       return json({ url: `${url.origin}/media/${key}` });
@@ -1397,6 +1581,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     }
   }
   if (url.pathname === "/purge-deleted") {
+    return json({ error: "Disabled: deleted posts are kept. Use Delete forever in the admin controls." }, 410);
     if (!isBot) return json({ error: "Unauthorized" }, 401);
     try {
       const { results } = await env.DB.prepare(
@@ -1993,9 +2178,19 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         if (_pdcIds.length) {
           await env.DB.prepare(`DELETE FROM comment_reactions WHERE comment_id IN (${ID_LIST})`).bind(JSON.stringify(_pdcIds)).run();
         }
+        const _pdp = await env.DB.prepare(`SELECT content FROM posts WHERE id = ?`).bind(body.post_id).first();
+        const _pdcc = await env.DB.prepare(`SELECT content FROM comments WHERE post_id = ?`).bind(body.post_id).all();
+        const _mediaKeys = /* @__PURE__ */ new Set();
+        for (const txt of [_pdp?.content, ...(_pdcc.results || []).map((r) => r.content)]) {
+          for (const m of String(txt || "").matchAll(/\/media\/([A-Za-z0-9][A-Za-z0-9._-]*)/g)) {
+            _mediaKeys.add(m[1]);
+            _mediaKeys.add(`thumbs/${m[1]}.jpg`);
+          }
+        }
         await env.DB.prepare(`DELETE FROM post_votes WHERE post_id = ?`).bind(body.post_id).run();
         await env.DB.prepare(`DELETE FROM comments WHERE post_id = ?`).bind(body.post_id).run();
         await env.DB.prepare(`DELETE FROM posts WHERE id = ?`).bind(body.post_id).run();
+        if (_mediaKeys.size) await env.MEDIA.delete([..._mediaKeys]).catch((err) => console.error("media delete failed", err.message));
       }
       if (t === "delete_comment") {
         const _dc = await env.DB.prepare(`SELECT is_admin FROM comments WHERE id = ?`).bind(body.comment_id).first();
