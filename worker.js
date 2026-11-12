@@ -785,6 +785,15 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   // ── /media/<key> ─────────────────────────────────────────────────────────────
 
   if (url.pathname.startsWith("/media/")) {
+    // Served by the perchposts-media worker through Workers Cache (nearby copies, byte ranges from cache).
+    if (env.MEDIA_SVC && (request.method === "GET" || request.method === "HEAD")) {
+      try {
+        const res = await env.MEDIA_SVC.fetch(request);
+        if (res.status !== 500) return res;
+      } catch (err) {
+        console.error("media worker unavailable, serving directly", err.message);
+      }
+    }
     let key = url.pathname.slice("/media/".length);
     if (!key) return new Response("Not found", { status: 404 });
     // ?thumb=1 → the small copy of an older photo if one was made, otherwise the photo itself
@@ -2035,7 +2044,11 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         await env.DB.prepare(`DELETE FROM post_votes WHERE post_id = ?`).bind(body.post_id).run();
         await env.DB.prepare(`DELETE FROM comments WHERE post_id = ?`).bind(body.post_id).run();
         await env.DB.prepare(`DELETE FROM posts WHERE id = ?`).bind(body.post_id).run();
-        if (_mediaKeys.size) await env.MEDIA.delete([..._mediaKeys]).catch(err => console.error("media delete failed", err.message));
+        if (_mediaKeys.size) {
+          await env.MEDIA.delete([..._mediaKeys]).catch(err => console.error("media delete failed", err.message));
+          // and the cached copies Cloudflare keeps near viewers
+          if (env.MEDIA_SVC) await env.MEDIA_SVC.fetch("https://media/__purge", { method: "POST", body: JSON.stringify({ keys: [..._mediaKeys].filter(k => !k.startsWith("thumbs/")) }) }).catch(err => console.error("media cache purge failed", err.message));
+        }
       }
       if (t === "delete_comment") {
         const _dc = await env.DB.prepare(`SELECT is_admin FROM comments WHERE id = ?`).bind(body.comment_id).first();

@@ -1,7 +1,7 @@
 var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
 
-// .wrangler/tmp/bundle-J3SZhB/checked-fetch.js
+// .wrangler/tmp/bundle-NFgZE3/checked-fetch.js
 var urls = /* @__PURE__ */ new Set();
 function checkURL(request, init) {
   const url = request instanceof URL ? request : new URL(
@@ -1164,6 +1164,14 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   }
   __name(getPostVoteSummary, "getPostVoteSummary");
   if (url.pathname.startsWith("/media/")) {
+    if (env.MEDIA_SVC && (request.method === "GET" || request.method === "HEAD")) {
+      try {
+        const res = await env.MEDIA_SVC.fetch(request);
+        if (res.status !== 500) return res;
+      } catch (err) {
+        console.error("media worker unavailable, serving directly", err.message);
+      }
+    }
     let key = url.pathname.slice("/media/".length);
     if (!key) return new Response("Not found", { status: 404 });
     if (url.searchParams.get("thumb") === "1" && !key.startsWith("thumbs/")) {
@@ -2290,7 +2298,10 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         await env.DB.prepare(`DELETE FROM post_votes WHERE post_id = ?`).bind(body.post_id).run();
         await env.DB.prepare(`DELETE FROM comments WHERE post_id = ?`).bind(body.post_id).run();
         await env.DB.prepare(`DELETE FROM posts WHERE id = ?`).bind(body.post_id).run();
-        if (_mediaKeys.size) await env.MEDIA.delete([..._mediaKeys]).catch((err) => console.error("media delete failed", err.message));
+        if (_mediaKeys.size) {
+          await env.MEDIA.delete([..._mediaKeys]).catch((err) => console.error("media delete failed", err.message));
+          if (env.MEDIA_SVC) await env.MEDIA_SVC.fetch("https://media/__purge", { method: "POST", body: JSON.stringify({ keys: [..._mediaKeys].filter((k) => !k.startsWith("thumbs/")) }) }).catch((err) => console.error("media cache purge failed", err.message));
+        }
       }
       if (t === "delete_comment") {
         const _dc = await env.DB.prepare(`SELECT is_admin FROM comments WHERE id = ?`).bind(body.comment_id).first();
@@ -3083,7 +3094,7 @@ var jsonError = /* @__PURE__ */ __name(async (request, env, _ctx, middlewareCtx)
 }, "jsonError");
 var middleware_miniflare3_json_error_default = jsonError;
 
-// .wrangler/tmp/bundle-J3SZhB/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-NFgZE3/middleware-insertion-facade.js
 var __INTERNAL_WRANGLER_MIDDLEWARE__ = [
   middleware_ensure_req_body_drained_default,
   middleware_miniflare3_json_error_default
@@ -3115,7 +3126,7 @@ function __facade_invoke__(request, env, ctx, dispatch, finalMiddleware) {
 }
 __name(__facade_invoke__, "__facade_invoke__");
 
-// .wrangler/tmp/bundle-J3SZhB/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-NFgZE3/middleware-loader.entry.ts
 var __Facade_ScheduledController__ = class ___Facade_ScheduledController__ {
   constructor(scheduledTime, cron, noRetry) {
     this.scheduledTime = scheduledTime;

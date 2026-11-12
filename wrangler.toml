@@ -17,3 +17,8 @@ bucket_name = "daboysforum-media"
 [vars]
 GITHUB_REPO = "coldbrainarchive/perchposts"
 TURNSTILE_HOSTNAMES = "perchposts.com"
+
+# Photos/videos are served by the perchposts-media worker (media-worker/), which has Workers Cache on.
+[[services]]
+binding = "MEDIA_SVC"
+service = "perchposts-media"

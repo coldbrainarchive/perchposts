@@ -1,0 +1,14 @@
+name = "perchposts-media"
+main = "index.js"
+compatibility_date = "2026-11-01"
+# Only reachable from the main worker (service binding), never directly.
+workers_dev = false
+
+# Cloudflare keeps photos/videos near viewers and answers byte-range requests (video seeking) from that copy,
+# without running this worker. Only this worker is cached; the main worker (API) is not.
+[cache]
+enabled = true
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "daboysforum-media"
