@@ -285,22 +285,24 @@ var BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/60
 var MAX_BYTES = 15e5;
 var TIMEOUT_MS = 6e3;
 var MAX_REDIRECTS = 5;
-async function linkPreview(raw, fetchImpl = fetch) {
+async function linkPreview(raw, fetchImpl = fetch, opts = {}) {
+  const addressFallback = opts.addressFallback !== false;
+  const timeout = opts.timeoutMs || TIMEOUT_MS;
   let u = normalize(raw);
   if (!u) return null;
   try {
-    const special = await viaOEmbed(u, fetchImpl);
+    const special = await viaOEmbed(u, fetchImpl, timeout);
     if (special) return special;
   } catch (e) {
   }
   if (/(^|\.)bbc\.(co\.uk|com)$/.test(u.hostname)) {
-    return await bbcFromFeeds(u, fetchImpl).catch(() => null) || fromAddress(u);
+    return await bbcFromFeeds(u, fetchImpl).catch(() => null) || (addressFallback ? fromAddress(u) : null);
   }
   const score = /* @__PURE__ */ __name((p) => p ? (p.title && !generic(p) ? 2 : p.title ? 1 : 0) + (p.description ? 1 : 0) + (p.image ? 2 : 0) : -1, "score");
   const results = await new Promise((resolve) => {
     const got = [null, null];
     let left = 2;
-    [BOT_UA, BROWSER_UA].forEach((ua, i) => fromPage(u, ua, fetchImpl).catch(() => null).then((p) => {
+    [BOT_UA, BROWSER_UA].forEach((ua, i) => fromPage(u, ua, fetchImpl, timeout).catch(() => null).then((p) => {
       got[i] = p;
       left--;
       if (score(p) >= 5 || !left) resolve(got.slice());
@@ -313,7 +315,7 @@ async function linkPreview(raw, fetchImpl = fetch) {
       const f = await bbcFromFeeds(u, fetchImpl).catch(() => null);
       if (f) return f;
     }
-    const s = fromAddress(u);
+    const s = addressFallback ? fromAddress(u) : null;
     if (s) return s;
   }
   if (best && /(^|\.)tiktok\.com$/.test(u.hostname) && generic(best)) {
@@ -353,10 +355,10 @@ function safeUrl(u) {
   return true;
 }
 __name(safeUrl, "safeUrl");
-async function viaOEmbed(u, fetchImpl) {
+async function viaOEmbed(u, fetchImpl, timeout = TIMEOUT_MS) {
   const h = u.hostname.replace(/^www\.|^m\./, "");
   const getJson = /* @__PURE__ */ __name(async (endpoint) => {
-    const r = await fetchImpl(endpoint, { headers: { "User-Agent": BOT_UA, Accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const r = await fetchImpl(endpoint, { headers: { "User-Agent": BOT_UA, Accept: "application/json" }, signal: AbortSignal.timeout(timeout) });
     return r.ok ? r.json() : null;
   }, "getJson");
   if (h === "youtube.com" || h === "youtu.be" || h === "music.youtube.com") {
@@ -397,13 +399,13 @@ function youtubeId(u) {
   return m ? m[2] : null;
 }
 __name(youtubeId, "youtubeId");
-async function fromPage(start, ua, fetchImpl) {
+async function fromPage(start, ua, fetchImpl, timeout = TIMEOUT_MS) {
   let u = start, res;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     res = await fetchImpl(u.href, {
       redirect: "manual",
       headers: { "User-Agent": ua, Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5", "Accept-Language": "en-IE,en;q=0.9" },
-      signal: AbortSignal.timeout(TIMEOUT_MS)
+      signal: AbortSignal.timeout(timeout)
     });
     if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
       const next = new URL(res.headers.get("location"), u);

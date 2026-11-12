@@ -1,4 +1,5 @@
 import Parser from "rss-parser";
+import { linkPreview } from "../link-preview.js";
 import { writeFileSync, existsSync, readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import path from "path";
@@ -127,7 +128,19 @@ function extractRSSImage(item) {
   return null;
 }
 
+// Link previews come from the site's shared preview code (../link-preview.js): honest name, oEmbed for
+// YouTube/X/TikTok/Spotify, BBC via its feeds. The old Googlebot-style lookup only fills in anything missing,
+// so no article ends up with less than before.
 async function fetchOgData(url) {
+  const n = await linkPreview(url, fetch, { addressFallback: false, timeoutMs: 10000 }).catch(() => null);
+  if (n && n.title && n.description && n.image) return { title: n.title, description: n.description, image: n.image, url };
+  const o = await fetchOgDataOld(url);
+  if (!n) return o;
+  if (!o) return { title: n.title, description: n.description, image: n.image, url };
+  return { title: n.title || o.title, description: n.description || o.description, image: n.image || o.image, url };
+}
+
+async function fetchOgDataOld(url) {
   try {
     const res = await fetch(url, {
       headers: { "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1)" },

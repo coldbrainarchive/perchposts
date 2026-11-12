@@ -1,7 +1,7 @@
 // Builds link previews (title, description, picture) on our own server, replacing microlink.io, so nobody
 // outside perchposts learns who is sharing which link (the linked site only sees Cloudflare).
 //
-//   linkPreview(url) -> { url, title, description, image } | null
+//   linkPreview(url, fetch?, { addressFallback = true }) -> { url, title, description, image } | null
 //
 // How: YouTube, X/Twitter, TikTok and Spotify answer through their official oEmbed endpoints (their pages
 // don't give previews to unknown visitors); everything else is read from the page's own preview tags
@@ -12,23 +12,25 @@ const BOT_UA = "Mozilla/5.0 (compatible; PerchpostsBot/1.0; +https://perchposts.
 const BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
 const MAX_BYTES = 1_500_000, TIMEOUT_MS = 6000, MAX_REDIRECTS = 5;
 
-export async function linkPreview(raw, fetchImpl = fetch) {
+export async function linkPreview(raw, fetchImpl = fetch, opts = {}) {
+  const addressFallback = opts.addressFallback !== false; // the news bots turn this off
+  const timeout = opts.timeoutMs || TIMEOUT_MS;               // the news bots can wait longer than someone typing
   let u = normalize(raw);
   if (!u) return null;
   try {
-    const special = await viaOEmbed(u, fetchImpl);
+    const special = await viaOEmbed(u, fetchImpl, timeout);
     if (special) return special;
   } catch (e) { /* fall through to the page */ }
   // Ask as our preview bot and as an ordinary browser at the same time; keep the fuller answer.
   // BBC always refuses Cloudflare's servers, so go straight to its news feeds.
   if (/(^|\.)bbc\.(co\.uk|com)$/.test(u.hostname)) {
-    return (await bbcFromFeeds(u, fetchImpl).catch(() => null)) || fromAddress(u);
+    return (await bbcFromFeeds(u, fetchImpl).catch(() => null)) || (addressFallback ? fromAddress(u) : null);
   }
   // Answers as soon as either gives a complete preview, otherwise when both have finished.
   const score = p => (p ? (p.title && !generic(p) ? 2 : p.title ? 1 : 0) + (p.description ? 1 : 0) + (p.image ? 2 : 0) : -1);
   const results = await new Promise(resolve => {
     const got = [null, null]; let left = 2;
-    [BOT_UA, BROWSER_UA].forEach((ua, i) => fromPage(u, ua, fetchImpl).catch(() => null).then(p => {
+    [BOT_UA, BROWSER_UA].forEach((ua, i) => fromPage(u, ua, fetchImpl, timeout).catch(() => null).then(p => {
       got[i] = p; left--;
       if (score(p) >= 5 || !left) resolve(got.slice());
     }));
@@ -38,7 +40,7 @@ export async function linkPreview(raw, fetchImpl = fetch) {
   // Sites behind Cloudflare's bot protection refuse requests from Cloudflare's own servers (BBC, FT, …).
   if (!best || !best.title) {
     if (/(^|\.)bbc\.(co\.uk|com)$/.test(u.hostname)) { const f = await bbcFromFeeds(u, fetchImpl).catch(() => null); if (f) return f; }
-    const s = fromAddress(u);
+    const s = addressFallback ? fromAddress(u) : null;
     if (s) return s;
   }
   if (best && /(^|\.)tiktok\.com$/.test(u.hostname) && generic(best)) {
@@ -76,10 +78,10 @@ function safeUrl(u) {
 }
 
 // ── Sites that only preview through oEmbed ──────────────────────────────────
-async function viaOEmbed(u, fetchImpl) {
+async function viaOEmbed(u, fetchImpl, timeout = TIMEOUT_MS) {
   const h = u.hostname.replace(/^www\.|^m\./, "");
   const getJson = async (endpoint) => {
-    const r = await fetchImpl(endpoint, { headers: { "User-Agent": BOT_UA, Accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const r = await fetchImpl(endpoint, { headers: { "User-Agent": BOT_UA, Accept: "application/json" }, signal: AbortSignal.timeout(timeout) });
     return r.ok ? r.json() : null;
   };
   if (h === "youtube.com" || h === "youtu.be" || h === "music.youtube.com") {
@@ -121,13 +123,13 @@ function youtubeId(u) {
 }
 
 // ── Everything else: the page's own preview tags ────────────────────────────
-async function fromPage(start, ua, fetchImpl) {
+async function fromPage(start, ua, fetchImpl, timeout = TIMEOUT_MS) {
   let u = start, res;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     res = await fetchImpl(u.href, {
       redirect: "manual",
       headers: { "User-Agent": ua, Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5", "Accept-Language": "en-IE,en;q=0.9" },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeout),
     });
     if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
       const next = new URL(res.headers.get("location"), u);
