@@ -566,7 +566,19 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     if (!row) return null;
     const raw = String(row.content || ""), cut = raw.search(/\n\n\[ATTACH/);
     let text = (cut >= 0 ? raw.slice(0, cut) : raw).replace(/\s+/g, " ").trim();
-    if (!text && cut >= 0) text = /"type":"video"/.test(raw.slice(cut)) ? "🎬 Video" : "📷 Photo";
+    if (!text && cut >= 0) {
+      const tail = raw.slice(cut);
+      if (/"type":"video"/.test(tail)) text = "🎬 Video";
+      else if (/"type":"image"/.test(tail)) text = "📷 Photo";
+      else {
+        let label = "";
+        try {
+          const att = JSON.parse(tail.slice(tail.indexOf(":") + 1, tail.lastIndexOf("]")));
+          label = String(att.title || "").trim() || new URL(att.url).hostname.replace(/^www\./, "");
+        } catch {}
+        text = "🔗 " + (label || "Link");
+      }
+    }
     return text ? (text.length > 80 ? text.slice(0, 79).trimEnd() + "…" : text) : null;
   };
   const accountRole = async name => {

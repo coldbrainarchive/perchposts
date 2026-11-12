@@ -710,7 +710,20 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     if (!row) return null;
     const raw = String(row.content || ""), cut = raw.search(/\n\n\[ATTACH/);
     let text = (cut >= 0 ? raw.slice(0, cut) : raw).replace(/\s+/g, " ").trim();
-    if (!text && cut >= 0) text = /"type":"video"/.test(raw.slice(cut)) ? "\u{1F3AC} Video" : "\u{1F4F7} Photo";
+    if (!text && cut >= 0) {
+      const tail = raw.slice(cut);
+      if (/"type":"video"/.test(tail)) text = "\u{1F3AC} Video";
+      else if (/"type":"image"/.test(tail)) text = "\u{1F4F7} Photo";
+      else {
+        let label = "";
+        try {
+          const att = JSON.parse(tail.slice(tail.indexOf(":") + 1, tail.lastIndexOf("]")));
+          label = String(att.title || "").trim() || new URL(att.url).hostname.replace(/^www\./, "");
+        } catch {
+        }
+        text = "\u{1F517} " + (label || "Link");
+      }
+    }
     return text ? text.length > 80 ? text.slice(0, 79).trimEnd() + "\u2026" : text : null;
   }, "huddlePreview");
   const accountRole = /* @__PURE__ */ __name(async (name) => {
