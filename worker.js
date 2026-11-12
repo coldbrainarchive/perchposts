@@ -25,6 +25,8 @@ export default {
   }
 };
 
+const LOGIN_TRIES = 10, LOCK_MINUTES = 15;
+
 // Posts written by people. Queries must repeat this text exactly to use idx_posts_human_activity.
 const HUMAN_POSTS = `username NOT IN ('NewsBot','ScienceBot','NatureBot','SportsBot')`;
 
@@ -961,8 +963,26 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         `SELECT * FROM mod_users WHERE username = ? AND deleted_at IS NULL`
       ).bind(uname.trim()).first();
       if (!user) return json({ error: "Invalid credentials" }, 401);
-      const ok = await verifyPassword(password, user.password_hash);
-      if (!ok) return json({ error: "Invalid credentials" }, 401);
+      // 10 wrong passwords in a row lock the account for 15 minutes (mods/admins can unlock it in the mod panel)
+      const lockedMsg = until => {
+        const mins = Math.max(1, Math.ceil((new Date(until) - Date.now()) / 60000));
+        return `Too many wrong passwords. This account is locked for ${mins} more minute${mins === 1 ? "" : "s"}. Try again later, or ask an admin to unlock it.`;
+      };
+      if (user.locked_until && user.locked_until > now) return json({ error: lockedMsg(user.locked_until), locked: true }, 423);
+      const ok = await verifyPassword(password, user.password_hash).catch(() => false);
+      if (!ok) {
+        const row = await env.DB.prepare(`UPDATE mod_users SET failed_logins = failed_logins + 1 WHERE id = ? RETURNING failed_logins`).bind(user.id).first();
+        if ((row?.failed_logins || 0) >= LOGIN_TRIES) {
+          const until = new Date(Date.now() + LOCK_MINUTES * 60000).toISOString();
+          await env.DB.prepare(`UPDATE mod_users SET failed_logins = 0, locked_until = ? WHERE id = ?`).bind(until, user.id).run();
+          const { results: admins = [] } = await env.DB.prepare(`SELECT username FROM mod_users WHERE role = 'admin' AND deleted_at IS NULL AND username IS NOT NULL`).all();
+          const msg = JSON.stringify({ text: `${user.username}'s account was locked for ${LOCK_MINUTES} minutes after ${LOGIN_TRIES} wrong passwords. You can unlock it in the mod panel.`, icon: "🔒" });
+          await Promise.all(admins.map(a => upsertNotif(a.username, msg))).catch(err => console.error("lock notify failed", err.message));
+          return json({ error: lockedMsg(until), locked: true }, 423);
+        }
+        return json({ error: "Invalid credentials" }, 401);
+      }
+      if (user.failed_logins || user.locked_until) await env.DB.prepare(`UPDATE mod_users SET failed_logins = 0, locked_until = NULL WHERE id = ?`).bind(user.id).run();
       const token = await signJWT(
         { sub: user.id, role: user.role, username: user.username, exp: Math.floor(Date.now() / 1000) + 86400 * 90 },
         env.JWT_SECRET
@@ -1893,7 +1913,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     if (!isModerator) return json({ error: "Unauthorized" }, 401);
     try {
       const { results } = await env.DB.prepare(`
-        SELECT m.id, m.email, m.username, m.role, m.created_at, m.last_active, m.deleted_at,
+        SELECT m.id, m.email, m.username, m.role, m.created_at, m.last_active, m.deleted_at, m.failed_logins, m.locked_until,
           (SELECT p.ip_hash FROM posts p WHERE p.username = m.username AND p.ip_hash IS NOT NULL ORDER BY p.created_at DESC LIMIT 1) as ip_hash,
           (SELECT p.browser_id FROM posts p WHERE p.username = m.username AND p.browser_id IS NOT NULL ORDER BY p.created_at DESC LIMIT 1) as browser_id,
           COALESCE((SELECT COUNT(*) FROM post_votes pv JOIN posts p ON pv.post_id = p.id WHERE p.username = m.username AND pv.value > 0 AND p.deleted = 0 AND (p.archived = 0 OR p.archived IS NULL)), 0)
@@ -1905,6 +1925,8 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         created_at: u.created_at,
         last_active: u.last_active || null,
         worm_count: u.worm_count || 0,
+        failed_logins: u.failed_logins || 0,
+        locked_until: u.locked_until && u.locked_until > now ? u.locked_until : null,
         user_metadata: { username: u.username, role: u.role, ip_hash: u.ip_hash || null, browser_id: u.browser_id || null }
       }));
       return json({ members });
@@ -1914,6 +1936,15 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   }
 
   // ── /update-member ────────────────────────────────────────────────────────────
+
+  // Mods and admins can lift a login lock (and reset the wrong-password count) from the mod panel
+  if (url.pathname === "/unlock-member" && request.method === "POST") {
+    if (!isModerator) return json({ error: "Unauthorized" }, 401);
+    if (!body.user_id) return json({ error: "Missing user_id" }, 400);
+    const row = await env.DB.prepare(`UPDATE mod_users SET failed_logins = 0, locked_until = NULL WHERE id = ? RETURNING username`).bind(body.user_id).first();
+    if (!row) return json({ error: "Not found" }, 404);
+    return json({ success: true, username: row.username });
+  }
 
   if (url.pathname === "/update-member") {
     if (!isAdmin) return json({ error: "Unauthorized" }, 401);
@@ -2445,10 +2476,10 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         const reqIds = [];
         (huddleN || []).forEach(n => {
           let text = n.message, postId = undefined, req = undefined;
-          let preview;
-          try { const parsed = JSON.parse(n.message); text = parsed.text || text; postId = parsed.postId; req = parsed.req; preview = parsed.preview; } catch {}
+          let preview, icon;
+          try { const parsed = JSON.parse(n.message); text = parsed.text || text; postId = parsed.postId; req = parsed.req; preview = parsed.preview; icon = parsed.icon; } catch {}
           if (req) reqIds.push(req);
-          results.push({ id: `hsys-${n.id}`, type: "system", icon: req ? "📨" : "👥", text, postId, time: n.created_at, req, preview, preClear: n.preClear || undefined });
+          results.push({ id: `hsys-${n.id}`, type: "system", icon: icon || (req ? "📨" : "👥"), text, postId, time: n.created_at, req, preview, preClear: n.preClear || undefined });
         });
         // Invitations and requests carry their state, and whether this bird is the one who answers them
         if (reqIds.length) {
