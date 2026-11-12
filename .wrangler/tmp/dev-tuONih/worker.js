@@ -195,6 +195,79 @@ function stripIsoBmff(b) {
   return { bytes: b, changed };
 }
 __name(stripIsoBmff, "stripIsoBmff");
+function stripIsoBmffStream() {
+  const HOLD = /* @__PURE__ */ new Set(["moov", "udta", "meta"]), MAX_HOLD = 64 * 1024 * 1024;
+  let hdr = new Uint8Array(0), mode = "header", left = 0, held = null, heldLen = 0, heldNeed = 0;
+  const join = /* @__PURE__ */ __name((a, b) => {
+    const o = new Uint8Array(a.length + b.length);
+    o.set(a);
+    o.set(b, a.length);
+    return o;
+  }, "join");
+  return new TransformStream({
+    transform(chunk, ctl) {
+      let c = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
+      while (c.length) {
+        if (mode === "rest") {
+          ctl.enqueue(c);
+          return;
+        }
+        if (mode === "pass") {
+          const n2 = Math.min(left, c.length);
+          ctl.enqueue(c.subarray(0, n2));
+          left -= n2;
+          c = c.subarray(n2);
+          if (!left) mode = "header";
+          continue;
+        }
+        if (mode === "hold") {
+          const n2 = Math.min(heldNeed - heldLen, c.length);
+          held.set(c.subarray(0, n2), heldLen);
+          heldLen += n2;
+          c = c.subarray(n2);
+          if (heldLen === heldNeed) {
+            ctl.enqueue(stripIsoBmff(held).bytes);
+            held = null;
+            mode = "header";
+          }
+          continue;
+        }
+        const want = hdr.length >= 8 && new DataView(hdr.buffer, hdr.byteOffset).getUint32(0) === 1 ? 16 : 8;
+        const n = Math.min(want - hdr.length, c.length);
+        hdr = join(hdr, c.subarray(0, n));
+        c = c.subarray(n);
+        if (hdr.length < want) continue;
+        if (want === 8 && new DataView(hdr.buffer, hdr.byteOffset).getUint32(0) === 1) continue;
+        const dv = new DataView(hdr.buffer, hdr.byteOffset);
+        let size = dv.getUint32(0);
+        if (size === 1) size = Number(dv.getBigUint64(8));
+        const type = str(hdr, 4, 4), h = hdr;
+        hdr = new Uint8Array(0);
+        if (size === 0 || size < h.length) {
+          ctl.enqueue(h);
+          mode = "rest";
+          continue;
+        }
+        if (HOLD.has(type) && size <= MAX_HOLD) {
+          held = new Uint8Array(size);
+          held.set(h);
+          heldLen = h.length;
+          heldNeed = size;
+          mode = "hold";
+          continue;
+        }
+        ctl.enqueue(h);
+        left = size - h.length;
+        mode = left ? "pass" : "header";
+      }
+    },
+    flush(ctl) {
+      if (hdr.length) ctl.enqueue(hdr);
+      if (held) ctl.enqueue(held.subarray(0, heldLen));
+    }
+  });
+}
+__name(stripIsoBmffStream, "stripIsoBmffStream");
 function concat(parts) {
   const n = parts.reduce((s, p) => s + p.length, 0), out = new Uint8Array(n);
   let o = 0;
@@ -1145,15 +1218,42 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   }
   if (url.pathname === "/upload" && request.method === "POST") {
     if (!username) return signInRequired();
+    const ALLOWED = /^(image\/(jpeg|png|gif|webp)|video\/(mp4|webm|quicktime))$/;
+    const MAX_VIDEO = 1e8, MAX_IMAGE = 5e7;
+    const reqType = (request.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+    if (reqType && reqType !== "multipart/form-data") {
+      try {
+        if (!ALLOWED.test(reqType)) return json({ error: "Unsupported file type" }, 400);
+        const len = Number(request.headers.get("content-length") || 0);
+        if (!len) return json({ error: "Missing file size" }, 411);
+        const isVideo = reqType.startsWith("video/");
+        if (len > (isVideo ? MAX_VIDEO : MAX_IMAGE)) return json({ error: isVideo ? "Video too large (max 100 MB)" : "Photo too large (max 50 MB)" }, 413);
+        const name = url.searchParams.get("name") || "file";
+        const ext = name.split(".").pop().toLowerCase().replace(/[^a-z0-9]/g, "") || (isVideo ? "mp4" : "jpg");
+        const key = `${crypto.randomUUID()}.${ext}`;
+        const meta = { httpMetadata: { contentType: reqType, cacheControl: "public, max-age=31536000, immutable" } };
+        if (isVideo && reqType !== "video/webm") {
+          const { readable, writable } = new FixedLengthStream(len);
+          const piping = request.body.pipeThrough(stripIsoBmffStream()).pipeTo(writable);
+          await Promise.all([env.MEDIA.put(key, readable, meta), piping]);
+        } else {
+          const buf = new Uint8Array(await request.arrayBuffer());
+          if (buf.length !== len) return json({ error: "Upload incomplete" }, 400);
+          await env.MEDIA.put(key, stripMedia(buf, reqType).bytes, meta);
+        }
+        return json({ url: `${url.origin}/media/${key}` });
+      } catch (err) {
+        return json({ error: err.message }, 500);
+      }
+    }
     try {
       const formData = await request.formData();
       const file = formData.get("file");
       if (!file) return json({ error: "No file provided" }, 400);
-      const ALLOWED = /^(image\/(jpeg|png|gif|webp)|video\/(mp4|webm|quicktime))$/;
       if (!ALLOWED.test(file.type)) return json({ error: "Unsupported file type" }, 400);
       const MAX_SIZE = 50 * 1024 * 1024;
+      if (file.size > MAX_SIZE) return json({ error: "File too large (max 50 MB)" }, 400);
       const buffer = await file.arrayBuffer();
-      if (buffer.byteLength > MAX_SIZE) return json({ error: "File too large (max 50 MB)" }, 400);
       const ext = (file.name || "file").split(".").pop().toLowerCase().replace(/[^a-z0-9]/g, "") || "bin";
       const key = `${crypto.randomUUID()}.${ext}`;
       const clean = stripMedia(new Uint8Array(buffer), file.type).bytes;

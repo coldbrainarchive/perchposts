@@ -1,4 +1,4 @@
-import { stripMedia } from "./media-strip.js";
+import { stripMedia, stripIsoBmffStream } from "./media-strip.js";
 
 export default {
   async fetch(request, env, ctx) {
@@ -845,17 +845,46 @@ async function handleRequest(request, env, ctx, corsHeaders) {
 
   if (url.pathname === "/upload" && request.method === "POST") {
     if (!username) return signInRequired();
+    const ALLOWED = /^(image\/(jpeg|png|gif|webp)|video\/(mp4|webm|quicktime))$/;
+    const MAX_VIDEO = 100_000_000, MAX_IMAGE = 50_000_000;   // 100 MB videos, 50 MB photos (photos are shrunk on the phone first)
+    const reqType = (request.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+    if (reqType && reqType !== "multipart/form-data") {
+      // The file itself is the body (?name=original-name). Videos stream straight into storage, cleaned on the way.
+      try {
+        if (!ALLOWED.test(reqType)) return json({ error: "Unsupported file type" }, 400);
+        const len = Number(request.headers.get("content-length") || 0);
+        if (!len) return json({ error: "Missing file size" }, 411);
+        const isVideo = reqType.startsWith("video/");
+        if (len > (isVideo ? MAX_VIDEO : MAX_IMAGE)) return json({ error: isVideo ? "Video too large (max 100 MB)" : "Photo too large (max 50 MB)" }, 413);
+        const name = url.searchParams.get("name") || "file";
+        const ext = name.split(".").pop().toLowerCase().replace(/[^a-z0-9]/g, "") || (isVideo ? "mp4" : "jpg");
+        const key = `${crypto.randomUUID()}.${ext}`;
+        const meta = { httpMetadata: { contentType: reqType, cacheControl: "public, max-age=31536000, immutable" } };
+        if (isVideo && reqType !== "video/webm") {
+          const { readable, writable } = new FixedLengthStream(len);
+          const piping = request.body.pipeThrough(stripIsoBmffStream()).pipeTo(writable);
+          await Promise.all([env.MEDIA.put(key, readable, meta), piping]);
+        } else {
+          const buf = new Uint8Array(await request.arrayBuffer());
+          if (buf.length !== len) return json({ error: "Upload incomplete" }, 400);
+          await env.MEDIA.put(key, stripMedia(buf, reqType).bytes, meta);
+        }
+        return json({ url: `${url.origin}/media/${key}` });
+      } catch (err) {
+        return json({ error: err.message }, 500);
+      }
+    }
     try {
       const formData = await request.formData();
       const file = formData.get("file");
       if (!file) return json({ error: "No file provided" }, 400);
 
-      const ALLOWED = /^(image\/(jpeg|png|gif|webp)|video\/(mp4|webm|quicktime))$/;
+      // Older pages send the file wrapped in a form; that path holds the file in memory twice, so it stays at 50 MB.
       if (!ALLOWED.test(file.type)) return json({ error: "Unsupported file type" }, 400);
 
       const MAX_SIZE = 50 * 1024 * 1024; // 50 MB
+      if (file.size > MAX_SIZE) return json({ error: "File too large (max 50 MB)" }, 400);
       const buffer = await file.arrayBuffer();
-      if (buffer.byteLength > MAX_SIZE) return json({ error: "File too large (max 50 MB)" }, 400);
 
       const ext = (file.name || "file").split(".").pop().toLowerCase().replace(/[^a-z0-9]/g, "") || "bin";
       const key = `${crypto.randomUUID()}.${ext}`;

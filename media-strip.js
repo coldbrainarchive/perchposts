@@ -158,6 +158,52 @@ function stripIsoBmff(b) {
   return { bytes: b, changed };
 }
 
+// Streaming version for MP4/MOV, so big videos never sit in memory: top-level boxes flow through as they arrive;
+// only the movie header ("moov", normally well under a few MB) and any top-level udta/meta are held, cleaned
+// with stripIsoBmff, then passed on. Output length always equals input length.
+export function stripIsoBmffStream() {
+  const HOLD = new Set(["moov", "udta", "meta"]), MAX_HOLD = 64 * 1024 * 1024;
+  let hdr = new Uint8Array(0), mode = "header", left = 0, held = null, heldLen = 0, heldNeed = 0;
+  const join = (a, b) => { const o = new Uint8Array(a.length + b.length); o.set(a); o.set(b, a.length); return o; };
+  return new TransformStream({
+    transform(chunk, ctl) {
+      let c = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
+      while (c.length) {
+        if (mode === "rest") { ctl.enqueue(c); return; }
+        if (mode === "pass") {
+          const n = Math.min(left, c.length);
+          ctl.enqueue(c.subarray(0, n)); left -= n; c = c.subarray(n);
+          if (!left) mode = "header";
+          continue;
+        }
+        if (mode === "hold") {
+          const n = Math.min(heldNeed - heldLen, c.length);
+          held.set(c.subarray(0, n), heldLen); heldLen += n; c = c.subarray(n);
+          if (heldLen === heldNeed) { ctl.enqueue(stripIsoBmff(held).bytes); held = null; mode = "header"; }
+          continue;
+        }
+        // header: need 8 bytes (16 for a 64-bit size)
+        const want = hdr.length >= 8 && new DataView(hdr.buffer, hdr.byteOffset).getUint32(0) === 1 ? 16 : 8;
+        const n = Math.min(want - hdr.length, c.length);
+        hdr = join(hdr, c.subarray(0, n)); c = c.subarray(n);
+        if (hdr.length < want) continue;
+        if (want === 8 && new DataView(hdr.buffer, hdr.byteOffset).getUint32(0) === 1) continue; // read the 64-bit size next
+        const dv = new DataView(hdr.buffer, hdr.byteOffset);
+        let size = dv.getUint32(0);
+        if (size === 1) size = Number(dv.getBigUint64(8));
+        const type = str(hdr, 4, 4), h = hdr; hdr = new Uint8Array(0);
+        if (size === 0 || size < h.length) { ctl.enqueue(h); mode = "rest"; continue; }       // runs to the end / not a box
+        if (HOLD.has(type) && size <= MAX_HOLD) { held = new Uint8Array(size); held.set(h); heldLen = h.length; heldNeed = size; mode = "hold"; continue; }
+        ctl.enqueue(h); left = size - h.length; mode = left ? "pass" : "header";
+      }
+    },
+    flush(ctl) {
+      if (hdr.length) ctl.enqueue(hdr);
+      if (held) ctl.enqueue(held.subarray(0, heldLen));
+    }
+  });
+}
+
 function concat(parts) {
   const n = parts.reduce((s, p) => s + p.length, 0), out = new Uint8Array(n);
   let o = 0;
