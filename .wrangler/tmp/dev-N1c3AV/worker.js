@@ -1,7 +1,7 @@
 var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
 
-// .wrangler/tmp/bundle-wuVu5p/checked-fetch.js
+// .wrangler/tmp/bundle-2CGTvK/checked-fetch.js
 var urls = /* @__PURE__ */ new Set();
 function checkURL(request, init) {
   const url = request instanceof URL ? request : new URL(
@@ -915,13 +915,46 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     const key = url.pathname.slice("/media/".length);
     if (!key) return new Response("Not found", { status: 404 });
     try {
-      const object = await env.MEDIA.get(key);
-      if (!object) return new Response("Not found", { status: 404 });
+      const want = (request.headers.get("range") || "").trim();
+      const rm = /^bytes=(\d*)-(\d*)$/.exec(want);
+      let range = null;
+      if (rm && (rm[1] !== "" || rm[2] !== "")) {
+        if (rm[1] === "") range = { suffix: Number(rm[2]) };
+        else range = rm[2] === "" ? { offset: Number(rm[1]) } : { offset: Number(rm[1]), length: Number(rm[2]) - Number(rm[1]) + 1 };
+        if (range.length !== void 0 && range.length <= 0 || range.suffix === 0) range = null;
+      }
+      const head = await env.MEDIA.head(key);
+      if (!head) return new Response("Not found", { status: 404 });
+      const size = head.size;
       const headers = new Headers();
-      object.writeHttpMetadata(headers);
-      headers.set("etag", object.httpEtag);
+      head.writeHttpMetadata(headers);
+      headers.set("etag", head.httpEtag);
       headers.set("cache-control", "public, max-age=31536000, immutable");
       headers.set("access-control-allow-origin", "*");
+      headers.set("access-control-expose-headers", "content-range, content-length, accept-ranges");
+      headers.set("accept-ranges", "bytes");
+      const inm = request.headers.get("if-none-match");
+      if (inm && !range && inm.split(",").some((t) => t.trim().replace(/^W\//, "") === head.httpEtag)) {
+        return new Response(null, { status: 304, headers });
+      }
+      if (range) {
+        const start = range.suffix !== void 0 ? Math.max(0, size - range.suffix) : range.offset;
+        if (start >= size) {
+          headers.set("content-range", `bytes */${size}`);
+          return new Response(null, { status: 416, headers });
+        }
+        const end = range.length !== void 0 ? Math.min(size - 1, start + range.length - 1) : size - 1;
+        headers.set("content-range", `bytes ${start}-${end}/${size}`);
+        headers.set("content-length", String(end - start + 1));
+        if (request.method === "HEAD") return new Response(null, { status: 206, headers });
+        const part = await env.MEDIA.get(key, { range: { offset: start, length: end - start + 1 } });
+        if (!part) return new Response("Not found", { status: 404 });
+        return new Response(part.body, { status: 206, headers });
+      }
+      headers.set("content-length", String(size));
+      if (request.method === "HEAD") return new Response(null, { headers });
+      const object = await env.MEDIA.get(key);
+      if (!object) return new Response("Not found", { status: 404 });
       return new Response(object.body, { headers });
     } catch (err) {
       return new Response("Error", { status: 500 });
@@ -2755,7 +2788,7 @@ var jsonError = /* @__PURE__ */ __name(async (request, env, _ctx, middlewareCtx)
 }, "jsonError");
 var middleware_miniflare3_json_error_default = jsonError;
 
-// .wrangler/tmp/bundle-wuVu5p/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-2CGTvK/middleware-insertion-facade.js
 var __INTERNAL_WRANGLER_MIDDLEWARE__ = [
   middleware_ensure_req_body_drained_default,
   middleware_miniflare3_json_error_default
@@ -2787,7 +2820,7 @@ function __facade_invoke__(request, env, ctx, dispatch, finalMiddleware) {
 }
 __name(__facade_invoke__, "__facade_invoke__");
 
-// .wrangler/tmp/bundle-wuVu5p/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-2CGTvK/middleware-loader.entry.ts
 var __Facade_ScheduledController__ = class ___Facade_ScheduledController__ {
   constructor(scheduledTime, cron, noRetry) {
     this.scheduledTime = scheduledTime;
