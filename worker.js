@@ -1,4 +1,5 @@
 import { stripMedia, stripIsoBmffStream } from "./media-strip.js";
+import { linkPreview } from "./link-preview.js";
 
 export default {
   async fetch(request, env, ctx) {
@@ -499,9 +500,15 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
+  // IP addresses are never stored. Mods can match the same address for bans through a keyed hash: with the
+  // secret IP_HASH_KEY it can't be turned back into an address (a plain hash could, by trying all 4 billion).
   const ip = request.headers.get("CF-Connecting-IP") || "0.0.0.0";
-  const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(ip));
-  const ip_hash = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
+  let ip_hash = null;
+  if (env.IP_HASH_KEY) {
+    const hk = await crypto.subtle.importKey("raw", new TextEncoder().encode(env.IP_HASH_KEY), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const sig = await crypto.subtle.sign("HMAC", hk, new TextEncoder().encode(ip));
+    ip_hash = Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
+  }
 
   const body = (request.method !== "GET" && request.method !== "HEAD" && url.pathname !== "/upload") ? await request.json().catch(() => ({})) : {};
   const now = new Date().toISOString();
@@ -1738,13 +1745,13 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       }
 
       if (existing?.id) {
-        await env.DB.prepare(`UPDATE post_votes SET value = ?, username = ?, ip_hash = ?, is_mod = ?, mod_user_id = ? WHERE id = ?`)
-          .bind(body.value, username, ip_hash, isModerator ? 1 : 0, isModerator ? authUser.sub : null, existing.id).run();
+        await env.DB.prepare(`UPDATE post_votes SET value = ?, username = ?, ip_hash = NULL, is_mod = ?, mod_user_id = ? WHERE id = ?`)
+          .bind(body.value, username, isModerator ? 1 : 0, isModerator ? authUser.sub : null, existing.id).run();
       } else {
         await env.DB.prepare(`
           INSERT INTO post_votes (id, post_id, browser_id, value, username, ip_hash, is_mod, mod_user_id, created_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).bind(crypto.randomUUID(), body.post_id, body.browser_id, body.value, username, ip_hash,
+        `).bind(crypto.randomUUID(), body.post_id, body.browser_id, body.value, username, null,
             isModerator ? 1 : 0, isModerator ? authUser.sub : null, now).run();
       }
       await bumpPost(body.post_id);
@@ -2819,6 +2826,22 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       }).catch(err => console.error("GitHub dispatch error:", err.message))
     );
     return json({ success: true });
+  }
+
+  // ── /link-preview ─────────────────────────────────────────────────────────────
+  // Replaces microlink.io: the linked site only sees Cloudflare, nobody outside learns who shared what.
+  // Signed-in only, so it can't be used as a free page-fetching service. Same answer shape as microlink.
+  if (url.pathname === "/link-preview" && request.method === "GET") {
+    if (!username) return signInRequired();
+    const target = url.searchParams.get("url") || "";
+    if (!target || target.length > 2000) return json({ status: "fail", message: "Missing url" }, 400);
+    try {
+      const p = await linkPreview(target);
+      if (!p) return json({ status: "fail" });
+      return json({ status: "success", data: { url: p.url, title: p.title || null, description: p.description || null, image: p.image ? { url: p.image } : null } });
+    } catch (err) {
+      return json({ status: "fail" });
+    }
   }
 
   // ── /my-username ──────────────────────────────────────────────────────────────
