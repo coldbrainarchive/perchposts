@@ -10,7 +10,7 @@ const BOARDS = {
   random: ["Random", "🎲", "#c084fc"], announcements: ["Announcements", "📢", "#f472b6"], cage: ["The Cage", "🪹", "#f43f5e"],
 };
 const SHORT = { "United States": "USA", "United Kingdom": "UK", "United Arab Emirates": "UAE" };
-const IMG_VER = "3"; // bump to redraw every cached card
+const IMG_VER = "5"; // bump to redraw every cached card
 const MEDIA_RE = /^https:\/\/daboysforumip\.coldbrainarchive\.workers\.dev\/media\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 function parse(content) {
@@ -33,15 +33,24 @@ async function getPost(env, id) {
     "SELECT id, title, content, board, country, is_huddle, deleted, archived FROM posts WHERE id = ?"
   ).bind(id).first();
   if (!p || p.deleted || p.archived || p.is_huddle) return null;
-  const { text, link, media } = parse(p.content);
+  let { text, link, media } = parse(p.content);
+  // A single photo/video is stored like a link ({type:"image"|"video", url, poster}); treat it as media, not a website
+  if (link && (link.type === "image" || link.type === "video")) { media = [link]; link = null; }
   const title = clip(p.title || link?.title || text || "A post on perchposts", 140);
   const description = clip(link?.description || (p.title ? text : "") || "", 200);
   let site = "";
   if (link?.url) { try { site = new URL(link.url).hostname.replace(/^www\./, ""); } catch {} }
   let image = link?.image || "";
-  const m = Array.isArray(media) ? media.find(a => a && a.type !== "video" && a.url) || media.find(a => a && a.thumb) : null;
-  if (!image && m) image = m.thumb || (MEDIA_RE.test(m.url) ? m.url + "?thumb=1" : "");
-  return { id: p.id, title, description, site, image, board: p.board, country: p.country };
+  let video = false;
+  if (!image && Array.isArray(media)) {
+    for (const a of media) {
+      if (!a) continue;
+      const still = a.type === "video" ? a.poster : (a.thumb || a.url);
+      if (still && MEDIA_RE.test(still)) { image = still + "?thumb=1"; video = a.type === "video"; break; }
+      if (still && /^https:\/\//.test(still)) { image = still; video = a.type === "video"; break; }
+    }
+  }
+  return { id: p.id, title, description, site, image, video, board: p.board, country: p.country };
 }
 
 // Fetch the post's photo ourselves so a slow or blocked image site can't break the card; only JPEG/PNG are drawn.
@@ -86,9 +95,16 @@ function card(post, img) {
   ]);
   let body;
   if (img) {
-    body = h("div", { display: "flex", flex: 1, width: "100%", marginTop: 30, borderRadius: 28, overflow: "hidden" }, [
+    const play = post.video ? h("div", {
+      position: "absolute", left: 0, top: 0, right: 0, bottom: 0, display: "flex", alignItems: "center", justifyContent: "center",
+    }, [h("div", {
+      display: "flex", alignItems: "center", justifyContent: "center", width: 112, height: 112, borderRadius: 999,
+      background: "rgba(11,12,16,.62)", border: "3px solid rgba(255,255,255,.85)",
+    }, [{ type: "svg", props: { width: 44, height: 44, viewBox: "0 0 24 24", children: [{ type: "path", props: { d: "M7 4.5v15l13-7.5z", fill: "#ffffff" } }] } }])]) : null;
+    body = h("div", { display: "flex", position: "relative", flex: 1, width: "100%", marginTop: 30, borderRadius: 28, overflow: "hidden" }, [
       { type: "img", props: { src: img, style: { width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 25%" } } },
-    ]);
+      play,
+    ].filter(Boolean));
   } else {
     body = h("div", { display: "flex", flexDirection: "column", justifyContent: "center", flex: 1, width: "100%", marginTop: 20 }, [
       h("div", { display: "flex", color: "#f8fafc", fontSize: post.title.length > 90 ? 52 : 64, fontWeight: 800, lineHeight: 1.15, letterSpacing: -1 }, post.title),
