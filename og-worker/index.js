@@ -10,7 +10,7 @@ const BOARDS = {
   random: ["Random", "🎲", "#c084fc"], announcements: ["Announcements", "📢", "#f472b6"], cage: ["The Cage", "🪹", "#f43f5e"],
 };
 const SHORT = { "United States": "USA", "United Kingdom": "UK", "United Arab Emirates": "UAE" };
-const IMG_VER = "15"; // bump to redraw every cached card
+const IMG_VER = "16"; // bump to redraw every cached card
 const MEDIA_RE = /^https:\/\/daboysforumip\.coldbrainarchive\.workers\.dev\/media\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 function parse(content) {
@@ -160,12 +160,7 @@ export default {
     if ((m = path.match(/^\/meta\/([^/]+)$/))) {
       const post = await getPost(env, m[1]);
       if (!post) return Response.json({ error: "not_found" }, { status: 404 });
-      let img = `${url.origin}/img/${post.id}.png?v=${IMG_VER}`;
-      // For link-preview crawlers (?bot=1): draw the card now. If the news site wouldn't give us its photo (CBC, BBC...
-      // block Cloudflare), point the preview at the site's own photo instead, which the phone can load itself.
-      if (url.searchParams.get("bot") === "1" && post.image) {
-        try { const c = await renderCard(env, ctx, post); if (!c.photo && /^https:\/\//.test(post.image) && !post.video) img = sized(post.image); } catch {}
-      }
+      const img = `${url.origin}/img/${post.id}.png?v=${IMG_VER}`;
       return Response.json({ title: post.title, description: post.description, site: post.site, img },
         { headers: { "Cache-Control": "no-store" } });
     }
