@@ -1,0 +1,135 @@
+// perchposts-og: link-preview data for shared post links (iMessage, WhatsApp, Discord...).
+//   GET /meta/<postId>      -> { title, description, site } for the page's og: tags (public posts only)
+//   GET /img/<postId>.png   -> 1200x630 card in the site's style (tags, photo, wordmark)
+// Huddles, deleted and archived posts get 404, so a shared link never reveals private content.
+import { ImageResponse, GoogleFont, cache } from "@cf-wasm/og/workerd";
+import FLAGS from "./flags.json";
+
+const BOARDS = {
+  general: ["General", "📰", "#60a5fa"], sports: ["Sports", "🏈", "#facc15"], "science-nature": ["Science", "🔬", "#4ade80"],
+  random: ["Random", "🎲", "#c084fc"], announcements: ["Announcements", "📢", "#f472b6"], cage: ["The Cage", "🪹", "#f43f5e"],
+};
+const SHORT = { "United States": "USA", "United Kingdom": "UK", "United Arab Emirates": "UAE" };
+const IMG_VER = "3"; // bump to redraw every cached card
+const MEDIA_RE = /^https:\/\/daboysforumip\.coldbrainarchive\.workers\.dev\/media\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+function parse(content) {
+  const c = content || "";
+  let text = c, link = null, media = null;
+  const ai = c.indexOf("[ATTACHMENTS:");
+  if (ai !== -1) { text = c.slice(0, ai); try { media = JSON.parse(c.slice(ai + 13, c.lastIndexOf("]"))); } catch {} }
+  else {
+    const li = c.indexOf("[ATTACH:");
+    if (li !== -1) { text = c.slice(0, li); try { link = JSON.parse(c.slice(li + 8, c.lastIndexOf("]"))); } catch {} }
+  }
+  return { text: text.trim(), link, media };
+}
+
+const clip = (s, n) => { s = (s || "").replace(/\s+/g, " ").trim(); return s.length > n ? s.slice(0, n - 1).trimEnd() + "…" : s; };
+
+async function getPost(env, id) {
+  if (!/^[A-Za-z0-9-]{1,64}$/.test(id)) return null;
+  const p = await env.DB.prepare(
+    "SELECT id, title, content, board, country, is_huddle, deleted, archived FROM posts WHERE id = ?"
+  ).bind(id).first();
+  if (!p || p.deleted || p.archived || p.is_huddle) return null;
+  const { text, link, media } = parse(p.content);
+  const title = clip(p.title || link?.title || text || "A post on perchposts", 140);
+  const description = clip(link?.description || (p.title ? text : "") || "", 200);
+  let site = "";
+  if (link?.url) { try { site = new URL(link.url).hostname.replace(/^www\./, ""); } catch {} }
+  let image = link?.image || "";
+  const m = Array.isArray(media) ? media.find(a => a && a.type !== "video" && a.url) || media.find(a => a && a.thumb) : null;
+  if (!image && m) image = m.thumb || (MEDIA_RE.test(m.url) ? m.url + "?thumb=1" : "");
+  return { id: p.id, title, description, site, image, board: p.board, country: p.country };
+}
+
+// Fetch the post's photo ourselves so a slow or blocked image site can't break the card; only JPEG/PNG are drawn.
+async function photo(url) {
+  if (!/^https:\/\//.test(url || "")) return null;
+  try {
+    const r = await fetch(url, {
+      headers: { Accept: "image/jpeg,image/png;q=0.9", "User-Agent": "perchposts-preview/1.0 (+https://perchposts.com)" },
+      signal: AbortSignal.timeout(4000), cf: { cacheTtl: 86400 },
+    });
+    const type = (r.headers.get("content-type") || "").split(";")[0].trim();
+    if (!r.ok || !/^image\/(jpeg|png)$/.test(type)) return null;
+    const buf = await r.arrayBuffer();
+    if (buf.byteLength > 6_000_000) return null;
+    let bin = ""; const u = new Uint8Array(buf);
+    for (let i = 0; i < u.length; i += 0x8000) bin += String.fromCharCode(...u.subarray(i, i + 0x8000));
+    return `data:${type};base64,${btoa(bin)}`;
+  } catch { return null; }
+}
+
+const h = (type, style, children) => ({ type, props: { style, children } });
+const GLOBE = "data:image/svg+xml;base64," + btoa(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="44" fill="#1a1d27" stroke="#c084fc" stroke-width="5"/><line x1="6" y1="50" x2="94" y2="50" stroke="#c084fc" stroke-width="4"/><path d="M 14 28 Q 50 38 86 28" fill="none" stroke="#c084fc" stroke-width="4"/><path d="M 14 72 Q 50 62 86 72" fill="none" stroke="#c084fc" stroke-width="4"/><ellipse cx="50" cy="50" rx="16" ry="44" fill="none" stroke="#c084fc" stroke-width="4"/></svg>`);
+
+function pill(text, color, emoji) {
+  return h("div", {
+    display: "flex", alignItems: "center", gap: 10, height: 50, padding: "0 20px", borderRadius: 999,
+    border: `3px solid ${color}`, color, fontSize: 24, fontWeight: 800, letterSpacing: 1.5, textTransform: "uppercase",
+  }, [emoji ? h("span", { display: "flex" }, emoji) : null, h("span", { display: "flex" }, text)].filter(Boolean));
+}
+
+function card(post, img) {
+  const b = BOARDS[post.board] || Object.values(BOARDS).find(x => x[0].toLowerCase() === String(post.board || "").toLowerCase());
+  const pills = [];
+  if (b) pills.push(pill(b[0], b[2], b[1]));
+  if (post.country) pills.push(pill(SHORT[post.country] || post.country, "#e2e8f0", FLAGS[post.country] || null));
+  const top = h("div", { display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }, [
+    h("div", { display: "flex", gap: 14 }, pills.length ? pills : [h("span", { display: "flex" }, "")]),
+    h("div", { display: "flex", alignItems: "center", gap: 14 }, [
+      { type: "img", props: { src: GLOBE, width: 48, height: 48 } },
+      h("span", { display: "flex", color: "#c084fc", fontSize: 40, fontWeight: 800, letterSpacing: -1 }, "perchposts"),
+    ]),
+  ]);
+  let body;
+  if (img) {
+    body = h("div", { display: "flex", flex: 1, width: "100%", marginTop: 30, borderRadius: 28, overflow: "hidden" }, [
+      { type: "img", props: { src: img, style: { width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 25%" } } },
+    ]);
+  } else {
+    body = h("div", { display: "flex", flexDirection: "column", justifyContent: "center", flex: 1, width: "100%", marginTop: 20 }, [
+      h("div", { display: "flex", color: "#f8fafc", fontSize: post.title.length > 90 ? 52 : 64, fontWeight: 800, lineHeight: 1.15, letterSpacing: -1 }, post.title),
+      post.site ? h("div", { display: "flex", marginTop: 28, color: "#c084fc", fontSize: 28, fontWeight: 800, letterSpacing: 2, textTransform: "uppercase" }, post.site + " ↗") : null,
+    ].filter(Boolean));
+  }
+  return h("div", {
+    display: "flex", flexDirection: "column", width: "100%", height: "100%", padding: "40px 44px 44px",
+    background: "#0b0c10", fontFamily: "Inter",
+  }, [top, body]);
+}
+
+export default {
+  async fetch(request, env, ctx) {
+    cache.setExecutionContext(ctx);
+    const url = new URL(request.url);
+    if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405 });
+    let m;
+    const path = url.pathname.replace(/^\/og(?=\/)/, "");
+    if ((m = path.match(/^\/meta\/([^/]+)$/))) {
+      const post = await getPost(env, m[1]);
+      if (!post) return Response.json({ error: "not_found" }, { status: 404 });
+      return Response.json({ title: post.title, description: post.description, site: post.site, img: `https://perchposts.com/og/img/${post.id}.png?v=${IMG_VER}` },
+        { headers: { "Cache-Control": "public, max-age=300" } });
+    }
+    if ((m = path.match(/^\/img\/([^/]+)\.png$/))) {
+      // Checked on every request, cached or not, so a card stops showing as soon as its post is deleted
+      const post = await getPost(env, m[1]);
+      if (!post) return new Response("Not found", { status: 404 });
+      const key = new Request(`https://perchposts.com/og/img/${post.id}.png?v=${IMG_VER}`);
+      const hit = await caches.default.match(key);
+      if (hit) return hit;
+      const img = await photo(post.image);
+      const res = await ImageResponse.async(card(post, img), {
+        width: 1200, height: 630, emoji: "twemoji",
+        fonts: [new GoogleFont("Inter", { weight: 800 })],
+      });
+      const out = new Response(res.body, { headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" } });
+      ctx.waitUntil(caches.default.put(key, out.clone()));
+      return out;
+    }
+    return new Response("Not found", { status: 404 });
+  },
+};

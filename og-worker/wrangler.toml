@@ -1,0 +1,13 @@
+name = "perchposts-og"
+main = "index.js"
+compatibility_date = "2026-11-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+preview_urls = false
+# Shared post links: og: data and the preview card image. Served on the site's own domain so the Cache API works.
+routes = [{ pattern = "perchposts.com/og/*", zone_name = "perchposts.com" }]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "daboysforum-db"
+database_id = "e35f001b-d7d2-47cb-8ac2-ee6c556a4a16"
