@@ -7,8 +7,12 @@ export async function onRequestGet(ctx) {
   const res = await ctx.next();
   if (!(res.headers.get("content-type") || "").includes("text/html")) return res;
   let meta = null;
+  // Link-preview fetchers (iMessage sends "facebookexternalhit ... Twitterbot") get the card drawn on the spot, which
+  // can take a few seconds; people opening the page only wait for the quick lookup.
+  const bot = /facebookexternalhit|Facebot|Twitterbot|WhatsApp|Slackbot|Discordbot|TelegramBot|LinkedInBot|redditbot|Applebot|SkypeUriPreview|Embedly|Pinterest|vkShare|Iframely/i
+    .test(ctx.request.headers.get("user-agent") || "");
   try {
-    const r = await fetch(`https://perchposts-og.coldbrainarchive.workers.dev/meta/${encodeURIComponent(ctx.params.id)}`, { signal: AbortSignal.timeout(2500) });
+    const r = await fetch(`https://perchposts-og.coldbrainarchive.workers.dev/meta/${encodeURIComponent(ctx.params.id)}${bot ? "?bot=1" : ""}`, { signal: AbortSignal.timeout(bot ? 9000 : 2500) });
     if (r.ok) meta = await r.json();
   } catch {}
   if (!meta || !meta.title) return res;
@@ -28,9 +32,10 @@ export async function onRequestGet(ctx) {
     .on("head", { element(el) {
       if (added) return; added = true;
       const q = s => esc(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+      const ours = /^https:\/\/perchposts-og\./.test(meta.img || "");
       el.append(`<meta property="og:url" content="${q(url)}" /><meta property="og:site_name" content="perchposts" />` +
-        `<meta property="og:image:width" content="1200" /><meta property="og:image:height" content="630" />` +
-        `<meta property="og:image:type" content="image/png" /><link rel="canonical" href="${q(url)}" />`, { html: true });
+        (ours ? `<meta property="og:image:width" content="1200" /><meta property="og:image:height" content="630" />` +
+        `<meta property="og:image:type" content="image/png" />` : "") + `<link rel="canonical" href="${q(url)}" />`, { html: true });
     } })
     .transform(res);
 }

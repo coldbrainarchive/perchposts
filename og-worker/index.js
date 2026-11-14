@@ -10,7 +10,7 @@ const BOARDS = {
   random: ["Random", "🎲", "#c084fc"], announcements: ["Announcements", "📢", "#f472b6"], cage: ["The Cage", "🪹", "#f43f5e"],
 };
 const SHORT = { "United States": "USA", "United Kingdom": "UK", "United Arab Emirates": "UAE" };
-const IMG_VER = "5"; // bump to redraw every cached card
+const IMG_VER = "15"; // bump to redraw every cached card
 const MEDIA_RE = /^https:\/\/daboysforumip\.coldbrainarchive\.workers\.dev\/media\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 function parse(content) {
@@ -50,25 +50,43 @@ async function getPost(env, id) {
       if (still && /^https:\/\//.test(still)) { image = still; video = a.type === "video"; break; }
     }
   }
-  return { id: p.id, title, description, site, image, video, board: p.board, country: p.country };
+  return { id: p.id, title, description, site, image, video, ref: link?.url ? new URL(link.url).origin + "/" : "", board: p.board, country: p.country };
 }
 
 // Fetch the post's photo ourselves so a slow or blocked image site can't break the card; only JPEG/PNG are drawn.
-async function photo(url) {
-  if (!/^https:\/\//.test(url || "")) return null;
+// Some news image servers (CBC's Akamai Image Manager) send AVIF/WebP whatever we ask for; `imformat=jpeg` gets a JPEG.
+const UA = "perchposts-preview/1.0 (+https://perchposts.com) facebookexternalhit/1.1";
+const BROWSER = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
+async function grab(url, ua = UA, ref = "") {
   try {
     const r = await fetch(url, {
-      headers: { Accept: "image/jpeg,image/png;q=0.9", "User-Agent": "perchposts-preview/1.0 (+https://perchposts.com)" },
-      signal: AbortSignal.timeout(4000), cf: { cacheTtl: 86400 },
+      headers: ua === UA ? { Accept: "image/jpeg,image/png;q=0.9,*/*;q=0.5", "User-Agent": ua }
+        : { Accept: "image/avif,image/webp,image/png,image/jpeg,*/*;q=0.8", "Accept-Language": "en;q=0.9", "User-Agent": ua, ...(ref ? { Referer: ref } : {}) },
+      signal: AbortSignal.timeout(5000), cf: { cacheTtl: 86400 },
     });
     const type = (r.headers.get("content-type") || "").split(";")[0].trim();
-    if (!r.ok || !/^image\/(jpeg|png)$/.test(type)) return null;
+    if (!r.ok) return { fail: true };
+    if (!/^image\/(jpeg|png)$/.test(type)) { r.body?.cancel(); return { wrong: true }; }
     const buf = await r.arrayBuffer();
-    if (buf.byteLength > 6_000_000) return null;
+    if (buf.byteLength > 6_000_000) return { fail: true };
     let bin = ""; const u = new Uint8Array(buf);
     for (let i = 0; i < u.length; i += 0x8000) bin += String.fromCharCode(...u.subarray(i, i + 0x8000));
-    return `data:${type};base64,${btoa(bin)}`;
-  } catch { return null; }
+    return { data: `data:${type};base64,${btoa(bin)}` };
+  } catch { return { fail: true }; }
+}
+function sized(url) {
+  if (/[?&]im=/.test(url) && !/Resize/i.test(url)) return url.replace(/([?&]im=[^&]*)/, (m) => m + (/%3B$/i.test(m) ? "" : "%3B") + "Resize%3D1200");
+  return url;
+}
+async function photo(url, ref = "") {
+  if (!/^https:\/\//.test(url || "")) return null;
+  // Akamai Image Manager URLs with no resize step serve the full original (can be 5000px+): ask for 1200 wide
+  const u = sized(url);
+  // Our honest name first; some image servers refuse unknown clients, so then a browser identity (as link-preview.js does)
+  let ua = UA, g = await grab(u, ua);
+  if (g.fail) { ua = BROWSER; g = await grab(u, ua, ref); }
+  if (g.wrong) g = await grab(u + (u.includes("?") ? "&" : "?") + "imformat=jpeg", ua, ref);
+  return g.data || null;
 }
 
 const h = (type, style, children) => ({ type, props: { style, children } });
@@ -117,6 +135,21 @@ function card(post, img) {
   }, [top, body]);
 }
 
+// Draws the card once and keeps it a day. Metadata says whether the post's photo made it in.
+async function renderCard(env, ctx, post) {
+  const key = `card:${post.id}:${IMG_VER}`;
+  const hit = await env.CARDS.getWithMetadata(key, "arrayBuffer");
+  if (hit.value) return { png: hit.value, photo: !!hit.metadata?.photo };
+  const img = await photo(post.image, post.ref);
+  const res = await ImageResponse.async(card(post, img), {
+    width: 1200, height: 630, emoji: "twemoji",
+    fonts: [new GoogleFont("Inter", { weight: 800 })],
+  });
+  const png = await res.arrayBuffer();
+  ctx.waitUntil(env.CARDS.put(key, png, { expirationTtl: 86400, metadata: { photo: !!img } }));
+  return { png, photo: !!img };
+}
+
 export default {
   async fetch(request, env, ctx) {
     cache.setExecutionContext(ctx);
@@ -127,24 +160,21 @@ export default {
     if ((m = path.match(/^\/meta\/([^/]+)$/))) {
       const post = await getPost(env, m[1]);
       if (!post) return Response.json({ error: "not_found" }, { status: 404 });
-      return Response.json({ title: post.title, description: post.description, site: post.site, img: `https://perchposts.com/og/img/${post.id}.png?v=${IMG_VER}` },
-        { headers: { "Cache-Control": "public, max-age=300" } });
+      let img = `${url.origin}/img/${post.id}.png?v=${IMG_VER}`;
+      // For link-preview crawlers (?bot=1): draw the card now. If the news site wouldn't give us its photo (CBC, BBC...
+      // block Cloudflare), point the preview at the site's own photo instead, which the phone can load itself.
+      if (url.searchParams.get("bot") === "1" && post.image) {
+        try { const c = await renderCard(env, ctx, post); if (!c.photo && /^https:\/\//.test(post.image) && !post.video) img = sized(post.image); } catch {}
+      }
+      return Response.json({ title: post.title, description: post.description, site: post.site, img },
+        { headers: { "Cache-Control": "no-store" } });
     }
     if ((m = path.match(/^\/img\/([^/]+)\.png$/))) {
       // Checked on every request, cached or not, so a card stops showing as soon as its post is deleted
       const post = await getPost(env, m[1]);
       if (!post) return new Response("Not found", { status: 404 });
-      const key = new Request(`https://perchposts.com/og/img/${post.id}.png?v=${IMG_VER}`);
-      const hit = await caches.default.match(key);
-      if (hit) return hit;
-      const img = await photo(post.image);
-      const res = await ImageResponse.async(card(post, img), {
-        width: 1200, height: 630, emoji: "twemoji",
-        fonts: [new GoogleFont("Inter", { weight: 800 })],
-      });
-      const out = new Response(res.body, { headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" } });
-      ctx.waitUntil(caches.default.put(key, out.clone()));
-      return out;
+      const { png } = await renderCard(env, ctx, post);
+      return new Response(png, { headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" } });
     }
     return new Response("Not found", { status: 404 });
   },

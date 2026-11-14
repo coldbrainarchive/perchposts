@@ -2,12 +2,16 @@ name = "perchposts-og"
 main = "index.js"
 compatibility_date = "2026-11-01"
 compatibility_flags = ["nodejs_compat"]
+# Served from workers.dev: some news image servers (CBC) refuse photo requests made from a perchposts.com route.
 workers_dev = true
 preview_urls = false
-# Shared post links: og: data and the preview card image. Served on the site's own domain so the Cache API works.
-routes = [{ pattern = "perchposts.com/og/*", zone_name = "perchposts.com" }]
 
 [[d1_databases]]
 binding = "DB"
 database_name = "daboysforum-db"
 database_id = "e35f001b-d7d2-47cb-8ac2-ee6c556a4a16"
+
+# Finished card images, kept for a day (the Cache API doesn't work on workers.dev)
+[[kv_namespaces]]
+binding = "CARDS"
+id = "e4ed6698ddc44e40991cd5edd4fe223d"
