@@ -138,7 +138,7 @@
       `<filter id="h${id}" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="8"/></filter>` +
       `<filter id="n${id}" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur in="SourceGraphic" stdDeviation="1.6" result="a"/>` +
       `<feGaussianBlur in="SourceGraphic" stdDeviation="5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="a"/></feMerge></filter></defs>` +
-      `<g transform="rotate(${f(pose.tilt || 0)} 50 88)"><circle cx="56" cy="48" r="40" fill="${L}" opacity="0.5" filter="url(#h${id})"/>` +
+      `<g transform="translate(${f(pose.dx || 0)} ${f(pose.dy || 0)}) rotate(${f(pose.tilt || 0)} 50 88)"><circle cx="56" cy="48" r="40" fill="${L}" opacity="0.5" filter="url(#h${id})"/>` +
       `<g filter="url(#n${id})">${b}</g>${b}</g></svg>`;
   }
 
@@ -155,11 +155,21 @@
       const tl = t < .5 ? -3 * Math.sin(Math.PI * seg(t, .1, .45)) : 3 * Math.sin(Math.PI * seg(t, .45, .85));
       return { ...REST, tilt: tl, look: [k[i][1] + (k[i + 1][1] - k[i][1]) * u, k[i][2] + (k[i + 1][2] - k[i][2]) * u] };
     } },
-    turn: { ms: 3200, at: t => {
-      const th = t < .3 ? 180 * ease(seg(t, 0, .3)) : t < .7 ? 180 : 180 * (1 - ease(seg(t, .7, 1)));
-      // a small dip of the head while turning sells the motion
-      const tilt = (t < .3 ? -4 * Math.sin(Math.PI * seg(t, 0, .3)) : t > .7 ? 4 * Math.sin(Math.PI * seg(t, .7, 1)) : 0);
-      return { ...REST, th, tilt };
+    turn: { ms: 5800, at: (t, el) => {
+      // turn (0-.13), inspect the "p" (.13-.5), peck twice (.5-.74), hold (.74-.86), turn back (.86-1)
+      const th = t < .13 ? 180 * ease(seg(t, 0, .13)) : t < .86 ? 180 : 180 * (1 - ease(seg(t, .86, 1)));
+      let tilt = (t < .13 ? -4 * Math.sin(Math.PI * seg(t, 0, .13)) : t > .86 ? 4 * Math.sin(Math.PI * seg(t, .86, 1)) : 0);
+      const reach = (el && el._ppReach) || 0;
+      // inspecting: lean back, cock the head one way then the other, eye drops to the letter
+      const lean = t > .15 && t < .5 ? Math.sin(Math.PI * seg(t, .15, .5)) : 0;
+      const cock = t > .17 && t < .47 ? Math.sin(2 * Math.PI * seg(t, .17, .47)) : 0;
+      const eye = t > .2 && t < .5 ? Math.sin(Math.PI * seg(t, .2, .5)) : 0;
+      let d = 0, hit = 0;
+      for (const [a, b] of [[.5, .61], [.63, .74]]) {
+        if (t >= a && t <= b) { const u = seg(t, a, b); d = u < .32 ? ease(u / .32) : 1 - ease((u - .32) / .68); if (u >= .3 && u <= .42) hit = a; }
+      }
+      return { ...REST, th, tilt: tilt - 4 * lean + 6 * cock + 9 * d, dx: reach * d - 3 * lean, dy: 2 * d - 1 * lean,
+        look: [2.2 * eye, 2.6 * eye], hit };
     } },
   };
 
@@ -168,11 +178,20 @@
     el._ppBusy = true; const id = el._ppId || (el._ppId = ++uid); const t0 = performance.now();
     const step = now => {
       const t = Math.min(1, (now - t0) / m.ms);
-      el.innerHTML = svg(m.at(t), id);
-      if (t < 1) requestAnimationFrame(step); else { el.innerHTML = svg(REST, id); el._ppBusy = false; done && done(); }
+      const pose = m.at(t, el);
+      el.innerHTML = svg(pose, id);
+      if (pose.hit && el._ppLastHit !== pose.hit) { el._ppLastHit = pose.hit; el.dispatchEvent(new CustomEvent("ppbird-peck", { bubbles: true })); }
+      if (t < 1) requestAnimationFrame(step); else { el.innerHTML = svg(REST, id); el._ppBusy = false; el._ppLastHit = 0; done && done(); }
     };
     requestAnimationFrame(step);
   }
 
-  root.ppBird = { svg, play, MOVES: Object.keys(MOVES), REST };
+  function reachTo(el, target, overlap) {
+    const a = el.getBoundingClientRect(), b = target.getBoundingClientRect();
+    if (!a.height || !b.width) return 0;
+    const k = Math.min(a.width / 100, a.height / 110), x0 = a.left + (a.width - 100 * k) / 2;
+    // beak tip when facing right sits at about x = 112 in the drawing
+    return Math.max(0, (b.left + (overlap || 1.5) - (x0 + 112 * k)) / k);
+  }
+  root.ppBird = { svg, play, reachTo, MOVES: Object.keys(MOVES), REST };
 })(typeof window !== "undefined" ? window : globalThis);
