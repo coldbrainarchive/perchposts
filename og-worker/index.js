@@ -10,7 +10,7 @@ const BOARDS = {
   random: ["Random", "🎲", "#c084fc"], announcements: ["Announcements", "📢", "#f472b6"], cage: ["The Cage", "🪹", "#f43f5e"],
 };
 const SHORT = { "United States": "USA", "United Kingdom": "UK", "United Arab Emirates": "UAE" };
-const IMG_VER = "16"; // bump to redraw every cached card
+const IMG_VER = "17"; // bump to redraw every cached card
 const MEDIA_RE = /^https:\/\/daboysforumip\.coldbrainarchive\.workers\.dev\/media\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 function parse(content) {
@@ -90,7 +90,8 @@ async function photo(url, ref = "") {
 }
 
 const h = (type, style, children) => ({ type, props: { style, children } });
-const GLOBE = "data:image/svg+xml;base64," + btoa(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="44" fill="#1a1d27" stroke="#c084fc" stroke-width="5"/><line x1="6" y1="50" x2="94" y2="50" stroke="#c084fc" stroke-width="4"/><path d="M 14 28 Q 50 38 86 28" fill="none" stroke="#c084fc" stroke-width="4"/><path d="M 14 72 Q 50 62 86 72" fill="none" stroke="#c084fc" stroke-width="4"/><ellipse cx="50" cy="50" rx="16" ry="44" fill="none" stroke="#c084fc" stroke-width="4"/></svg>`);
+// Bird-globe logo (brand/bird-globe.svg). The old plain globe is brand/old-globe-favicon.svg.
+const GLOBE = "data:image/svg+xml;base64," + btoa(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -6 100 106" ><path d="M 50 14.5 C 47 9 47 4 50 1 C 52 6 53 10 54.5 13 Z" fill="#14151b" stroke="#c084fc" stroke-width="3.4" stroke-linejoin="round"/><path d="M 54 13 C 53 6 55 0 59 -3 C 60 3 60 8 59.5 12.5 Z" fill="#14151b" stroke="#c084fc" stroke-width="3.4" stroke-linejoin="round"/><path d="M 59 12.8 C 61 7 64 3 69 2 C 67 7 65 11 63.5 13.8 Z" fill="#14151b" stroke="#c084fc" stroke-width="3.4" stroke-linejoin="round"/><defs><clipPath id="g90"><circle cx="56" cy="50" r="38"/></clipPath></defs><circle cx="56" cy="50" r="38" fill="#14151b"/><g clip-path="url(#g90)"><line x1="18" y1="50" x2="94" y2="50" stroke="#c084fc" stroke-width="3.6"/><path d="M 16 30 Q 56 37 96 30" fill="none" stroke="#c084fc" stroke-width="3.6"/><path d="M 16 70 Q 56 63 96 70" fill="none" stroke="#c084fc" stroke-width="3.6"/><ellipse cx="56" cy="50" rx="11.5" ry="38" fill="none" stroke="#c084fc" stroke-width="3.6"/><ellipse cx="56" cy="50" rx="25" ry="38" fill="none" stroke="#c084fc" stroke-width="3.6"/></g><circle cx="44.5" cy="34.8" r="6.2" fill="#14151b" stroke="#c084fc" stroke-width="3.6"/><circle cx="56" cy="50" r="38" fill="none" stroke="#c084fc" stroke-width="4.6"/><path d="M 7.3 59 C 10 51.5 17 44 21.7 43.1 C 25.5 42.4 31 49.5 32.4 54.5 C 33.2 58.6 29.5 63.8 25 64.9 C 19 64.6 11.5 61.2 7.3 59 Z" fill="#14151b" stroke="#c084fc" stroke-width="3.9099999999999997" stroke-linejoin="round"/><path d="M 7.6 59 C 14 57 23 55.8 31.6 56.2" fill="none" stroke="#c084fc" stroke-width="2.8800000000000003" stroke-linecap="round"/></svg>`);
 
 function pill(text, color, emoji) {
   return h("div", {
@@ -107,7 +108,7 @@ function card(post, img) {
   const top = h("div", { display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }, [
     h("div", { display: "flex", gap: 14 }, pills.length ? pills : [h("span", { display: "flex" }, "")]),
     h("div", { display: "flex", alignItems: "center", gap: 14 }, [
-      { type: "img", props: { src: GLOBE, width: 48, height: 48 } },
+      { type: "img", props: { src: GLOBE, width: 54, height: 57 } },
       h("span", { display: "flex", color: "#c084fc", fontSize: 40, fontWeight: 800, letterSpacing: -1 }, "perchposts"),
     ]),
   ]);
