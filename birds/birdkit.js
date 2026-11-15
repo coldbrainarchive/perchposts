@@ -153,7 +153,6 @@
   }
   const FACE = {
     "rictal bristles": (ctx, G) => { ctx.strokeStyle = "rgba(20,18,15,.85)"; ctx.lineWidth = .9; for (let i = 0; i < 5; i++) { const sx = G.B.x - 1, sy = G.B.y - G.E.r * 1.4 + i * G.E.r * .45; ctx.beginPath(); ctx.moveTo(sx, sy); ctx.quadraticCurveTo(sx - G.E.r * 2, sy - G.E.r * (.6 - i * .2), sx - G.E.r * 3.6, sy - G.E.r * (.2 - i * .35)); ctx.stroke(); } },
-    beard: (ctx, G, col) => shade(ctx, G, col, x => { const bx = G.B.x + G.E.r * .8, by = G.B.y + G.E.r * 2; for (let i = 0; i < 6; i++) { feather(x, bx + i * G.E.r * .45, by, G.E.r * (3.4 - Math.abs(i - 2.5) * .4), Math.PI + (i - 2.5) * .12, G.E.r * .38); x.fill(); } }),
     wattle: (ctx, G, col) => glossy(ctx, col, x => { const sx = G.B.x + G.E.r * .8, sy = G.B.y + G.E.r * 1.2; x.beginPath(); x.moveTo(sx - G.E.r, sy); x.bezierCurveTo(sx - G.E.r * 1.6, sy + G.E.r * 2.2, sx - G.E.r * .4, sy + G.E.r * 4.2, sx + G.E.r * .4, sy + G.E.r * 3.4); x.bezierCurveTo(sx + G.E.r * 1.4, sy + G.E.r * 4.4, sx + G.E.r * 2.2, sy + G.E.r * 1.8, sx + G.E.r * 1.4, sy); x.closePath(); x.fill(); }, G, G.B.x + G.E.r, G.B.y + G.E.r * 3, G.E.r * 2.4),
     "throat pouch": (ctx, G, col) => glossy(ctx, col, x => { x.beginPath(); x.ellipse(G.B.x + G.E.r * 1.4, G.B.y + G.E.r * 3.6, G.E.r * 3.2, G.E.r * 3, 0, 0, 7); x.fill(); }, G, G.B.x + G.E.r * 1.4, G.B.y + G.E.r * 3.6, G.E.r * 3.2),
   };
@@ -223,7 +222,7 @@
   // ---------- reading the username ----------
   const PART_RULES = {   // every body-part word does something of its own
     crowned: ["crown"], capped: ["cap"], crested: ["@crest"], plumed: ["@plume"], hooded: ["black hood"], headed: ["crown stripe"], masked: ["face mask"], browed: ["brow ridge"], eyed: ["eye ring"],
-    cheeked: ["cheek patch"], eared: ["@ears"], faced: ["bare face"], fronted: ["forehead"], lored: ["lores"], billed: ["@beak"], throated: ["throat"], chinned: ["bib"], bibbed: ["beard"], gorgeted: ["iridescence"],
+    cheeked: ["cheek patch"], eared: ["@ears"], faced: ["bare face"], fronted: ["forehead"], lored: ["lores"], billed: ["@beak"], throated: ["throat"], chinned: ["bib"], bibbed: ["bib"], gorgeted: ["iridescence"],
     necked: ["moustache"], collared: ["nape collar"], ringed: ["eye crescent"], naped: ["nape"], backed: ["two-tone"], mantled: ["white cheeks"], shouldered: ["racing stripe"], rumped: ["cheek blush"],
     breasted: ["wattle"], chested: ["eyebrow"], bellied: ["fade"], vented: ["scales"], flanked: ["mottled"], sided: ["eye stripe"], spotted: ["spots"], speckled: ["speckles"], streaked: ["streaks"], striped: ["stripes"],
     banded: ["bars"], tipped: ["@tipped"], tailed: ["tuft"], winged: ["frill"], legged: ["feather spikes"], footed: ["eye wattle"],
@@ -236,11 +235,11 @@
     [/duck|merganser|teal/, { beak: "flat" }], [/flamingo/, { beak: "curved" }], [/ibis|curlew/, { beak: "curved" }], [/woodpecker/, { beak: "chisel", tops: ["flame crest"] }], [/nuthatch|treecreeper/, { beak: "chisel" }],
     [/pelican/, { beak: "pouch" }], [/stork|heron|egret|bittern|crane|kingfisher|jacamar/, { beak: "dagger" }], [/hummingbird|sunbird|myzomela|honeyeater|bee-eater/, { beak: "needle", marks: ["iridescence"] }],
     [/finch|grosbeak|bunting|sparrow|canary|waxbill|weaver|seedeater|conebill|parrotbill/, { beak: "cone" }], [/parrot|parakeet|lorikeet|cockatoo/, { beak: "parrot" }],
-    [/cockatoo/, { tops: ["mohawk"] }], [/grebe/, { tops: ["double crest"] }], [/pigeon|dove/, { tops: ["crown"] }], [/pheasant/, { marks: ["eye wattle"] }], [/barbet|puffbird/, { face: ["beard"] }],
+    [/cockatoo/, { tops: ["mohawk"] }], [/grebe/, { tops: ["double crest"] }], [/pigeon|dove/, { tops: ["crown"] }], [/pheasant/, { marks: ["eye wattle"] }], [/barbet|puffbird/, { face: ["rictal bristles"] }],
     [/nightjar/, { face: ["rictal bristles"] }], [/cormorant|booby/, { face: ["throat pouch"] }], [/albatross|petrel|gull|tern/, { beak: "hooked" }], [/lapwing/, { tops: ["plume"] }],
   ];
   const EXTRAS = [["spots", 3], ["speckles", 3], ["cap", 3], ["cheek patch", 2], ["eye ring", 2], ["eye crescent", 2], ["eyebrow", 2], ["racing stripe", 1], ["scales", 1], ["mottled", 2], ["white cheeks", 2], ["moustache", 2],
-    ["@crest", 2], ["tuft", 2], ["@cheek", 2], ["fan crest", 1], ["frill", 1], ["casque", 1], ["feather spikes", 1], ["wattle", 1], ["beard", 1]];
+    ["@crest", 2], ["tuft", 2], ["@cheek", 2], ["fan crest", 1], ["frill", 1], ["casque", 1], ["feather spikes", 1], ["wattle", 1]];
   const pickW = (r, list) => { const tot = list.reduce((a, x) => a + x[1], 0); let v = r() * tot; for (const [k, w] of list) { v -= w; if (v <= 0) return k; } return list[0][0]; };
   const ROLL = { "@crest": ["crest", "fan crest", "mohawk", "flame crest", "double crest", "crown"], "@plume": ["plume", "feather spikes"], "@ears": ["ear tufts", "horned brow"], "@cheek": ["cheek patch", "white cheeks", "cheek blush"],
     "@eye": ["eye ring", "eye wattle", "eye crescent"], "@beak": ["#beakcol"], "@tipped": ["#tips"] };
@@ -415,7 +414,7 @@
     if (BW && BW.spec.pouch) glossy(cx, [.7, .15, 50], x => { x.beginPath(); x.moveTo(BW.bx, BW.by + 2); x.quadraticCurveTo(BW.bx - BW.len * .5, BW.by + BW.L * 1.1, BW.bx - BW.len * .95, BW.by + 3); x.lineTo(BW.bx, BW.by + 2); x.fill(); }, G, BW.bx - BW.len * .4, BW.by + BW.L * .4, BW.L * .7);
     const e = document.createElement("canvas"); e.width = e.height = S2; e.getContext("2d").putImageData(out, 0, 0); cx.drawImage(e, 0, 0);
     if (beakLayer) { const bc = document.createElement("canvas"); bc.width = bc.height = beakLayer.width; bc.getContext("2d").putImageData(beakLayer, 0, 0); cx.drawImage(bc, -PAD, -PAD); }
-    for (const k of o.face) FACE[k](cx, G, k === "beard" ? tones.body : k === "throat pouch" ? [.58, .21, 28] : [.56, .19, 22]);
+    for (const k of o.face) FACE[k](cx, G, k === "throat pouch" ? [.58, .21, 28] : [.56, .19, 22]);
     return c;
   }
   // pad so tall crests / long beaks fit, then return an image URL
