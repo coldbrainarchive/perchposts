@@ -29,7 +29,7 @@ async function step() {
   const t0 = performance.now();
   while (queue.length && performance.now() - t0 < 12) {          // a little at a time so scrolling stays smooth
     const [n, c] = queue.shift(), k = key(n, c), r = cache.get(k);
-    try { Object.assign(r, await make(n, c)); } catch (e) { r.fail = true; }
+    try { Object.assign(r, await (c === "A" ? makeAdmin() : make(n, c))); } catch (e) { r.fail = true; }
     r.done = true; (subs.get(k) || []).forEach(f => f());
   }
   running = false; pump();
@@ -45,13 +45,40 @@ function make(n, c) {
   const fd = Math.round(side * .07); x.globalCompositeOperation = "destination-out";
   const edge = (x0, y0, x1, y1, rx, ry, rw, rh) => { const g = x.createLinearGradient(x0, y0, x1, y1); g.addColorStop(0, "#000"); g.addColorStop(1, "rgba(0,0,0,0)"); x.fillStyle = g; x.fillRect(rx, ry, rw, rh); };
   edge(0, 0, fd, 0, 0, 0, fd, side); edge(side, 0, side - fd, 0, side - fd, 0, fd, side); edge(0, 0, 0, fd, 0, 0, side, fd); edge(0, side, 0, side - fd, 0, side - fd, side, fd);
-  const k = side / TAG_DISP, rr = TAG_OUTLINE * k, pad = Math.ceil(rr) + 1, W = side + pad * 2;
-  const sil = document.createElement("canvas"); sil.width = sil.height = W; const sx = sil.getContext("2d");
-  sx.drawImage(crop, pad, pad); sx.globalCompositeOperation = "source-in"; sx.fillStyle = "#0b0c10"; sx.fillRect(0, 0, W, W);
-  const tag = document.createElement("canvas"); tag.width = tag.height = W; const tx = tag.getContext("2d");
-  for (let a = 0; a < 32; a++) for (const f of [.5, 1]) tx.drawImage(sil, Math.cos(a / 32 * 6.283) * rr * f, Math.sin(a / 32 * 6.283) * rr * f);
-  tx.drawImage(crop, pad, pad);
-  return Promise.all([toUrl(full), toUrl(tag)]).then(([f, t]) => ({ f, t, g: pad / side }));   // g: outline growth per side, as a share of the emoji size
+  const { cv: tag, g } = outlined(crop);
+  return Promise.all([toUrl(full), toUrl(tag)]).then(([f, t]) => ({ f, t, g }));
+}
+// 1px (at tag size) dark outline around a square image. Faint or hair-thin bits (bristles, soft fades, crest tips)
+// are left out of the outline's shape, so it stays a clean, even line instead of smudging around them.
+function outlined(src) {
+  const side = src.width, k = side / TAG_DISP, rr = TAG_OUTLINE * k, E = 3, pad = Math.ceil(rr) + 1, W = side + pad * 2;
+  const a = src.getContext("2d").getImageData(0, 0, side, side).data;
+  let m = new Uint8Array(W * W);
+  for (let y = 0; y < side; y++) for (let x = 0; x < side; x++) m[(y + pad) * W + x + pad] = a[(y * side + x) * 4 + 3] > 140 ? 1 : 0;
+  // shrink the shape by E px (drops anything thinner than ~2E), then the outline is grown back by rr + E
+  for (const [dx, dy] of [[1, 0], [0, 1]]) {
+    const o = new Uint8Array(W * W);
+    for (let y = 0; y < W; y++) for (let x = 0; x < W; x++) { let v = 1;
+      for (let t = -E; t <= E && v; t++) { const xx = x + dx * t, yy = y + dy * t; v = xx >= 0 && yy >= 0 && xx < W && yy < W ? m[yy * W + xx] : 0; }
+      o[y * W + x] = v; }
+    m = o;
+  }
+  const sil = document.createElement("canvas"); sil.width = sil.height = W; const sx = sil.getContext("2d"), id = sx.createImageData(W, W);
+  for (let p = 0; p < W * W; p++) if (m[p]) { id.data[p * 4] = 11; id.data[p * 4 + 1] = 12; id.data[p * 4 + 2] = 16; id.data[p * 4 + 3] = 255; }
+  sx.putImageData(id, 0, 0);
+  const cv = document.createElement("canvas"); cv.width = cv.height = W; const cx = cv.getContext("2d"), R = rr + E;
+  cx.drawImage(sil, 0, 0);
+  for (let i = 0; i < 48; i++) for (const f of [.35, .7, 1]) cx.drawImage(sil, Math.cos(i / 48 * 6.283) * R * f, Math.sin(i / 48 * 6.283) * R * f);
+  cx.drawImage(src, pad, pad);
+  return { cv, g: pad / side };   // g: outline growth per side, as a share of the image size
+}
+// the admin bird for tags: same outline, made once from /admin-bird.png
+function makeAdmin() {
+  return new Promise((res, rej) => { const im = new Image(); im.onload = () => {
+    const side = Math.round(S * .8 * 1.08), c = document.createElement("canvas"); c.width = c.height = side;
+    const s = Math.min(side / im.width, side / im.height), w = im.width * s, h = im.height * s;
+    c.getContext("2d").drawImage(im, (side - w) / 2, (side - h) / 2, w, h);
+    const { cv, g } = outlined(c); toUrl(cv).then(t => res({ t, f: t, g })); }; im.onerror = rej; im.src = "/admin-bird.png"; });
 }
 
 // tag colour: the bird's body colour (grey/white/black birds use their marking colour), never mod purple
