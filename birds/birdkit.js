@@ -153,7 +153,6 @@
   }
   const FACE = {
     wattle: (ctx, G, col) => glossy(ctx, col, x => { const sx = G.B.x + G.E.r * .8, sy = G.B.y + G.E.r * 1.2; x.beginPath(); x.moveTo(sx - G.E.r, sy); x.bezierCurveTo(sx - G.E.r * 1.6, sy + G.E.r * 2.2, sx - G.E.r * .4, sy + G.E.r * 4.2, sx + G.E.r * .4, sy + G.E.r * 3.4); x.bezierCurveTo(sx + G.E.r * 1.4, sy + G.E.r * 4.4, sx + G.E.r * 2.2, sy + G.E.r * 1.8, sx + G.E.r * 1.4, sy); x.closePath(); x.fill(); }, G, G.B.x + G.E.r, G.B.y + G.E.r * 3, G.E.r * 2.4),
-    "throat pouch": (ctx, G, col) => glossy(ctx, col, x => { x.beginPath(); x.ellipse(G.B.x + G.E.r * 1.4, G.B.y + G.E.r * 3.6, G.E.r * 3.2, G.E.r * 3, 0, 0, 7); x.fill(); }, G, G.B.x + G.E.r * 1.4, G.B.y + G.E.r * 3.6, G.E.r * 3.2),
   };
   // ---------- beaks: the emoji's beak is removed and redrawn in its own colours, top/bottom shaded ----------
   // coordinates: base at (bx, by) on the head, beak points left. bh = base height, L = original beak length.
@@ -235,7 +234,7 @@
     [/pelican/, { beak: "pouch" }], [/stork|heron|egret|bittern|crane|kingfisher|jacamar/, { beak: "dagger" }], [/hummingbird|sunbird|myzomela|honeyeater|bee-eater/, { beak: "needle", marks: ["iridescence"] }],
     [/finch|grosbeak|bunting|sparrow|canary|waxbill|weaver|seedeater|conebill|parrotbill/, { beak: "cone" }], [/parrot|parakeet|lorikeet|cockatoo/, { beak: "parrot" }],
     [/cockatoo/, { tops: ["mohawk"] }], [/grebe/, { tops: ["double crest"] }], [/pigeon|dove/, { tops: ["crown"] }], [/pheasant/, { marks: ["eye wattle"] }], [/barbet|puffbird/, { marks: ["moustache"] }],
-    [/nightjar/, { marks: ["mottled"] }], [/cormorant|booby/, { face: ["throat pouch"] }], [/albatross|petrel|gull|tern/, { beak: "hooked" }], [/lapwing/, { tops: ["plume"] }],
+    [/nightjar/, { marks: ["mottled"] }], [/cormorant|booby/, { marks: ["bare face"] }], [/albatross|petrel|gull|tern/, { beak: "hooked" }], [/lapwing/, { tops: ["plume"] }],
   ];
   const EXTRAS = [["spots", 3], ["speckles", 3], ["cap", 3], ["cheek patch", 2], ["eye ring", 2], ["eye crescent", 2], ["eyebrow", 2], ["racing stripe", 1], ["scales", 1], ["mottled", 2], ["white cheeks", 2], ["moustache", 2],
     ["@crest", 2], ["tuft", 2], ["@cheek", 2], ["fan crest", 1], ["frill", 1], ["casque", 1], ["feather spikes", 1], ["wattle", 1]];
@@ -416,7 +415,7 @@
     if (BW && BW.spec.pouch) glossy(cx, [.7, .15, 50], x => { x.beginPath(); x.moveTo(BW.bx, BW.by + 2); x.quadraticCurveTo(BW.bx - BW.len * .5, BW.by + BW.L * 1.1, BW.bx - BW.len * .95, BW.by + 3); x.lineTo(BW.bx, BW.by + 2); x.fill(); }, G, BW.bx - BW.len * .4, BW.by + BW.L * .4, BW.L * .7);
     const e = document.createElement("canvas"); e.width = e.height = S2; e.getContext("2d").putImageData(out, 0, 0); cx.drawImage(e, 0, 0);
     if (beakLayer) { const bc = document.createElement("canvas"); bc.width = bc.height = beakLayer.width; bc.getContext("2d").putImageData(beakLayer, 0, 0); cx.drawImage(bc, -PAD, -PAD); }
-    for (const k of o.face) FACE[k](cx, G, k === "throat pouch" ? [.58, .21, 28] : [.56, .19, 22]);
+    for (const k of o.face) FACE[k](cx, G, [.56, .19, 22]);
     return c;
   }
   // pad so tall crests / long beaks fit, then return an image URL
