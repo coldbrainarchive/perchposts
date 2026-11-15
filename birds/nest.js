@@ -7,19 +7,19 @@ const _ppNestCss = `
 .ppn{display:flex;flex-direction:column;align-items:center;width:100%}
 .ppn-wrap{position:relative;width:320px;height:222px;margin:-8px 0 4px;touch-action:manipulation;-webkit-user-select:none;user-select:none}
 .ppn-wrap svg.ppn-l{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
-.ppn .egg{position:absolute;width:50px;height:64px;transform-origin:50% 85%;cursor:pointer;-webkit-tap-highlight-color:transparent;border:0;padding:0;background:none}
+.ppn .egg{position:absolute;width:60px;height:77px;transform-origin:50% 85%;cursor:pointer;-webkit-tap-highlight-color:transparent;border:0;padding:0;background:none}
 .ppn .egg:focus-visible{outline:2px solid #c084fc;outline-offset:4px;border-radius:40%}
 .ppn .egg svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}
 .ppn .shell-top{z-index:3;transition:transform .6s cubic-bezier(.3,.7,.4,1),opacity .6s}
 .ppn .shell-bot{z-index:2}
 .ppn .egg:not(.hatched) .shell-bot .half,.ppn .egg.hatched .shell-bot .whole{display:none}
-.ppn .bird{position:absolute;z-index:1;pointer-events:none;left:50%;top:20px;width:94px;height:94px;margin:-47px 0 0 -47px;transform:scale(.2) translateY(30px);opacity:0}
+.ppn .bird{position:absolute;z-index:1;pointer-events:none;left:50%;top:24px;width:113px;height:113px;margin:-56.5px 0 0 -56.5px;transform:scale(.2) translateY(36px);opacity:0}
 .ppn .bird .face{position:relative;width:100%;height:100%;scale:var(--dir,1) 1;transition:scale .22s ease-in-out,filter .25s;transform-origin:50% 70%}
 .ppn .bird .face img{width:100%;height:100%;display:block}
 .ppn .bird .face img:not(.ok){visibility:hidden}   /* no empty picture frame while the bird is still being drawn */
 .ppn .lid{position:absolute;border-radius:50%;transform:scaleY(0);transform-origin:50% 0;box-shadow:inset 0 -1.2px 0 rgba(0,0,0,.35),0 0 1.5px 1px transparent;opacity:0}
 .ppn .lid.on{opacity:1}.ppn .lid.blink{animation:ppn-blink .17s ease-in-out}
-.ppn .egg.hatched .shell-top{transform:translate(var(--fx),-50px) rotate(var(--fr));opacity:0}
+.ppn .egg.hatched .shell-top{transform:translate(var(--fx),-60px) rotate(var(--fr));opacity:0}
 .ppn .egg.hatched .bird{animation:ppn-pop .7s cubic-bezier(.3,1.6,.5,1) forwards}
 .ppn .egg.sel .bird .face{filter:drop-shadow(0 0 6px var(--glow)) drop-shadow(0 0 2px var(--glow))}
 .ppn .egg.wob{animation:ppn-wob .6s ease-in-out}
@@ -30,7 +30,7 @@ const _ppNestCss = `
 @keyframes ppn-blink{0%,100%{transform:scaleY(0)}45%,60%{transform:scaleY(1)}}
 @keyframes ppn-wob{0%,100%{rotate:0deg}20%{rotate:-7deg}45%{rotate:6deg}70%{rotate:-3deg}85%{rotate:2deg}}
 @keyframes ppn-hit{0%,100%{rotate:0deg;translate:0 0}25%{rotate:-9deg;translate:-1px 0}55%{rotate:8deg;translate:1px -2px}80%{rotate:-3deg}}
-@keyframes ppn-pop{0%{transform:scale(.2) translateY(30px);opacity:0}35%{opacity:1}100%{transform:scale(1) translateY(0);opacity:1}}
+@keyframes ppn-pop{0%{transform:scale(.2) translateY(36px);opacity:0}35%{opacity:1}100%{transform:scale(1) translateY(0);opacity:1}}
 @keyframes ppn-bob{0%,100%{translate:0 0}40%{translate:0 -5px}70%{translate:0 1px}}
 @keyframes ppn-tilt{0%,100%{rotate:0deg}30%{rotate:-12deg}65%{rotate:9deg}}
 @keyframes ppn-peek{0%,100%{translate:0 0}35%,65%{translate:0 6px}}
@@ -41,7 +41,7 @@ const _ppNestCss = `
 .ppn-tag.empty{border:1.5px dashed #3f4756;justify-content:center;color:#64748b;font-size:14px;font-weight:600}
 .ppn-tag .tf{width:40px;height:40px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
 .ppn-tag .tf img{width:85px;height:85px;margin:-22.5px;display:block;max-width:none}
-.ppn-tag .nm{flex:1;text-align:center;font-size:16px;font-weight:700;color:#0a0a0a;word-break:break-word;padding-right:40px}
+.ppn-tag .nm{flex:1;text-align:center;font-size:16px;font-weight:700;color:var(--tc,#e2e8f0);word-break:break-word;padding-right:40px}
 .ppn-fresh{margin:0 0 10px;background:#2a2116;color:#fde68a;border:1.5px solid #6b4f1d;border-radius:999px;padding:9px 18px;font-size:14px;font-weight:700;cursor:pointer;display:none}
 @media (prefers-reduced-motion:reduce){.ppn .egg.wob,.ppn .egg.hit,.ppn .face.bob,.ppn .face.tilt,.ppn .face.peek,.ppn .lid.blink{animation:none}.ppn .egg.hatched .bird{animation:none;transform:none;opacity:1}.ppn .shell-top{transition:opacity .2s}}`;
 
@@ -70,7 +70,7 @@ function _ppNest(root, api, onPick) {
     hint = root.querySelector(".ppn-hint"), tag = root.querySelector(".ppn-tag");
 
   // ---------- the nest: woven all the way through, no bare floor ----------
-  const K = .8, CX = 160, CY = 132, RX = 152 * K, RY = 94 * K, BX = CX, BY = CY - 6, BRX = RX * .7, BRY = RY * .62;
+  const K = .88, CX = 160, CY = 132, RX = 152 * K, RY = 94 * K, BX = CX, BY = CY - 6, BRX = RX * .7, BRY = RY * .62;
   const RIM = ["#5a3a1e", "#6b4423", "#7a5230", "#8b5e34", "#a0703f", "#b98a52", "#4a2f17", "#c49a63"];
   const INNER = ["#4a2f17", "#5a3a1e", "#6b4423", "#7a5230", "#8b5e34", "#9a6a3a"];
   function strand(x, y, dx, dy, len, bend, w, col, hi) {
@@ -104,7 +104,7 @@ function _ppNest(root, api, onPick) {
   front.innerHTML = ring(rng(31), 300, CX, CY, RX, RY, .7, 1.02, RIM, a => Math.sin(a) > .25, 1.6, 4.2, 26 * K, 72 * K);
 
   // ---------- eggs ----------
-  const SPOTS = [[107, 98], [160, 93], [213, 98], [133, 132], [187, 132]];
+  const SPOTS = [[99, 96], [160, 90], [221, 96], [129, 136], [191, 136]];
   const EGG = "M25 2 C40 2 48 26 48 40 C48 54 38 62 25 62 C12 62 2 54 2 40 C2 26 10 2 25 2Z";
   function crackFor(i, name) {
     const r = rng(hashStr(name) + i * 7919), n = 5 + Math.floor(r() * 4), amp = 2.5 + r() * 3.5, cy = 29 + r() * 7, tilt = (r() - .5) * 12;
@@ -133,8 +133,8 @@ function _ppNest(root, api, onPick) {
   function weaveFor(i, x, y) {
     const r = rng(500 + i * 31); let s = "";
     for (let k = 0; k < 5; k++) {
-      const yy = y + 17 + r() * 13, xx = x + (r() - .5) * 22, a = (r() - .5) * .5;
-      s += strand(xx, yy, Math.cos(a), Math.sin(a), 26 + r() * 24, 3 + r() * 5, 1.4 + r() * 1.6, RIM[Math.floor(r() * RIM.length)], r() < .45);
+      const yy = y + 20 + r() * 16, xx = x + (r() - .5) * 26, a = (r() - .5) * .5;
+      s += strand(xx, yy, Math.cos(a), Math.sin(a), 30 + r() * 28, 3 + r() * 5, 1.4 + r() * 1.6, RIM[Math.floor(r() * RIM.length)], r() < .45);
     }
     return s;
   }
@@ -163,7 +163,7 @@ function _ppNest(root, api, onPick) {
     nest.names.forEach((name, i) => {
       const [x, y] = SPOTS[i], clan = clanOf(name), b = document.createElement("button"), ck = crackFor(i, name), z = 2 * Math.round(y);
       dirs[i] = hashStr(name + "dir") % 2 ? -1 : 1;
-      b.type = "button"; b.className = "egg"; b.style.left = (x - 25) + "px"; b.style.top = (y - 32) + "px"; b.style.zIndex = z;
+      b.type = "button"; b.className = "egg"; b.style.left = (x - 30) + "px"; b.style.top = (y - 38) + "px"; b.style.zIndex = z;
       b.style.transform = `rotate(${[-8, 4, 10, -5, 7][i]}deg)`;
       b.style.setProperty("--glow", _ppKit.tagCol(name)); b.style.setProperty("--fx", ck.fx + "px"); b.style.setProperty("--fr", ck.fr + "deg");
       b.setAttribute("aria-label", "Egg " + (i + 1));
@@ -204,7 +204,7 @@ function _ppNest(root, api, onPick) {
     const hatched = nest.taps.filter(t => t >= 3).length;
     if (nest.sel != null) {
       const n = nest.names[nest.sel], c = clanOf(n), r = _ppKit.get(n, c), col = _ppKit.tagCol(n);
-      tag.className = "ppn-tag"; tag.style.background = col; tag.style.borderColor = col; tag.innerHTML = "";
+      tag.className = "ppn-tag"; tag.style.background = "#1b1e26"; tag.style.borderColor = col; tag.style.setProperty("--tc", col); tag.innerHTML = "";
       const f = document.createElement("span"); f.className = "tf";
       if (r && !r.fail) { const im = document.createElement("img"); im.src = r.f; im.alt = ""; f.appendChild(im); } else { f.style.fontSize = "34px"; f.textContent = c; }
       const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = n;
