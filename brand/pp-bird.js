@@ -122,18 +122,23 @@
       `<path d="M 59 12.8 C 61 7 64 3 69 2 C 67 7 65 11 63.5 13.8 Z" ${st}/></g>`;
   }
 
+  // pose.grow: 0 = plain globe, 1 = crest, eye and beak fully out (they grow from where they join the head)
+  const grown = (g, x, y, inner) => g <= 0.01 ? "" : g >= 0.999 ? inner : `<g transform="translate(${x} ${y}) scale(${f(g)}) translate(${-x} ${-y})">${inner}</g>`;
   function body(pose, id) {
-    return `${crest(pose.th)}<circle cx="${CX}" cy="${CY}" r="${R}" fill="${F}"/>` +
+    const g = pose.grow == null ? 1 : pose.grow;
+    return `${grown(g, 56, 13, crest(pose.th))}<circle cx="${CX}" cy="${CY}" r="${R}" fill="${F}"/>` +
       `<g fill="none" stroke="${L}" stroke-width="1.6" clip-path="url(#c${id})"><line x1="18" y1="50" x2="94" y2="50"/>` +
       `<path d="M 16 30 Q 56 37 96 30"/><path d="M 16 70 Q 56 63 96 70"/>${meridians(pose.th)}</g>` +
-      `<g clip-path="url(#c${id})">${eyes(pose)}</g><circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="${L}" stroke-width="4.6"/>${beak(pose)}`;
+      `<g clip-path="url(#c${id})">${grown(g, 44.5, 34.8, eyes(pose))}</g><circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="${L}" stroke-width="4.6"/>${grown(g, 19, 56, beak(pose))}`;
   }
 
   let uid = 0;
-  function svg(pose, id) {
-    id = id || ++uid;
+  function svg(pose, id, opt) {
+    id = id || ++uid; opt = opt || {};
     const b = body(pose, id);
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -10 100 110" overflow="visible"><defs>` +
+    if (opt.glow === false) return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${opt.viewBox || "0 -10 100 110"}"><defs>` +
+      `<clipPath id="c${id}"><circle cx="${CX}" cy="${CY}" r="${R}"/></clipPath></defs>${b}</svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${opt.viewBox || "0 -10 100 110"}" overflow="visible"><defs>` +
       `<clipPath id="c${id}"><circle cx="${CX}" cy="${CY}" r="${R}"/></clipPath>` +
       `<filter id="h${id}" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="8"/></filter>` +
       `<filter id="n${id}" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur in="SourceGraphic" stdDeviation="1.6" result="a"/>` +
@@ -145,7 +150,7 @@
   // ---- animations: each maps t (0..1) to a pose ----
   const ease = t => t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
   const seg = (t, a, b) => Math.min(1, Math.max(0, (t - a) / (b - a)));
-  const REST = { th: 0, tilt: 0, jaw: 0, wink: 0, look: [0, 0] };
+  const REST = { th: 0, tilt: 0, jaw: 0, wink: 0, look: [0, 0], grow: 0 };
   const MOVES = {
     wink: { ms: 1100, at: t => ({ ...REST, tilt: -7 * Math.sin(Math.PI * ease(seg(t, 0, 1))), wink: t > .3 && t < .62 ? 1 : 0 }) },
     look: { ms: 2200, at: t => {
@@ -173,15 +178,20 @@
     } },
   };
 
+  const G_IN = 520, G_HOLD = 160, G_OUT = 460;
+  const popOut = x => { const c1 = 1.9, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };  // slight overshoot
   function play(el, name, done) {
     const m = MOVES[name]; if (!m || el._ppBusy) return;
     el._ppBusy = true; const id = el._ppId || (el._ppId = ++uid); const t0 = performance.now();
+    const total = G_IN + G_HOLD + m.ms + G_HOLD + G_OUT;
     const step = now => {
-      const t = Math.min(1, (now - t0) / m.ms);
-      const pose = m.at(t, el);
+      const e = Math.min(total, now - t0), t = Math.min(1, Math.max(0, (e - G_IN - G_HOLD) / m.ms));
+      const after = e - (G_IN + G_HOLD + m.ms + G_HOLD);
+      const grow = e < G_IN ? popOut(e / G_IN) : after > 0 ? 1 - ease(Math.min(1, after / G_OUT)) : 1;
+      const pose = { ...m.at(t, el), grow };
       el.innerHTML = svg(pose, id);
       if (pose.hit && el._ppLastHit !== pose.hit) { el._ppLastHit = pose.hit; el.dispatchEvent(new CustomEvent("ppbird-peck", { bubbles: true })); }
-      if (t < 1) requestAnimationFrame(step); else { el.innerHTML = svg(REST, id); el._ppBusy = false; el._ppLastHit = 0; done && done(); }
+      if (e < total) requestAnimationFrame(step); else { el.innerHTML = svg(REST, id); el._ppBusy = false; el._ppLastHit = 0; done && done(); }
     };
     requestAnimationFrame(step);
   }
