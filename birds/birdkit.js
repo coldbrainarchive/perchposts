@@ -187,7 +187,7 @@
   const darkTip = from => (O, W, bx, by, len) => { for (let q = 0; q < O.length; q += 4) { if (!O[q + 3]) continue; const x = (q / 4) % W; const t = (bx - x) / len; if (t > from) { const f = Math.min(1, (t - from) * 6); O[q] *= 1 - .8 * f; O[q + 1] *= 1 - .8 * f; O[q + 2] *= 1 - .78 * f; } } };
   const WARPS = {
     hooked: { k: 1.08, s: t => 1 + .1 * t, bend: t => .42 * Math.pow(t, 2.6) },
-    parrot: { shift: .16, k: .9, s: t => 1.25, bend: t => .62 * Math.pow(t, 2.2) },
+    parrot: { shift: .16, k: .9, s: t => 1.25, bend: t => .62 * Math.pow(t, 2.2), cutBottom: .62 },   // short rounded lower half under the hook
     oversized: { shift: .32, k: 1.45, s: t => 1.3 - .15 * t, paint: (D, parts) => { paint(D, parts.beakTop, [.84, .16, 85]); paint(D, parts.beakBottom, [.68, .17, 55]); }, after: darkTip(.86) },
     giant: { shift: .3, k: 1.2, s: t => 1.5 - .1 * t, bend: t => .18 * Math.pow(t, 3) },
     curved: { k: 1.3, s: t => .95 - .2 * t, bend: t => t < .45 ? 0 : .95 * (t - .45), after: darkTip(.72) },
