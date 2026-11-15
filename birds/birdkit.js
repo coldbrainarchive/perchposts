@@ -192,7 +192,7 @@
     spoon: { k: 1.4, s: t => t < .68 ? .5 : .5 + (t - .68) * 2.3 },
     chisel: { k: 1.35, s: t => 1 - .55 * t },
     needle: { k: 1.5, s: t => .42 - .22 * t },
-    decurved: { k: 1.8, s: t => .62 - .38 * t, bend: t => .6 * Math.pow(t, 2.3) },   // slender, curving down toward the tip (bee-eaters, flycatchers)
+    decurved: { even: true, k: 1.9, s: t => .35, bend: t => .9 * t },   // slender, curving down toward the tip (bee-eaters, flycatchers)
     dagger: { k: 1.45, s: t => .78 - .25 * t },
     cone: { shift: .14, k: .78, s: t => 1.22 },
     pouch: { k: 1.45, s: t => .72 - .1 * t, pouch: true },
@@ -367,9 +367,10 @@
       for (let yy = Math.floor(by - L * 2.2); yy <= by + L * 2.2; yy++) for (let xx = Math.floor(bx - len - 4); xx <= bx; xx++) {
         // the first quarter of the beak is left exactly as the emoji draws it; stretching and reshaping ease in after that
         const d = bx - xx, A = L * .25; if (d < 0) continue;
-        const ds = d <= A ? d : A + (d - A) * (L - A) / Math.max(1, len - A);
+        // even: stretch the whole beak evenly from the face, so its edges stay one smooth curve (no kink where the kept quarter ends)
+        const ds = spec.even ? d * L / Math.max(1, len) : d <= A ? d : A + (d - A) * (L - A) / Math.max(1, len - A);
         const t = ds / L; if (t > 1.03) continue;
-        const ease = spec.shift ? Math.min(1, t / .3) : Math.min(1, Math.max(0, (t - .2) / .35)), blend = ease * ease * (3 - 2 * ease);
+        const ease = spec.shift ? Math.min(1, t / .3) : Math.min(1, Math.max(0, (t - .2) / .35)), blend = spec.even ? Math.min(1, t) : ease * ease * (3 - 2 * ease);   // even beaks change gradually from the face
         const xs = bx - ds, best = [];
         // one piece unless the halves bend apart (crossed); then each half on its own, and the whole beak fills any hairline gap
         // crossed: the upper half curving down, and a flipped copy of it curving up underneath (two halves that cross)
