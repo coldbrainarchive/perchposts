@@ -425,6 +425,15 @@
         g.globalCompositeOperation = "source-atop";
         const hl = g.createLinearGradient(0, yT0 + PAD, 0, yT0 + PAD + th * .45); hl.addColorStop(0, "rgba(255,255,255,.16)"); hl.addColorStop(1, "rgba(255,255,255,0)");
         g.fillStyle = hl; g.fillRect(0, 0, W, W);
+        // 4. the mouth line: upper and lower halves, following the beak's curve from the face to near the tip
+        const f = Math.min(.68, Math.max(.4, (crease - cT) / Math.max(1, ch))), lerp = (a, b) => a + (b - a) * f;
+        const m0 = [xs + 1, cT + ch * f], m1 = [lerp(xs - run * .4, xs - run * .35), lerp(cT + ch * .05, cB - ch * sl)],
+          m2 = [lerp(ax + run * .3, ax + run * .3), lerp(ay - ch * .55, ay - ch * (.1 + sl * .25))], m3 = [ax + run * .06, ay - ch * .06];
+        const mouth = () => { g.beginPath(); g.moveTo(bx + PAD, crease + PAD); g.lineTo(m0[0] + PAD, m0[1] + PAD); g.bezierCurveTo(m1[0] + PAD, m1[1] + PAD, m2[0] + PAD, m2[1] + PAD, m3[0] + PAD, m3[1] + PAD); };
+        g.save(); mouth(); g.lineTo(m3[0] + PAD - 40, m3[1] + PAD + 200); g.lineTo(bx + PAD + 10, m3[1] + PAD + 200); g.lineTo(bx + PAD + 10, crease + PAD); g.closePath(); g.clip();
+        g.fillStyle = "rgba(0,0,0,.14)"; g.fillRect(0, 0, W, W); g.restore();                               // lower half a touch darker
+        g.lineCap = "round"; g.lineWidth = Math.max(1, ch * .07); g.strokeStyle = "rgba(0,0,0,.55)"; mouth(); g.stroke();
+        g.save(); g.translate(0, Math.max(1, ch * .07)); g.lineWidth = Math.max(.8, ch * .04); g.strokeStyle = "rgba(255,255,255,.1)"; mouth(); g.stroke(); g.restore();
         O.set(g.getImageData(0, 0, W, W).data);
       }
       if (spec.after) spec.after(O, W, bx + PAD, by + PAD, len);    // e.g. dark tips
