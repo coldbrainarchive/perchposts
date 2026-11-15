@@ -359,6 +359,7 @@
       // the mouth line: average bottom edge of the upper half, column by column
       let crease = by; { const lowest = new Map(); for (const p of parts.beakTop) { const x = p % S2, y = Math.floor(p / S2); if (!lowest.has(x) || y > lowest.get(x)) lowest.set(x, y); }
         if (lowest.size) { let sum = 0; for (const v of lowest.values()) sum += v; crease = sum / lowest.size + .5; } }
+      let botH = 1; for (const p of parts.beakBottom) botH = Math.max(botH, Math.floor(p / S2) - crease);
       const k = spec.k || 1, len = L * k, sh = Math.round((spec.shift || 0) * L);   // thick beaks slide back into the face
       // where the face starts on each row; a slid-back beak tucks under the face along this curve instead of a straight cut
       const faceLeft = new Int16Array(S2).fill(9999), isB = new Uint8Array(S2 * S2);
@@ -378,7 +379,9 @@
         for (const [mask, bend, flip] of passes) {
           const sv = 1 + ((spec.s ? spec.s(t) : 1) - 1) * blend, bd = bend ? bend(t) * L * blend : 0, ys0 = by + (yy - bd - by) / sv;
           const ys = flip ? 2 * crease - ys0 : ys0;
-          const c = samp(xs, ys, mask); if (c) { if (flip) { c[0] *= .82; c[1] *= .82; c[2] *= .82; } best.push(c); }
+          // parrots: the lower half stops short with a rounded end, so the hooked top hangs over it
+          let m = mask; if (spec.cutBottom && !flip && ys > crease) { const u = Math.min(1, (ys - crease) / botH); if (t > spec.cutBottom * Math.sqrt(1 - u * u)) m = top; }
+          const c = samp(xs, ys, m); if (c) { if (flip) { c[0] *= .82; c[1] *= .82; c[2] *= .82; } best.push(c); }
         }
         if (!best.length) continue;
         // where top and bottom overlap (crossed beaks), the top one shows
@@ -422,5 +425,5 @@
     const c = render(o);
     return { url: c.toDataURL(), o };
   }
-  __bk = { draw, describe, render, seg, PAD };
+  __bk = { draw, describe, render, seg, PAD, WARPS };
 })();
