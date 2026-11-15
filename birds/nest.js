@@ -41,7 +41,7 @@ const _ppNestCss = `
 .ppn-tag.empty{border:1.5px dashed #3f4756;justify-content:center;color:#64748b;font-size:14px;font-weight:600}
 .ppn-tag .tf{width:40px;height:40px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
 .ppn-tag .tf img{width:85px;height:85px;margin:-22.5px;display:block;max-width:none}
-.ppn-tag .nm{flex:1;text-align:center;font-size:16px;font-weight:700;color:var(--tc,#e2e8f0);word-break:break-word;padding-right:40px}
+.ppn-tag .nm{flex:1;text-align:center;font-size:16px;font-weight:700;color:#0a0a0a;word-break:break-word;padding-right:40px}
 .ppn-fresh{margin:0 0 10px;background:#2a2116;color:#fde68a;border:1.5px solid #6b4f1d;border-radius:999px;padding:9px 18px;font-size:14px;font-weight:700;cursor:pointer;display:none}
 @media (prefers-reduced-motion:reduce){.ppn .egg.wob,.ppn .egg.hit,.ppn .face.bob,.ppn .face.tilt,.ppn .face.peek,.ppn .lid.blink{animation:none}.ppn .egg.hatched .bird{animation:none;transform:none;opacity:1}.ppn .shell-top{transition:opacity .2s}}`;
 
@@ -204,7 +204,7 @@ function _ppNest(root, api, onPick) {
     const hatched = nest.taps.filter(t => t >= 3).length;
     if (nest.sel != null) {
       const n = nest.names[nest.sel], c = clanOf(n), r = _ppKit.get(n, c), col = _ppKit.tagCol(n);
-      tag.className = "ppn-tag"; tag.style.background = "#1b1e26"; tag.style.borderColor = col; tag.style.setProperty("--tc", col); tag.innerHTML = "";
+      tag.className = "ppn-tag"; tag.style.background = col; tag.style.borderColor = col; tag.innerHTML = "";
       const f = document.createElement("span"); f.className = "tf";
       if (r && !r.fail) { const im = document.createElement("img"); im.src = r.f; im.alt = ""; f.appendChild(im); } else { f.style.fontSize = "34px"; f.textContent = c; }
       const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = n;
