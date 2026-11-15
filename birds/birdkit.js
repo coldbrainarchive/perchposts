@@ -152,7 +152,6 @@
     x.fillStyle = g; build(x); x.globalCompositeOperation = "source-atop"; x.fillStyle = "rgba(255,255,255,.28)"; x.beginPath(); x.ellipse(cx - rr * .35, cy - rr * .4, rr * .3, rr * .18, -.5, 0, 7); x.fill(); ctx.drawImage(t, -PAD, -PAD);
   }
   const FACE = {
-    "rictal bristles": (ctx, G) => { ctx.strokeStyle = "rgba(20,18,15,.85)"; ctx.lineWidth = .9; for (let i = 0; i < 5; i++) { const sx = G.B.x - 1, sy = G.B.y - G.E.r * 1.4 + i * G.E.r * .45; ctx.beginPath(); ctx.moveTo(sx, sy); ctx.quadraticCurveTo(sx - G.E.r * 2, sy - G.E.r * (.6 - i * .2), sx - G.E.r * 3.6, sy - G.E.r * (.2 - i * .35)); ctx.stroke(); } },
     wattle: (ctx, G, col) => glossy(ctx, col, x => { const sx = G.B.x + G.E.r * .8, sy = G.B.y + G.E.r * 1.2; x.beginPath(); x.moveTo(sx - G.E.r, sy); x.bezierCurveTo(sx - G.E.r * 1.6, sy + G.E.r * 2.2, sx - G.E.r * .4, sy + G.E.r * 4.2, sx + G.E.r * .4, sy + G.E.r * 3.4); x.bezierCurveTo(sx + G.E.r * 1.4, sy + G.E.r * 4.4, sx + G.E.r * 2.2, sy + G.E.r * 1.8, sx + G.E.r * 1.4, sy); x.closePath(); x.fill(); }, G, G.B.x + G.E.r, G.B.y + G.E.r * 3, G.E.r * 2.4),
     "throat pouch": (ctx, G, col) => glossy(ctx, col, x => { x.beginPath(); x.ellipse(G.B.x + G.E.r * 1.4, G.B.y + G.E.r * 3.6, G.E.r * 3.2, G.E.r * 3, 0, 0, 7); x.fill(); }, G, G.B.x + G.E.r * 1.4, G.B.y + G.E.r * 3.6, G.E.r * 3.2),
   };
@@ -235,8 +234,8 @@
     [/duck|merganser|teal/, { beak: "flat" }], [/flamingo/, { beak: "curved" }], [/ibis|curlew/, { beak: "curved" }], [/woodpecker/, { beak: "chisel", tops: ["flame crest"] }], [/nuthatch|treecreeper/, { beak: "chisel" }],
     [/pelican/, { beak: "pouch" }], [/stork|heron|egret|bittern|crane|kingfisher|jacamar/, { beak: "dagger" }], [/hummingbird|sunbird|myzomela|honeyeater|bee-eater/, { beak: "needle", marks: ["iridescence"] }],
     [/finch|grosbeak|bunting|sparrow|canary|waxbill|weaver|seedeater|conebill|parrotbill/, { beak: "cone" }], [/parrot|parakeet|lorikeet|cockatoo/, { beak: "parrot" }],
-    [/cockatoo/, { tops: ["mohawk"] }], [/grebe/, { tops: ["double crest"] }], [/pigeon|dove/, { tops: ["crown"] }], [/pheasant/, { marks: ["eye wattle"] }], [/barbet|puffbird/, { face: ["rictal bristles"] }],
-    [/nightjar/, { face: ["rictal bristles"] }], [/cormorant|booby/, { face: ["throat pouch"] }], [/albatross|petrel|gull|tern/, { beak: "hooked" }], [/lapwing/, { tops: ["plume"] }],
+    [/cockatoo/, { tops: ["mohawk"] }], [/grebe/, { tops: ["double crest"] }], [/pigeon|dove/, { tops: ["crown"] }], [/pheasant/, { marks: ["eye wattle"] }], [/barbet|puffbird/, { marks: ["moustache"] }],
+    [/nightjar/, { marks: ["mottled"] }], [/cormorant|booby/, { face: ["throat pouch"] }], [/albatross|petrel|gull|tern/, { beak: "hooked" }], [/lapwing/, { tops: ["plume"] }],
   ];
   const EXTRAS = [["spots", 3], ["speckles", 3], ["cap", 3], ["cheek patch", 2], ["eye ring", 2], ["eye crescent", 2], ["eyebrow", 2], ["racing stripe", 1], ["scales", 1], ["mottled", 2], ["white cheeks", 2], ["moustache", 2],
     ["@crest", 2], ["tuft", 2], ["@cheek", 2], ["fan crest", 1], ["frill", 1], ["casque", 1], ["feather spikes", 1], ["wattle", 1]];
