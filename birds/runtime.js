@@ -3,6 +3,7 @@
 //   _ppKit.get(name, clanEmoji) -> null while drawing, then { f: full image URL, t: tag image URL, g: outline growth, fail }
 //   _ppKit.sub(name, clanEmoji, fn) -> call fn when that bird is ready; returns an unsubscribe function
 //   _ppKit.tagCol(name) -> the username tag colour, matched to the bird
+//   _ppKit.ready (base images loaded), _ppKit.eye(clanEmoji) -> eye position, for the sign-up nest
 const VER = 1, TAG_DISP = 16, TAG_OUTLINE = 1;
 const BASE_FILES = [["🐤", "chick"], ["🐦", "songbird"], ["🐧", "penguin"]];
 let ok = false;
@@ -80,6 +81,9 @@ function makeAdmin() {
     c.getContext("2d").drawImage(im, (side - w) / 2, (side - h) / 2, w, h);
     const { cv, g } = outlined(c); toUrl(cv).then(t => res({ t, f: t, g })); }; im.onerror = rej; im.src = "/admin-bird.png"; });
 }
+
+// where the eye sits in a full image of that clan (the sign-up nest puts an eyelid there for blinking)
+function eye(c) { const g = __bk.seg(c).geo.eye, P = __bk.PAD; return { x: g.x + P, y: g.y + P, r: g.r, W: S + P * 2 }; }
 
 // tag colour: the bird's body colour (grey/white/black birds use their marking colour), never mod purple
 function okToRgb(L, C, h) { const a = C * Math.cos(h * Math.PI / 180), b = C * Math.sin(h * Math.PI / 180);

@@ -1,5 +1,12 @@
 import { stripMedia, stripIsoBmffStream } from "./media-strip.js";
 import { linkPreview } from "./link-preview.js";
+import NEST_WORDS from "./birds/lists.json";
+
+// Sign-up nests: 5 usernames (eggs) per device, a fresh set only every 15 minutes, and only names never offered to
+// that device before. Clearing the browser makes a new device, so each network (keyed IP hash) gets at most
+// NEST_NET_CAP new nests per 15 minutes; past that, a new device shares the network's latest nest.
+const NEST_WAIT = 15 * 60000, NEST_NET_CAP = 4, NEST_KEEP = 2 * 86400000;
+const nestName = () => { const p = a => a[Math.floor(Math.random() * a.length)]; return `${p(NEST_WORDS.A)}-${p(NEST_WORDS.B)}-${p(NEST_WORDS.C)}`; };
 
 export default {
   async fetch(request, env, ctx) {
@@ -942,6 +949,43 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     }
   }
 
+  // ── /nest ─────────────────────────────────────────────────────────────────────
+  // body: { device: 32 hex chars made by the browser, fresh: true to ask for new eggs }
+
+  if (url.pathname === "/nest" && request.method === "POST") {
+    const dev = body.device;
+    if (typeof dev !== "string" || !/^[0-9a-f]{32}$/.test(dev)) return json({ error: "Bad device" }, 400);
+    try {
+      const out = r => json({ names: JSON.parse(r.names), left_ms: Math.max(0, NEST_WAIT - (Date.now() - Date.parse(r.issued_at))) });
+      const row = await env.DB.prepare(`SELECT names, prev, issued_at FROM nests WHERE device = ?`).bind(dev).first();
+      if (row && (!body.fresh || Date.now() - Date.parse(row.issued_at) < NEST_WAIT)) return out(row);
+      const since = new Date(Date.now() - NEST_WAIT).toISOString();
+      if (ip_hash) {
+        const { n } = await env.DB.prepare(`SELECT COUNT(*) AS n FROM nests WHERE net = ? AND issued_at > ?`).bind(ip_hash, since).first();
+        if (n >= NEST_NET_CAP) {
+          if (row) return out(row);
+          const last = await env.DB.prepare(`SELECT names, issued_at FROM nests WHERE net = ? ORDER BY issued_at DESC LIMIT 1`).bind(ip_hash).first();
+          await env.DB.prepare(`INSERT OR REPLACE INTO nests (device, net, names, prev, issued_at) VALUES (?, ?, ?, NULL, ?)`).bind(dev, ip_hash, last.names, last.issued_at).run();
+          return out(last);
+        }
+      }
+      // new names: not offered to this device before, and not anyone's username
+      const seen = new Set(row ? [...JSON.parse(row.names), ...JSON.parse(row.prev || "[]")] : []);
+      const names = [];
+      for (let tries = 0; names.length < 5 && tries < 6; tries++) {
+        const want = new Set(); while (want.size < 5 - names.length) { const n = nestName(); if (!seen.has(n) && !names.includes(n)) want.add(n); }
+        const list = [...want], taken = new Set(((await env.DB.prepare(`SELECT LOWER(username) AS u FROM mod_users WHERE LOWER(username) IN (${list.map(() => "?").join(",")})`).bind(...list).all()).results || []).map(r => r.u));
+        names.push(...list.filter(n => !taken.has(n)));
+      }
+      const prev = row ? JSON.stringify([...seen].slice(-200)) : null;
+      await env.DB.prepare(`INSERT OR REPLACE INTO nests (device, net, names, prev, issued_at) VALUES (?, ?, ?, ?, ?)`).bind(dev, ip_hash, JSON.stringify(names), prev, now).run();
+      if (Math.random() < .05) await env.DB.prepare(`DELETE FROM nests WHERE issued_at < ?`).bind(new Date(Date.now() - NEST_KEEP).toISOString()).run();
+      return json({ names, left_ms: NEST_WAIT });
+    } catch (err) {
+      return serverError(err);
+    }
+  }
+
   // ── /register ─────────────────────────────────────────────────────────────────
 
   if (url.pathname === "/register" && request.method === "POST") {
@@ -954,6 +998,10 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       return json({ error: "Bot check failed. Please try again." }, 403);
     }
     try {
+      // the name has to be one of the eggs in this device's nest
+      const nd = typeof body.nest_device === "string" && /^[0-9a-f]{32}$/.test(body.nest_device) ? body.nest_device : null;
+      const nestRow = nd && await env.DB.prepare(`SELECT names FROM nests WHERE device = ?`).bind(nd).first();
+      if (!nestRow || !JSON.parse(nestRow.names).includes(uname.trim())) return json({ error: "Pick a bird from your nest. If the page has been open a long time, reload it." }, 400);
       // Retired names stay taken: the site knows people by name, so a reused one would inherit someone's posts
       const existing = await env.DB.prepare(`SELECT id FROM mod_users WHERE LOWER(username) = LOWER(?)`).bind(uname.trim()).first();
       if (existing) return json({ error: "Username already taken" }, 409);
@@ -962,6 +1010,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       await env.DB.prepare(
         `INSERT INTO mod_users (id, email, password_hash, username, role, created_at) VALUES (?, ?, ?, ?, 'user', ?)`
       ).bind(id, `${uname.trim().toLowerCase()}@users.local`, hash, uname.trim(), now).run();
+      await env.DB.prepare(`DELETE FROM nests WHERE device = ?`).bind(nd).run();
       if (bid) {
         await env.DB.prepare(`UPDATE posts SET username = ? WHERE browser_id = ? AND is_mod = 0 AND username IS NULL`).bind(uname.trim(), bid).run();
         await env.DB.prepare(`UPDATE comments SET username = ? WHERE browser_id = ? AND is_mod = 0 AND username IS NULL`).bind(uname.trim(), bid).run();
