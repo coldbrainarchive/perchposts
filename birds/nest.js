@@ -16,6 +16,7 @@ const _ppNestCss = `
 .ppn .bird{position:absolute;z-index:1;pointer-events:none;left:50%;top:20px;width:94px;height:94px;margin:-47px 0 0 -47px;transform:scale(.2) translateY(30px);opacity:0}
 .ppn .bird .face{position:relative;width:100%;height:100%;scale:var(--dir,1) 1;transition:scale .22s ease-in-out,filter .25s;transform-origin:50% 70%}
 .ppn .bird .face img{width:100%;height:100%;display:block}
+.ppn .bird .face img:not(.ok){visibility:hidden}   /* no empty picture frame while the bird is still being drawn */
 .ppn .lid{position:absolute;border-radius:50%;transform:scaleY(0);transform-origin:50% 0;box-shadow:inset 0 -1.2px 0 rgba(0,0,0,.35),0 0 1.5px 1px transparent;opacity:0}
 .ppn .lid.on{opacity:1}.ppn .lid.blink{animation:ppn-blink .17s ease-in-out}
 .ppn .egg.hatched .shell-top{transform:translate(var(--fx),-50px) rotate(var(--fr));opacity:0}
@@ -173,7 +174,7 @@ function _ppNest(root, api, onPick) {
       w.style.zIndex = z + 1; w.innerHTML = weaveFor(i, x, y); box.appendChild(w);
       setStage(i, true);
       const img = b.querySelector(".bird img");
-      const want = () => { const r = _ppKit.get(name, clan); if (r && !r.fail && !img.getAttribute("src")) { img.src = r.f; fitLid(b.querySelector(".lid"), r.f, clan); if (nest.sel === i) update(); } return r; };
+      const want = () => { const r = _ppKit.get(name, clan); if (r && !r.fail && !img.getAttribute("src")) { img.onload = () => img.classList.add("ok"); img.src = r.f; fitLid(b.querySelector(".lid"), r.f, clan); if (nest.sel === i) update(); } return r; };
       if (!want()) unsubs.push(_ppKit.sub(name, clan, want));
     });
     if (nest.sel != null && !(nest.taps[nest.sel] >= 3)) nest.sel = null;
