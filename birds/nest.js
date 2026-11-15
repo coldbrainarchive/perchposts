@@ -211,10 +211,12 @@ function _ppNest(root, api, onPick) {
       tag.append(f, nm);
     } else { tag.className = "ppn-tag empty"; tag.style.background = ""; tag.style.borderColor = ""; tag.textContent = "Crack an egg to meet your bird"; }
     const left = nest.until - Date.now(), ss = Math.max(0, Math.ceil(left / 1000)), clock = `${Math.floor(ss / 60)}:${String(ss % 60).padStart(2, "0")}`;
-    freshBtn.style.display = hatched === 5 && left <= 0 ? "block" : "none";
-    hint.innerHTML = hatched === 0 ? "" :
+    const fresh = hatched === 5 && left <= 0;
+    freshBtn.style.display = fresh ? "block" : "none";
+    hint.style.display = fresh ? "none" : "";              // the fresh-nest button takes the hint's place
+    hint.innerHTML = hatched === 0 || fresh ? "" :
       hatched < 5 ? `Tap any hatchling to switch <span style="color:#475569">· ${5 - hatched} egg${5 - hatched > 1 ? "s" : ""} left</span>` :
-      left > 0 ? `No more eggs. New nest in <b>${clock}</b>` : "Pick one of these, or get a fresh nest";
+      `No more eggs. New nest in <b>${clock}</b>`;
   }
   function fitLid(lid, url, clan) {
     const e = _ppKit.eye(clan), pct = v => (v / e.W * 100) + "%", d = e.r * 2.35;
