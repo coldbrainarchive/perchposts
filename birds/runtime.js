@@ -1,46 +1,56 @@
-// Site glue for the bird avatars. Wrapped (with seg.js and birdkit.js) into one block by scripts/patch_v1076.py.
+// Site glue for the bird avatars. The patch script wraps seg.js + scale.js + birdkit.js into mkKit(SC, BASE) and adds this.
 // Every device draws from the same saved base images, so a username gives the same bird everywhere.
-//   _ppKit.get(name, clanEmoji) -> null while drawing, then { f: full image URL, t: tag image URL, g: outline growth, fail }
-//   _ppKit.sub(name, clanEmoji, fn) -> call fn when that bird is ready; returns an unsubscribe function
+// Tags are drawn at 2x (TAG_SC) and big birds (profile cards, Your Nest, the sign-up nest) at 3x (BIG_SC); the parts are
+// always found on the 160px emoji, so both sizes are the same bird. The 3x images only load when a big bird is wanted.
+//   _ppKit.get(name, clanEmoji, kind) kind "t" = tag bird, "f" = full big bird (the default)
+//        -> null while drawing, then { f: full image URL, t: tag image URL (kind "t"), g: outline growth, fail }
+//   _ppKit.sub(name, clanEmoji, fn, kind) -> call fn when that bird is ready; returns an unsubscribe function
 //   _ppKit.tagCol(name) -> the username tag colour, matched to the bird
-//   _ppKit.ready (base images loaded), _ppKit.eye(clanEmoji) -> eye position, for the sign-up nest
-const VER = 1, TAG_DISP = 16, TAG_OUTLINE = 1;
+//   _ppKit.ready (base images loaded), _ppKit.eye(clanEmoji) -> eye position in the big bird, for the sign-up nest
+const VER = 2, TAG_DISP = 16, TAG_OUTLINE = 1, TAG_SC = 2, BIG_SC = 3;
 const BASE_FILES = [["🐤", "chick"], ["🐦", "songbird"], ["🐧", "penguin"]];
-let ok = false;
-const ready = Promise.all(BASE_FILES.map(([em, f]) => new Promise((res, rej) => {
-  const im = new Image(); im.onload = () => { BASE[em] = im; res(); }; im.onerror = rej; im.src = `/birds/${f}.png?v=${VER}`;
-}))).then(() => { ok = true; pump(); }).catch(() => {
+const BASE2 = {}, BASE3 = {}, kitT = mkKit(TAG_SC, BASE2), kitF = mkKit(BIG_SC, BASE3);
+const loadSet = (into, suffix) => Promise.all(BASE_FILES.map(([em, f]) => new Promise((res, rej) => {
+  const im = new Image(); im.onload = () => { into[em] = im; res(); }; im.onerror = rej; im.src = `/birds/${f}${suffix}.png?v=${VER}`;
+})));
+let ok = false, bigKit = null, bigLoad = null;
+const ready = Promise.all([loadSet(BASE1, ""), loadSet(BASE2, "@2x")]).then(() => { ok = true; pump(); }).catch(() => {
   // base images missing: every bird stays the plain emoji
   for (const r of cache.values()) r.done = r.fail = true;
   for (const s of subs.values()) s.forEach(f => f());
 });
+// the 3x images, the first time a big bird is wanted (if they can't load, big birds use the 2x drawing)
+const big = () => bigLoad || (bigLoad = loadSet(BASE3, "@3x").then(() => bigKit = kitF, () => bigKit = kitT));
 
 const cache = new Map(), subs = new Map(), queue = [];
 let running = false;
-const key = (n, c) => c + "|" + n;
-function get(n, c) {
-  const k = key(n, c), r = cache.get(k);
+const key = (n, c, kind) => (kind === "t" ? "t" : "f") + "|" + c + "|" + n;
+function get(n, c, kind) {
+  const k = key(n, c, kind), r = cache.get(k);
   if (r) return r.done ? r : null;
-  cache.set(k, { done: false }); queue.push([n, c]); pump(); return null;
+  cache.set(k, { done: false }); queue.push([n, c, kind === "t" ? "t" : "f"]); pump(); return null;
 }
-function sub(n, c, fn) { const k = key(n, c); let s = subs.get(k); if (!s) subs.set(k, s = new Set()); s.add(fn); return () => s.delete(fn); }
+function sub(n, c, fn, kind) { const k = key(n, c, kind); let s = subs.get(k); if (!s) subs.set(k, s = new Set()); s.add(fn); return () => s.delete(fn); }
 function pump() { if (running || !ok || !queue.length) return; running = true; setTimeout(step, 0); }
 const toUrl = cv => new Promise(res => cv.toBlob(b => res(b ? URL.createObjectURL(b) : cv.toDataURL()), "image/png"));
 async function step() {
   const t0 = performance.now();
   while (queue.length && performance.now() - t0 < 12) {          // a little at a time so scrolling stays smooth
-    const [n, c] = queue.shift(), k = key(n, c), r = cache.get(k);
-    try { Object.assign(r, await (c === "A" ? makeAdmin() : make(n, c))); } catch (e) { r.fail = true; }
+    const [n, c, kind] = queue.shift(), k = key(n, c, kind), r = cache.get(k);
+    try { if (kind === "f" && c !== "A") await big(); Object.assign(r, await (c === "A" ? makeAdmin() : kind === "t" ? makeTag(n, c) : makeBig(n, c))); } catch (e) { r.fail = true; }
     r.done = true; (subs.get(k) || []).forEach(f => f());
   }
   running = false; pump();
 }
 
-// the full bird (profile cards, Your Nest) and the tag bird (cropped to emoji size, 1px dark outline)
-function make(n, c) {
-  const o = __bk.describe(n); o.clan = c;
-  const full = __bk.render(o), PAD = __bk.PAD, b = __bk.seg(c).img.box;
-  const side = Math.round(S * .8 * 1.08), cx = PAD + (b[0] + b[2]) / 2, cy = PAD + (b[1] + b[3]) / 2;
+// the big bird: the whole bird at 3x (profile cards, Your Nest, the sign-up nest)
+function makeBig(n, c) { const o = bigKit.describe(n); o.clan = c; return toUrl(bigKit.render(o)).then(f => ({ f })); }
+// the tag bird at 2x: cropped to emoji size, 1px dark outline
+const TAG_SIDE = Math.round(160 * TAG_SC * .8 * 1.08);
+function makeTag(n, c) {
+  const K = kitT, o = K.describe(n); o.clan = c;
+  const full = K.render(o), PAD = K.PAD, b = K.seg(c).img.box;
+  const side = TAG_SIDE, cx = PAD + (b[0] + b[2]) / 2, cy = PAD + (b[1] + b[3]) / 2;
   const crop = document.createElement("canvas"); crop.width = crop.height = side; const x = crop.getContext("2d");
   x.drawImage(full, cx - side / 2, cy - side / 2, side, side, 0, 0, side, side);
   const fd = Math.round(side * .07); x.globalCompositeOperation = "destination-out";
@@ -52,7 +62,7 @@ function make(n, c) {
 // 1px (at tag size) dark outline around a square image. Faint or hair-thin bits (bristles, soft fades, crest tips)
 // are left out of the outline's shape, so it stays a clean, even line instead of smudging around them.
 function outlined(src) {
-  const side = src.width, k = side / TAG_DISP, rr = TAG_OUTLINE * k, E = 3, pad = Math.ceil(rr) + 1, W = side + pad * 2;
+  const side = src.width, k = side / TAG_DISP, rr = TAG_OUTLINE * k, E = 3 * TAG_SC, pad = Math.ceil(rr) + 1, W = side + pad * 2;
   const a = src.getContext("2d").getImageData(0, 0, side, side).data;
   let m = new Uint8Array(W * W);
   for (let y = 0; y < side; y++) for (let x = 0; x < side; x++) m[(y + pad) * W + x + pad] = a[(y * side + x) * 4 + 3] > 140 ? 1 : 0;
@@ -76,14 +86,14 @@ function outlined(src) {
 // the admin bird for tags: same outline, made once from /admin-bird.png
 function makeAdmin() {
   return new Promise((res, rej) => { const im = new Image(); im.onload = () => {
-    const side = Math.round(S * .8 * 1.08), c = document.createElement("canvas"); c.width = c.height = side;
+    const side = TAG_SIDE, c = document.createElement("canvas"); c.width = c.height = side;
     const s = Math.min(side / im.width, side / im.height), w = im.width * s, h = im.height * s;
     c.getContext("2d").drawImage(im, (side - w) / 2, (side - h) / 2, w, h);
     const { cv, g } = outlined(c); toUrl(cv).then(t => res({ t, f: t, g })); }; im.onerror = rej; im.src = "/admin-bird.png"; });
 }
 
 // where the eye sits in a full image of that clan (the sign-up nest puts an eyelid there for blinking)
-function eye(c) { const g = __bk.seg(c).geo.eye, P = __bk.PAD; return { x: g.x + P, y: g.y + P, r: g.r, W: S + P * 2 }; }
+function eye(c) { const K = bigKit || kitT, s = K.seg(c), g = s.geo.eye, P = K.PAD; return { x: g.x + P, y: g.y + P, r: g.r, W: s.img.d.width + P * 2 }; }
 
 // tag colour: the bird's body colour (grey/white/black birds use their marking colour), never mod purple
 function okToRgb(L, C, h) { const a = C * Math.cos(h * Math.PI / 180), b = C * Math.sin(h * Math.PI / 180);
@@ -96,6 +106,6 @@ const fixPurple = h => h >= 232 && h <= 328 ? (h < 280 ? 218 : 336) : h;
 const cols = new Map();
 function tagCol(n) {
   let v = cols.get(n); if (v) return v;
-  const o = __bk.describe(n), h = o.body[1] < .05 ? hueOf(okToRgb(.7, .12, o.markHue)) : hueOf(okToRgb(...o.body));
+  const o = kitT.describe(n), h = o.body[1] < .05 ? hueOf(okToRgb(.7, .12, o.markHue)) : hueOf(okToRgb(...o.body));
   v = `hsl(${Math.round(fixPurple(h))}, 72%, 68%)`; cols.set(n, v); return v;
 }

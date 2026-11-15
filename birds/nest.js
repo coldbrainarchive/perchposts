@@ -174,8 +174,8 @@ function _ppNest(root, api, onPick) {
       w.style.zIndex = z + 1; w.innerHTML = weaveFor(i, x, y); box.appendChild(w);
       setStage(i, true);
       const img = b.querySelector(".bird img");
-      const want = () => { const r = _ppKit.get(name, clan); if (r && !r.fail && !img.getAttribute("src")) { img.onload = () => img.classList.add("ok"); img.src = r.f; fitLid(b.querySelector(".lid"), r.f, clan); if (nest.sel === i) update(); } return r; };
-      if (!want()) unsubs.push(_ppKit.sub(name, clan, want));
+      const want = () => { const r = _ppKit.get(name, clan, "f"); if (r && !r.fail && !img.getAttribute("src")) { img.onload = () => img.classList.add("ok"); img.src = r.f; fitLid(b.querySelector(".lid"), r.f, clan); if (nest.sel === i) update(); } return r; };
+      if (!want()) unsubs.push(_ppKit.sub(name, clan, want, "f"));
     });
     if (nest.sel != null && !(nest.taps[nest.sel] >= 3)) nest.sel = null;
     pick(nest.sel); update();
@@ -203,7 +203,7 @@ function _ppNest(root, api, onPick) {
     if (!nest) return;
     const hatched = nest.taps.filter(t => t >= 3).length;
     if (nest.sel != null) {
-      const n = nest.names[nest.sel], c = clanOf(n), r = _ppKit.get(n, c), col = _ppKit.tagCol(n);
+      const n = nest.names[nest.sel], c = clanOf(n), r = _ppKit.get(n, c, "f"), col = _ppKit.tagCol(n);
       tag.className = "ppn-tag"; tag.style.background = col; tag.style.borderColor = col; tag.innerHTML = "";
       const f = document.createElement("span"); f.className = "tf";
       if (r && !r.fail) { const im = document.createElement("img"); im.src = r.f; im.alt = ""; f.appendChild(im); } else { f.style.fontSize = "34px"; f.textContent = c; }

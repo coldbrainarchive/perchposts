@@ -1,7 +1,7 @@
 // Bird avatar kit: real emoji (recoloured with its own shading) + realistic traits + rules that read the username.
 // Needs seg2.js (segment, S). Exposes window.birdkit = { draw(name, overrides) -> {url, traits}, ... }.
 (function () {
-  const PAD = 56;   // room around the emoji for tall crests and long beaks
+  const PAD = 56 * SC;   // room around the emoji for tall crests and long beaks (SC: drawing scale, 1 = the 160px emoji)
   // ---------- colour (OKLab) ----------
   const toLin = v => { v /= 255; return v <= .04045 ? v / 12.92 : Math.pow((v + .055) / 1.055, 2.4); };
   const toSrgb = v => { v = v <= .0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - .055; return Math.max(0, Math.min(255, Math.round(v * 255))); };
@@ -324,7 +324,7 @@
     for (const k of o.marks) {
       if (k === "face mask" && em !== "🐤") continue;
       if (k === "iridescence") { // shimmering colour across the head
-        const sel = bp.filter(() => true), wt = []; for (const p of sel) { const x = p % S2, y = Math.floor(p / S2); wt.push(.55 + .45 * Math.sin((x + y) * .12)); }
+        const sel = bp.filter(() => true), wt = []; for (const p of sel) { const x = p % S2, y = Math.floor(p / S2); wt.push(.55 + .45 * Math.sin((x + y) * .12 / SC)); }
         paint(D, sel.filter((p, i) => wt[i] > .7), [bodyT[0], Math.min(.2, bodyT[1] + .06), (bodyT[2] + 70) % 360], wt.filter(w => w > .7).map(w => (w - .7) * 2.5)); continue; }
       const m = document.createElement("canvas"); m.width = m.height = S2; const mx = m.getContext("2d"); mx.fillStyle = mx.strokeStyle = "#000";
       MARKS[k](mx, r, G);
@@ -444,11 +444,11 @@
       let hy0 = 999, hy1 = 0, hx1 = 0; for (let p = 0; p < S2 * S2; p++) if (!isBeak[p] && src[p * 4 + 3] > 200) { const x = p % S2, y = Math.floor(p / S2); hy0 = Math.min(hy0, y); hy1 = Math.max(hy1, y); hx1 = Math.max(hx1, x); }
       const hry = (hy1 - hy0) / 2, hcy = (hy0 + hy1) / 2, hrx = hry * 1.02, hcx = hx1 - hrx;
       const inHead = (x, y) => ((x - hcx) / hrx) ** 2 + ((y - hcy) / hry) ** 2 <= .97;
-      for (let pass = 0; pass < 3; pass++) for (const p of [...parts.beakTop, ...parts.beakBottom]) {
+      for (let pass = 0; pass < 3 * SC; pass++) for (const p of [...parts.beakTop, ...parts.beakBottom]) {
         const x = p % S2, y = Math.floor(p / S2); if (!inHead(x, y) || D[p * 4 + 3] > 0) continue;
         const q = ((y + PAD) * W + (x + PAD)) * 4; if (O[q + 3] > 200) continue;          // the new beak covers it
         // nearest face pixel to the right or above
-        let src2 = -1; for (let k = 1; k <= 10 && src2 < 0; k++) for (const n of [p + k, p - k * S2, p + k - k * S2]) if (n >= 0 && n < S2 * S2 && !isBeak[n] && D[n * 4 + 3] > 200) { src2 = n; break; }
+        let src2 = -1; for (let k = 1; k <= 10 * SC && src2 < 0; k++) for (const n of [p + k, p - k * S2, p + k - k * S2]) if (n >= 0 && n < S2 * S2 && !isBeak[n] && D[n * 4 + 3] > 200) { src2 = n; break; }
         if (src2 < 0) for (const n of [p + 1, p - S2, p - 1]) if (n >= 0 && isBeak[n] && D[n * 4 + 3] > 200) { src2 = n; break; }   // grow from pixels filled this pass
         if (src2 < 0) continue;
         D[p * 4] = D[src2 * 4]; D[p * 4 + 1] = D[src2 * 4 + 1]; D[p * 4 + 2] = D[src2 * 4 + 2]; D[p * 4 + 3] = 255;
