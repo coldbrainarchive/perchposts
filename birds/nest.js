@@ -53,6 +53,54 @@ function _ppNestDev() {
 function _ppNewDev() { const a = new Uint8Array(16); crypto.getRandomValues(a); return Array.from(a, b => b.toString(16).padStart(2, "0")).join(""); }
 function _ppNestDone() { try { localStorage.removeItem("pp_nest"); localStorage.removeItem("pp_nest_dev"); } catch (e) {} _ppNestMem = null; }
 
+// Egg looks: each name gets its own egg (same name -> same egg everywhere), patterns from real eggs:
+// plain, fine speckles, big blotches, a ring of spots round the wide end, scribbles, or blotches + speckles.
+// Markings are mostly a darker shade of the bird's colour, sometimes dark brown/black; name words give hints.
+const _ppEggs = (() => {
+const rngE = s => () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296;
+const hashE = n => { let h = 0; for (let i = 0; i < n.length; i++) h = n.charCodeAt(i) + ((h << 5) - h); return Math.abs(h); };
+const f1e = v => v.toFixed(1);
+const PATTERNS = ["plain", "fine", "blotch", "ring", "scribble", "mixed"];
+const PW = { plain: 1, fine: 2, blotch: 2, ring: 1.5, scribble: 1.2, mixed: 1.5 };
+// which pattern a name gets: hints from its words first, otherwise a weighted pick from its hash
+function eggPattern(name) {
+  const w = name.split("-"), r = rngE(hashE(name + "#egg"));
+  if (/^(spotted|speckled)$/.test(w[1]) || /^(spotted|speckled)$/.test(w[0])) return r() < .5 ? "fine" : "mixed";
+  if (/^(streaked|striped|barred|banded)$/.test(w[1]) || /^(streaked|striped|barred|banded)$/.test(w[0])) return "scribble";
+  if (/^(black|sooty|dark|dusky|slaty)$/.test(w[0])) return r() < .6 ? "fine" : "mixed";     // dark names: dark speckles, never plain
+  const tot = PATTERNS.reduce((a, k) => a + PW[k], 0); let v = r() * tot;
+  for (const k of PATTERNS) { v -= PW[k]; if (v <= 0) return k; } return "fine";
+}
+// a whole nest: no two eggs with the same pattern if it can be helped
+function nestPatterns(names) { const used = new Set(); return names.map(n => { let p = eggPattern(n);
+  if (used.has(p)) { const r = rngE(hashE(n + "#alt")), free = PATTERNS.filter(k => !used.has(k)); p = free[Math.floor(r() * free.length)] || p; }
+  used.add(p); return p; }); }
+// markings: mostly a darker shade of the bird's colour; some eggs get dark brown/black speckles ("black", "sooty" names always do)
+function eggInk(name, h) { const r = rngE(hashE(name + "#ink")), w = name.split("-");
+  const dark = /^(black|sooty|dark|dusky|slaty)$/.test(w[0]) || r() < .28;
+  return dark ? (r() < .5 ? "hsl(25,28%,16%)" : "hsl(20,12%,9%)") : `hsl(${h},${Math.round(42 + r() * 18)}%,${Math.round(30 + r() * 14)}%)`; }
+function eggMarks(name, h, pattern) {
+  const r = rngE(hashE(name + "#marks")), ink = eggInk(name, h); let s = "";
+  const dot = (x, y, rx, ry, op, rot) => `<ellipse cx="${f1e(x)}" cy="${f1e(y)}" rx="${f1e(rx)}" ry="${f1e(ry)}" transform="rotate(${Math.round(rot || 0)} ${f1e(x)} ${f1e(y)})" fill="${ink}" fill-opacity="${op.toFixed(2)}"/>`;
+  const anywhere = () => [5 + r() * 40, 6 + r() * 54];
+  const lower = () => { const y = 30 + Math.pow(r(), .7) * 30; return [6 + r() * 38, y]; };   // more toward the wide end
+  if (pattern === "fine" || pattern === "mixed") { const n = pattern === "fine" ? 55 + r() * 35 : 30 + r() * 15;
+    for (let k = 0; k < n; k++) { const [x, y] = r() < .6 ? lower() : anywhere(), d = .35 + r() * .75; s += dot(x, y, d, d * (.7 + r() * .5), .55 + r() * .4, r() * 180); } }
+  if (pattern === "blotch" || pattern === "mixed") { const n = pattern === "blotch" ? 4 + r() * 4 : 2 + r() * 2;
+    let b = ""; for (let k = 0; k < n; k++) { const [x, y] = anywhere(), d = 2.5 + r() * 4; b += dot(x, y, d, d * (.6 + r() * .5), .55 + r() * .3, r() * 180); }
+    s += `<g filter="url(#ppn-eb)">${b}</g>`; }
+  if (pattern === "ring") { for (let k = 0; k < 38 + r() * 20; k++) { const a = r() * 6.283, y = 41 + Math.sin(a) * 4 + (r() - .5) * 5, x = 25 + Math.cos(a) * 22 * (r() * .4 + .6), d = .5 + r() * 1.6;
+      s += dot(x, y, d, d * (.6 + r() * .5), .5 + r() * .45, r() * 180); }
+    for (let k = 0; k < 8; k++) { const [x, y] = anywhere(), d = .4 + r() * .5; s += dot(x, y, d, d, .5, 0); } }
+  if (pattern === "scribble") { for (let k = 0; k < 5 + r() * 4; k++) { let [x, y] = anywhere(), p = `M${f1e(x)} ${f1e(y)}`;
+      for (let j = 0; j < 3; j++) { const nx = x + (r() - .5) * 14, ny = y + (r() - .5) * 8; p += ` Q${f1e((x + nx) / 2 + (r() - .5) * 8)} ${f1e((y + ny) / 2 + (r() - .5) * 8)} ${f1e(nx)} ${f1e(ny)}`; x = nx; y = ny; }
+      s += `<path d="${p}" fill="none" stroke="${ink}" stroke-width="${f1e(.6 + r() * .7)}" stroke-linecap="round" stroke-opacity="${(.6 + r() * .35).toFixed(2)}"/>`; }
+    for (let k = 0; k < 10; k++) { const [x, y] = anywhere(), d = .4 + r() * .6; s += dot(x, y, d, d, .6, 0); } }
+  return s;
+}
+return { nestPatterns, eggMarks };
+})();
+
 function _ppNest(root, api, onPick) {
   if (!document.getElementById("ppn-css")) { const st = document.createElement("style"); st.id = "ppn-css"; st.textContent = _ppNestCss; document.head.appendChild(st); }
   const NS = "http://www.w3.org/2000/svg", rng = s => () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296;
@@ -90,7 +138,7 @@ function _ppNest(root, api, onPick) {
     }
     return s;
   }
-  back.innerHTML = `<defs>
+  back.innerHTML = `<defs><filter id=ppn-eb x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation=".45"/></filter>
     <radialGradient id=ppn-shade cx=50% cy=50% r=50%><stop offset=0 stop-color="#000" stop-opacity=".55"/><stop offset=1 stop-color="#000" stop-opacity="0"/></radialGradient>
     <radialGradient id=ppn-depth cx=50% cy=62% r=58%><stop offset=0 stop-color="#000" stop-opacity="0"/><stop offset=.75 stop-color="#000" stop-opacity=".18"/><stop offset=1 stop-color="#000" stop-opacity=".42"/></radialGradient>
     <linearGradient id=ppn-wall x1=0 y1=0 x2=0 y2=1><stop offset=0 stop-color="#000" stop-opacity=".38"/><stop offset=.45 stop-color="#000" stop-opacity="0"/></linearGradient></defs>
@@ -117,10 +165,8 @@ function _ppNest(root, api, onPick) {
     const fx = Math.round((r() - .5) * 52), fr = Math.round((fx >= 0 ? 1 : -1) * (25 + r() * 30));
     return { zig, first, second, fx, fr };
   }
-  function eggSVG(i, name, part, ck) {
-    const h = hueOf(name), r = rng(i * 97 + name.length * 13 + h);
-    let sp = ""; for (let k = 0; k < 16; k++) { const x = 6 + r() * 38, y = 6 + r() * 54, s = .9 + r() * (k < 4 ? 3.4 : 1.8);
-      sp += `<ellipse cx="${f1(x)}" cy="${f1(y)}" rx="${f1(s)}" ry="${f1(s * (.6 + r() * .5))}" fill="hsl(${h},${Math.round(45 + r() * 15)}%,${Math.round(36 + r() * 22)}%)" fill-opacity="${(.55 + r() * .4).toFixed(2)}"/>`; }
+  function eggSVG(i, name, part, ck, pattern) {
+    const h = hueOf(name), sp = _ppEggs.eggMarks(name, h, pattern);   // same markings on both halves (seeded by the name)
     const clipPts = part === "top" ? [[0, -10], [50, -10], ...ck.zig.slice().reverse()] : [...ck.zig, [50, 80], [0, 80]];
     const id = `ppn${i}${part}`;
     return `<svg class="shell-${part}" viewBox="0 0 50 64"><defs><clipPath id="${id}"><polygon points="${clipPts.map(p => f1(p[0]) + "," + f1(p[1])).join(" ")}"/></clipPath>
@@ -160,6 +206,7 @@ function _ppNest(root, api, onPick) {
   }
   function render() {
     unsubs.splice(0).forEach(u => u()); box.innerHTML = ""; eggs = [];
+    const pats = _ppEggs.nestPatterns(nest.names);   // no two eggs in a nest with the same pattern
     nest.names.forEach((name, i) => {
       const [x, y] = SPOTS[i], clan = clanOf(name), b = document.createElement("button"), ck = crackFor(i, name), z = 2 * Math.round(y);
       // the outer birds face the middle of the nest (left ones look right, right ones look left); the middle one by its name
@@ -168,7 +215,7 @@ function _ppNest(root, api, onPick) {
       b.style.transform = `rotate(${[-8, 4, 10, -5, 7][i]}deg)`;
       b.style.setProperty("--glow", _ppKit.tagCol(name)); b.style.setProperty("--fx", ck.fx + "px"); b.style.setProperty("--fr", ck.fr + "deg");
       b.setAttribute("aria-label", "Egg " + (i + 1));
-      b.innerHTML = eggSVG(i, name, "bot", ck) + `<div class=bird><div class=face style="--dir:${dirs[i]}"><img alt=""><i class=lid></i></div></div>` + eggSVG(i, name, "top", ck);
+      b.innerHTML = eggSVG(i, name, "bot", ck, pats[i]) + `<div class=bird><div class=face style="--dir:${dirs[i]}"><img alt=""><i class=lid></i></div></div>` + eggSVG(i, name, "top", ck, pats[i]);
       b.onclick = () => tap(i);
       box.appendChild(b); eggs.push(b);
       const w = document.createElementNS(NS, "svg"); w.setAttribute("class", "ppn-l"); w.setAttribute("viewBox", "0 0 320 222");
