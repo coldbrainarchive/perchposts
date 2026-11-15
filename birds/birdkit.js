@@ -389,6 +389,10 @@
         if (sh && yy >= 0 && yy < S2 && faceLeft[yy] < 9999) { const lim = faceLeft[yy] + tuck - ox; if (lim < 0) continue; if (lim < 3) fa = lim / 3; }
         O[q] = c[0]; O[q + 1] = c[1]; O[q + 2] = c[2]; O[q + 3] = Math.min(255, c[3] * 255 * fa);
       }
+      // even beaks: near the face, wherever the old beak was and the new one doesn't reach, keep the old beak, so the root stays solid (no gap above it)
+      if (spec.even) for (const p of [...parts.beakTop, ...parts.beakBottom]) { const x = p % S2, y = Math.floor(p / S2); if (bx - x > L * .6) continue;
+        const q = ((y + PAD) * W + (x + sh + PAD)) * 4; if (q < 0 || q >= O.length || O[q + 3] > 200) continue;
+        const a = src[p * 4 + 3]; if (a <= O[q + 3]) continue; O[q] = src[p * 4]; O[q + 1] = src[p * 4 + 1]; O[q + 2] = src[p * 4 + 2]; O[q + 3] = a; }
       if (spec.after) spec.after(O, W, bx + PAD, by + PAD, len);    // e.g. dark tips
       // where the old beak was but the new one isn't, close the face over the gap using the feathers right next to it
       const isBeak = new Uint8Array(S2 * S2); for (const p of [...parts.beakTop, ...parts.beakBottom]) isBeak[p] = 1;
