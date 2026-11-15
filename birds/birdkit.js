@@ -192,7 +192,7 @@
     spoon: { k: 1.4, s: t => t < .68 ? .5 : .5 + (t - .68) * 2.3 },
     chisel: { k: 1.35, s: t => 1 - .55 * t },
     needle: { k: 1.5, s: t => .42 - .22 * t },
-    decurved: { even: true, k: 1.9, s: t => .35, bend: t => .9 * t },   // slender, curving down toward the tip (bee-eaters, flycatchers)
+    decurved: { drawn: true, k: 1.9, drop: .4, slim: .45, root: .3 },   // slender, curving down toward the tip (bee-eaters, flycatchers)
     dagger: { k: 1.45, s: t => .78 - .25 * t },
     cone: { shift: .14, k: .78, s: t => 1.22 },
     pouch: { k: 1.45, s: t => .72 - .1 * t, pouch: true },
@@ -364,7 +364,7 @@
       for (const p of [...parts.beakTop, ...parts.beakBottom]) isB[p] = 1;
       for (let y = 0; y < S2; y++) for (let x = 0; x < S2; x++) { const p = y * S2 + x; if (!isB[p] && src[p * 4 + 3] > 160) { faceLeft[y] = x; break; } }
       const tuck = Math.max(2, sh * .55);
-      for (let yy = Math.floor(by - L * 2.2); yy <= by + L * 2.2; yy++) for (let xx = Math.floor(bx - len - 4); xx <= bx; xx++) {
+      if (!spec.drawn) for (let yy = Math.floor(by - L * 2.2); yy <= by + L * 2.2; yy++) for (let xx = Math.floor(bx - len - 4); xx <= bx; xx++) {
         // the first quarter of the beak is left exactly as the emoji draws it; stretching and reshaping ease in after that
         const d = bx - xx, A = L * .25; if (d < 0) continue;
         // even: stretch the whole beak evenly from the face, so its edges stay one smooth curve (no kink where the kept quarter ends)
@@ -389,10 +389,44 @@
         if (sh && yy >= 0 && yy < S2 && faceLeft[yy] < 9999) { const lim = faceLeft[yy] + tuck - ox; if (lim < 0) continue; if (lim < 3) fa = lim / 3; }
         O[q] = c[0]; O[q + 1] = c[1]; O[q + 2] = c[2]; O[q + 3] = Math.min(255, c[3] * 255 * fa);
       }
-      // even beaks: near the face, wherever the old beak was and the new one doesn't reach, keep the old beak, so the root stays solid (no gap above it)
-      if (spec.even) for (const p of [...parts.beakTop, ...parts.beakBottom]) { const x = p % S2, y = Math.floor(p / S2); if (bx - x > L * .6) continue;
-        const q = ((y + PAD) * W + (x + sh + PAD)) * 4; if (q < 0 || q >= O.length || O[q + 3] > 200) continue;
-        const a = src[p * 4 + 3]; if (a <= O[q + 3]) continue; O[q] = src[p * 4]; O[q + 1] = src[p * 4 + 1]; O[q + 2] = src[p * 4 + 2]; O[q + 3] = a; }
+      // drawn beaks: one smooth solid shape in the old beak's own colours. Its root is as tall as the old beak at its
+      // highest and lowest points, so it covers the old beak by the face; the top runs flat, then curves down to the tip.
+      // drawn beaks: the emoji's own beak plus a smooth curved extension, merged into one outline and filled as one piece
+      // (one shading for the whole beak, so there are no seams or sections, and nothing of the old beak is left uncovered)
+      if (spec.drawn) {
+        let yT0 = 1e9, yB0 = -1e9; const sT = [0, 0, 0, 0], sB = [0, 0, 0, 0];
+        for (const [list, acc] of [[parts.beakTop, sT], [parts.beakBottom, sB]]) for (const p of list) {
+          const x = p % S2, y = Math.floor(p / S2), a = src[p * 4 + 3] / 255; if (a < .5) continue;
+          if (x >= bx - L * .35) { yT0 = Math.min(yT0, y); yB0 = Math.max(yB0, y); }
+          acc[0] += src[p * 4] * a; acc[1] += src[p * 4 + 1] * a; acc[2] += src[p * 4 + 2] * a; acc[3] += a; }
+        if (yT0 > yB0) { yT0 = by - L * .3; yB0 = by + L * .3; }
+        const avg = (s, f) => `rgb(${Math.min(255, s[0] / s[3] * f) | 0},${Math.min(255, s[1] / s[3] * f) | 0},${Math.min(255, s[2] / s[3] * f) | 0})`;
+        if (!sB[3]) sB.splice(0, 4, ...sT); if (!sT[3]) sT.splice(0, 4, ...sB);
+        const th = yB0 - yT0, mid = (yT0 + yB0) / 2, ax = bx - len, ay = mid + (spec.drop || 0) * len;
+        const bcv = document.createElement("canvas"); bcv.width = bcv.height = W; const g = bcv.getContext("2d");
+        // 1. the old beak's outline, only right by the face (its root); the rest is replaced by the slim curve
+        const xs = Math.round(bx - L * (spec.root || .3));
+        const old = new ImageData(W, W); for (const p of [...parts.beakTop, ...parts.beakBottom]) { const x = p % S2, y = Math.floor(p / S2); if (x < xs) continue; const q = ((y + PAD) * W + x + PAD) * 4; old.data[q] = old.data[q + 1] = old.data[q + 2] = 255; old.data[q + 3] = src[p * 4 + 3]; }
+        const oc = document.createElement("canvas"); oc.width = oc.height = W; oc.getContext("2d").putImageData(old, 0, 0); g.drawImage(oc, 0, 0);
+        // 2. plus the long curved beak: level from the face, then curving down to the tip
+        //    it starts partway along the old beak, exactly as tall as the old beak there, so the two join with no step
+        let cT = 1e9, cB = -1e9;
+        for (const p of [...parts.beakTop, ...parts.beakBottom]) { const x = p % S2, y = Math.floor(p / S2); if (Math.abs(x - xs) <= 1 && src[p * 4 + 3] > 128) { cT = Math.min(cT, y); cB = Math.max(cB, y); } }
+        if (cT > cB) { cT = yT0; cB = yB0; }
+        const ch = cB - cT, run = xs - ax;
+        g.save(); g.translate(PAD, PAD); g.fillStyle = "#fff"; g.beginPath(); g.moveTo(xs + 1, cT);
+        g.bezierCurveTo(xs - run * .4, cT + ch * .05, ax + run * .3, ay - ch * .55, ax, ay);
+        const sl = spec.slim || 0; g.bezierCurveTo(ax + run * .3, ay - ch * (.1 + sl * .25), xs - run * .35, cB - ch * sl, xs + 1, cB); g.closePath(); g.fill(); g.restore();   // lower edge: slim follows the top edge
+        // 3. one fill for the whole outline: lighter on top, darker underneath, a soft shine near the top
+        g.globalCompositeOperation = "source-in";
+        const gr = g.createLinearGradient(0, yT0 + PAD, 0, Math.max(yB0, ay) + PAD);
+        gr.addColorStop(0, avg(sT, 1.25)); gr.addColorStop(.35, avg(sT, 1)); gr.addColorStop(1, avg(sB, .8));
+        g.fillStyle = gr; g.fillRect(0, 0, W, W);
+        g.globalCompositeOperation = "source-atop";
+        const hl = g.createLinearGradient(0, yT0 + PAD, 0, yT0 + PAD + th * .45); hl.addColorStop(0, "rgba(255,255,255,.16)"); hl.addColorStop(1, "rgba(255,255,255,0)");
+        g.fillStyle = hl; g.fillRect(0, 0, W, W);
+        O.set(g.getImageData(0, 0, W, W).data);
+      }
       if (spec.after) spec.after(O, W, bx + PAD, by + PAD, len);    // e.g. dark tips
       // where the old beak was but the new one isn't, close the face over the gap using the feathers right next to it
       const isBeak = new Uint8Array(S2 * S2); for (const p of [...parts.beakTop, ...parts.beakBottom]) isBeak[p] = 1;
