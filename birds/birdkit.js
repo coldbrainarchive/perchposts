@@ -186,6 +186,7 @@
     hooked: { k: 1.08, s: t => 1 + .1 * t, bend: t => .42 * Math.pow(t, 2.6) },
     parrot: { shift: .16, k: .9, s: t => 1.25, bend: t => .62 * Math.pow(t, 2.2), cutBottom: .62 },   // short rounded lower half under the hook
     oversized: { shift: .32, k: 1.45, s: t => 1.3 - .15 * t, paint: (D, parts) => { paint(D, parts.beakTop, [.84, .16, 85]); paint(D, parts.beakBottom, [.68, .17, 55]); }, after: darkTip(.86) },
+    owl: { k: .85, s: t => 1, bend: t => .5 * Math.pow(t, 2) },   // short and curved down (the parrot cut looked jagged on owls)
     giant: { shift: .3, k: 1.2, s: t => 1.5 - .1 * t, bend: t => .18 * Math.pow(t, 3) },
     curved: { k: 1.3, s: t => .95 - .2 * t, bend: t => t < .45 ? 0 : .95 * (t - .45), after: darkTip(.72) },
     flat: { k: 1.22, s: t => .62 + .12 * t },
@@ -228,7 +229,7 @@
     royal: "crown", sacred: "crown", elegant: "@plume", varied: "mottled", painted: "two-tone", glossy: "iridescence", iridescent: "iridescence", flame: "flame crest", fiery: "flame crest" };
   const SPECIES = [
     [/toucan|aracari/, { beak: "oversized" }], [/hornbill/, { beak: "oversized" }], [/eagle|hawk|goshawk|harrier|kite|buzzard|kestrel|skua/, { beak: "hooked", marks: ["brow ridge"] }],
-    [/falcon/, { beak: "hooked", marks: ["eye stripe"] }], [/vulture/, { beak: "hooked", marks: ["bare face"] }], [/owl/, { beak: "parrot", marks: ["facial disc"], tops: ["horned brow"] }],
+    [/falcon/, { beak: "hooked", marks: ["eye stripe"] }], [/vulture/, { beak: "hooked", marks: ["bare face"] }], [/owl/, { beak: "owl", marks: ["facial disc"], tops: ["horned brow"] }],
     [/duck|merganser|teal/, { beak: "flat" }], [/flamingo/, { beak: "curved" }], [/ibis|curlew/, { beak: "curved" }], [/woodpecker/, { beak: "chisel", tops: ["flame crest"] }], [/nuthatch|treecreeper/, { beak: "chisel" }],
     [/pelican/, { beak: "pouch" }], [/stork|heron|egret|bittern|crane|kingfisher|jacamar/, { beak: "dagger" }], [/hummingbird|sunbird|myzomela|honeyeater/, { beak: "needle", marks: ["iridescence"] }], [/bee-eater/, { beak: "decurved", marks: ["iridescence"] }], [/flycatcher/, { beak: "decurved" }],
     [/finch|grosbeak|bunting|sparrow|canary|waxbill|weaver|seedeater|conebill|parrotbill/, { beak: "cone" }], [/parrot|parakeet|lorikeet|cockatoo/, { beak: "parrot" }],

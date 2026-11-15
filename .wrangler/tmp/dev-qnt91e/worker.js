@@ -586,7 +586,49 @@ function decode(s) {
 }
 __name(decode, "decode");
 
+// birds/lists.json
+var lists_default = { A: ["african", "alpine", "amazonian", "american", "andean", "arabian", "arctic", "ashy", "asian", "australasian", "azure", "banded", "barred", "black", "blue", "bornean", "brown", "buff", "burmese", "cape", "chestnut", "chinese", "cinnamon", "collared", "common", "copper", "crested", "crimson", "dark", "dusky", "eastern", "elegant", "emerald", "eurasian", "european", "fiery", "flame", "giant", "golden", "greater", "green", "grey", "himalayan", "hooded", "indian", "indigo", "island", "javan", "lesser", "lilac", "little", "long", "magenta", "maroon", "melodious", "mongolian", "mountain", "northern", "olive", "orange", "oriental", "pacific", "painted", "pale", "papuan", "philippine", "pink", "purple", "pygmy", "red", "royal", "rufous", "rusty", "sacred", "scarlet", "short", "siberian", "silvery", "slaty", "sooty", "southern", "speckled", "spotted", "streaked", "striped", "sumatran", "tibetan", "tropical", "turquoise", "varied", "velvet", "violet", "western", "white", "yellow", "coral", "ferruginous", "fulvous", "garnet", "glossy", "iridescent", "malachite", "oceanic", "ringed", "tawny"], B: ["backed", "banded", "bellied", "billed", "breasted", "browed", "capped", "cheeked", "chested", "chinned", "collared", "crowned", "eared", "eyed", "faced", "flanked", "fronted", "gorgeted", "headed", "hooded", "legged", "lored", "mantled", "masked", "naped", "necked", "plumed", "ringed", "rumped", "shouldered", "sided", "spotted", "streaked", "striped", "tailed", "throated", "tipped", "vented", "winged", "crested", "bibbed", "footed"], C: ["albatross", "antbird", "antpitta", "antshrike", "aracari", "avocet", "babbler", "barbet", "bee-eater", "bittern", "blackbird", "booby", "broadbill", "bulbul", "bunting", "bustard", "buzzard", "canary", "cisticola", "cockatoo", "conebill", "cormorant", "cotinga", "coucal", "crane", "creeper", "cuckoo", "dacnis", "dove", "drongo", "duck", "eagle", "egret", "elaenia", "falcon", "fantail", "finch", "flamingo", "flowerpecker", "flycatcher", "francolin", "gerygone", "goshawk", "grebe", "grosbeak", "gull", "harrier", "hawk", "heron", "honeyeater", "hornbill", "hummingbird", "ibis", "jacamar", "jay", "kestrel", "kingfisher", "kite", "lark", "lorikeet", "magpie", "manakin", "martin", "merganser", "mockingbird", "monarch", "nightjar", "nuthatch", "oriole", "owl", "parakeet", "parrot", "pelican", "penguin", "petrel", "pheasant", "pigeon", "pipit", "plover", "puffbird", "rail", "raven", "robin", "sandpiper", "shrike", "skua", "snipe", "sparrow", "starling", "stork", "sunbird", "swallow", "swift", "tanager", "teal", "tern", "thrush", "tit", "toucan", "trogon", "tyrannulet", "vireo", "vulture", "warbler", "waxbill", "waxwing", "weaver", "whistler", "woodpecker", "wren", "jacana", "lapwing", "myzomela", "parrotbill", "pitta", "tailorbird", "treecreeper"] };
+
 // worker.js
+var NEST_WAIT = 15 * 6e4;
+var NEST_NET_CAP = 4;
+var NEST_KEEP = 2 * 864e5;
+var NEST_PEOPLE = /* @__PURE__ */ new Set([
+  "african",
+  "american",
+  "amazonian",
+  "andean",
+  "arabian",
+  "asian",
+  "australasian",
+  "bornean",
+  "burmese",
+  "chinese",
+  "eurasian",
+  "european",
+  "himalayan",
+  "indian",
+  "javan",
+  "mongolian",
+  "oriental",
+  "pacific",
+  "papuan",
+  "philippine",
+  "siberian",
+  "sumatran",
+  "tibetan"
+]);
+var nestBlocked = /* @__PURE__ */ __name((n) => {
+  const [a, b] = String(n).toLowerCase().split("-");
+  return a === "oriental" || (b === "eyed" || b === "faced") && NEST_PEOPLE.has(a) || b === "faced" && ["black", "yellow", "brown"].includes(a);
+}, "nestBlocked");
+var nestName = /* @__PURE__ */ __name(() => {
+  const p = /* @__PURE__ */ __name((a) => a[Math.floor(Math.random() * a.length)], "p");
+  for (; ; ) {
+    const n = `${p(lists_default.A)}-${p(lists_default.B)}-${p(lists_default.C)}`;
+    if (!nestBlocked(n)) return n;
+  }
+}, "nestName");
 var worker_default = {
   async fetch(request, env, ctx) {
     const corsHeaders = {
@@ -1604,6 +1646,47 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       return serverError(err);
     }
   }
+  if (url.pathname === "/nest" && request.method === "POST") {
+    const dev = body.device;
+    if (typeof dev !== "string" || !/^[0-9a-f]{32}$/.test(dev)) return json({ error: "Bad device" }, 400);
+    try {
+      const out = /* @__PURE__ */ __name((r) => json({ names: JSON.parse(r.names), left_ms: Math.max(0, NEST_WAIT - (Date.now() - Date.parse(r.issued_at))) }), "out");
+      const row = await env.DB.prepare(`SELECT names, prev, issued_at FROM nests WHERE device = ?`).bind(dev).first();
+      if (row && JSON.parse(row.names).some(nestBlocked)) {
+        const fixed = JSON.parse(row.names).map((n) => nestBlocked(n) ? nestName() : n);
+        row.names = JSON.stringify(fixed);
+        await env.DB.prepare(`UPDATE nests SET names = ? WHERE device = ?`).bind(row.names, dev).run();
+      }
+      if (row && (!body.fresh || Date.now() - Date.parse(row.issued_at) < NEST_WAIT)) return out(row);
+      const since = new Date(Date.now() - NEST_WAIT).toISOString();
+      if (ip_hash) {
+        const { n } = await env.DB.prepare(`SELECT COUNT(*) AS n FROM nests WHERE net = ? AND issued_at > ?`).bind(ip_hash, since).first();
+        if (n >= NEST_NET_CAP) {
+          if (row) return out(row);
+          const last = await env.DB.prepare(`SELECT names, issued_at FROM nests WHERE net = ? ORDER BY issued_at DESC LIMIT 1`).bind(ip_hash).first();
+          await env.DB.prepare(`INSERT OR REPLACE INTO nests (device, net, names, prev, issued_at) VALUES (?, ?, ?, NULL, ?)`).bind(dev, ip_hash, last.names, last.issued_at).run();
+          return out(last);
+        }
+      }
+      const seen = new Set(row ? [...JSON.parse(row.names), ...JSON.parse(row.prev || "[]")] : []);
+      const names = [];
+      for (let tries = 0; names.length < 5 && tries < 6; tries++) {
+        const want = /* @__PURE__ */ new Set();
+        while (want.size < 5 - names.length) {
+          const n = nestName();
+          if (!seen.has(n) && !names.includes(n)) want.add(n);
+        }
+        const list = [...want], taken = new Set(((await env.DB.prepare(`SELECT LOWER(username) AS u FROM mod_users WHERE LOWER(username) IN (${list.map(() => "?").join(",")})`).bind(...list).all()).results || []).map((r) => r.u));
+        names.push(...list.filter((n) => !taken.has(n)));
+      }
+      const prev = row ? JSON.stringify([...seen].slice(-200)) : null;
+      await env.DB.prepare(`INSERT OR REPLACE INTO nests (device, net, names, prev, issued_at) VALUES (?, ?, ?, ?, ?)`).bind(dev, ip_hash, JSON.stringify(names), prev, now).run();
+      if (Math.random() < 0.05) await env.DB.prepare(`DELETE FROM nests WHERE issued_at < ?`).bind(new Date(Date.now() - NEST_KEEP).toISOString()).run();
+      return json({ names, left_ms: NEST_WAIT });
+    } catch (err) {
+      return serverError(err);
+    }
+  }
   if (url.pathname === "/register" && request.method === "POST") {
     const { username: uname, password, browser_id: bid } = body;
     if (!uname || !password) return json({ error: "Missing fields" }, 400);
@@ -1614,6 +1697,10 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       return json({ error: "Bot check failed. Please try again." }, 403);
     }
     try {
+      const nd = typeof body.nest_device === "string" && /^[0-9a-f]{32}$/.test(body.nest_device) ? body.nest_device : null;
+      const nestRow = nd && await env.DB.prepare(`SELECT names FROM nests WHERE device = ?`).bind(nd).first();
+      if (!nestRow || !JSON.parse(nestRow.names).includes(uname.trim())) return json({ error: "Pick a bird from your nest. If the page has been open a long time, reload it." }, 400);
+      if (nestBlocked(uname.trim())) return json({ error: "That name isn't available any more. Please pick another bird from your nest." }, 400);
       const existing = await env.DB.prepare(`SELECT id FROM mod_users WHERE LOWER(username) = LOWER(?)`).bind(uname.trim()).first();
       if (existing) return json({ error: "Username already taken" }, 409);
       const id = crypto.randomUUID();
@@ -1621,6 +1708,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       await env.DB.prepare(
         `INSERT INTO mod_users (id, email, password_hash, username, role, created_at) VALUES (?, ?, ?, ?, 'user', ?)`
       ).bind(id, `${uname.trim().toLowerCase()}@users.local`, hash, uname.trim(), now).run();
+      await env.DB.prepare(`DELETE FROM nests WHERE device = ?`).bind(nd).run();
       if (bid) {
         await env.DB.prepare(`UPDATE posts SET username = ? WHERE browser_id = ? AND is_mod = 0 AND username IS NULL`).bind(uname.trim(), bid).run();
         await env.DB.prepare(`UPDATE comments SET username = ? WHERE browser_id = ? AND is_mod = 0 AND username IS NULL`).bind(uname.trim(), bid).run();

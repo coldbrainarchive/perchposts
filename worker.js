@@ -6,7 +6,13 @@ import NEST_WORDS from "./birds/lists.json";
 // that device before. Clearing the browser makes a new device, so each network (keyed IP hash) gets at most
 // NEST_NET_CAP new nests per 15 minutes; past that, a new device shares the network's latest nest.
 const NEST_WAIT = 15 * 60000, NEST_NET_CAP = 4, NEST_KEEP = 2 * 86400000;
-const nestName = () => { const p = a => a[Math.floor(Math.random() * a.length)]; return `${p(NEST_WORDS.A)}-${p(NEST_WORDS.B)}-${p(NEST_WORDS.C)}`; };
+// Word pairs that read as a slur about people are never handed out: a nationality or people word with "eyed"/"faced",
+// "black/yellow/brown-faced", and "oriental" in any name
+const NEST_PEOPLE = new Set(["african", "american", "amazonian", "andean", "arabian", "asian", "australasian", "bornean", "burmese", "chinese", "eurasian", "european",
+  "himalayan", "indian", "javan", "mongolian", "oriental", "pacific", "papuan", "philippine", "siberian", "sumatran", "tibetan"]);
+const nestBlocked = n => { const [a, b] = String(n).toLowerCase().split("-");
+  return a === "oriental" || ((b === "eyed" || b === "faced") && NEST_PEOPLE.has(a)) || (b === "faced" && ["black", "yellow", "brown"].includes(a)); };
+const nestName = () => { const p = a => a[Math.floor(Math.random() * a.length)]; for (;;) { const n = `${p(NEST_WORDS.A)}-${p(NEST_WORDS.B)}-${p(NEST_WORDS.C)}`; if (!nestBlocked(n)) return n; } };
 
 export default {
   async fetch(request, env, ctx) {
@@ -958,6 +964,10 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     try {
       const out = r => json({ names: JSON.parse(r.names), left_ms: Math.max(0, NEST_WAIT - (Date.now() - Date.parse(r.issued_at))) });
       const row = await env.DB.prepare(`SELECT names, prev, issued_at FROM nests WHERE device = ?`).bind(dev).first();
+      if (row && JSON.parse(row.names).some(nestBlocked)) {          // nests handed out before the blocked pairs: swap those names
+        const fixed = JSON.parse(row.names).map(n => nestBlocked(n) ? nestName() : n); row.names = JSON.stringify(fixed);
+        await env.DB.prepare(`UPDATE nests SET names = ? WHERE device = ?`).bind(row.names, dev).run();
+      }
       if (row && (!body.fresh || Date.now() - Date.parse(row.issued_at) < NEST_WAIT)) return out(row);
       const since = new Date(Date.now() - NEST_WAIT).toISOString();
       if (ip_hash) {
@@ -1002,6 +1012,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const nd = typeof body.nest_device === "string" && /^[0-9a-f]{32}$/.test(body.nest_device) ? body.nest_device : null;
       const nestRow = nd && await env.DB.prepare(`SELECT names FROM nests WHERE device = ?`).bind(nd).first();
       if (!nestRow || !JSON.parse(nestRow.names).includes(uname.trim())) return json({ error: "Pick a bird from your nest. If the page has been open a long time, reload it." }, 400);
+      if (nestBlocked(uname.trim())) return json({ error: "That name isn't available any more. Please pick another bird from your nest." }, 400);
       // Retired names stay taken: the site knows people by name, so a reused one would inherit someone's posts
       const existing = await env.DB.prepare(`SELECT id FROM mod_users WHERE LOWER(username) = LOWER(?)`).bind(uname.trim()).first();
       if (existing) return json({ error: "Username already taken" }, 409);
