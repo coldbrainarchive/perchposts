@@ -162,7 +162,8 @@ function _ppNest(root, api, onPick) {
     unsubs.splice(0).forEach(u => u()); box.innerHTML = ""; eggs = [];
     nest.names.forEach((name, i) => {
       const [x, y] = SPOTS[i], clan = clanOf(name), b = document.createElement("button"), ck = crackFor(i, name), z = 2 * Math.round(y);
-      dirs[i] = hashStr(name + "dir") % 2 ? -1 : 1;
+      // the outer birds face the middle of the nest (left ones look right, right ones look left); the middle one by its name
+      dirs[i] = i === 0 || i === 3 ? -1 : i === 2 || i === 4 ? 1 : hashStr(name + "dir") % 2 ? -1 : 1;
       b.type = "button"; b.className = "egg"; b.style.left = (x - 30) + "px"; b.style.top = (y - 38) + "px"; b.style.zIndex = z;
       b.style.transform = `rotate(${[-8, 4, 10, -5, 7][i]}deg)`;
       b.style.setProperty("--glow", _ppKit.tagCol(name)); b.style.setProperty("--fx", ck.fx + "px"); b.style.setProperty("--fr", ck.fr + "deg");
@@ -242,7 +243,7 @@ function _ppNest(root, api, onPick) {
   }
   function birdLoop() {
     const h = nest ? nest.taps.map((t, i) => t >= 3 ? i : -1).filter(i => i >= 0) : [];
-    if (h.length) { const i = h[Math.floor(Math.random() * h.length)], r = Math.random(); move(i, r < .4 ? "look" : r < .65 ? "bob" : r < .87 ? "tilt" : "peek"); }
+    if (h.length) { const i = h[Math.floor(Math.random() * h.length)], r = Math.random(); move(i, r < .45 ? "bob" : r < .82 ? "tilt" : "peek"); /* no turning around: it was a flat mirror flip */ }
     later(birdLoop, 700 + Math.random() * 1600);
   }
   function wobbleLoop() {
