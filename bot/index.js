@@ -14,8 +14,12 @@ const LOOKBACK_HOURS = 6;
 if (!BOT_KEY) { console.error("BOT_KEY env var is required"); process.exit(1); }
 
 // Links the bot never posts: CBS News videos and sponsored pages (/moneywatch/ and /essentials/
-// are affiliate shopping guides; CBS's real business news lives under /news/)
-const SKIPPED_LINKS = /\/\/www\.cbsnews\.com\/(?:video|moneywatch|essentials)\//;
+// are affiliate shopping guides; CBS's real business news lives under /news/), and CBS Sports' gambling
+// sections (/betting/ and /prediction/ are sportsbook and prediction-market promotions; real sports news is under /nfl/news/ etc.)
+const SKIPPED_LINKS = /\/\/www\.cbsnews\.com\/(?:video|moneywatch|essentials)\/|\/\/www\.cbssports\.com\/(?:betting|prediction)\//;
+// Ads dressed as news, from any site: sign-up offers for betting and prediction apps, promo/coupon codes, sponsored pages
+const PROMO_TEXT = /\b(?:promo|bonus|coupon|referral|voucher|discount)\s+codes?\b|\bbonus\s+bets?\b|\bfree\s+bets?\b|\bsign[- ]?up\s+(?:bonus|offer)s?\b|\bdeposit\s+match\b|\bodds\s+boosts?\b|\b(?:sponsored|paid)\s+(?:content|post|partner(?:ship)?)\b/i;
+const isPromo = (...texts) => PROMO_TEXT.test(texts.filter(Boolean).join(" "));
 
 function normalizeUrl(url) {
   if (!url) return url;
@@ -376,12 +380,14 @@ async function run() {
 
 
           const snippet = String(item.contentSnippet || item.summary || "").trim();
+          if (isPromo(rssTitle, snippet)) continue;                      // ads and betting promos
           const board = feed.board || "general";
           const rssImage = extractRSSImage(item);
 
           const og = await fetchOgData(url);
           const resolvedTitle = looksLikeSlug(rssTitle) ? (og?.title || null) : (rssTitle || og?.title || null);
           if (!resolvedTitle || looksLikeSlug(resolvedTitle)) { stats.skippedBadTitle.push({ url, title: rssTitle || url }); continue; }
+          if (isPromo(resolvedTitle, og?.description)) continue;
 
           const attachment = {
             type: "link",
