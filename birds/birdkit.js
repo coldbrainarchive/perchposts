@@ -151,9 +151,7 @@
     const g = x.createRadialGradient(cx - rr * .3, cy - rr * .35, 0, cx, cy, rr * 1.2); g.addColorStop(0, css(col, .14)); g.addColorStop(.6, css(col)); g.addColorStop(1, css(col, -.14));
     x.fillStyle = g; build(x); x.globalCompositeOperation = "source-atop"; x.fillStyle = "rgba(255,255,255,.28)"; x.beginPath(); x.ellipse(cx - rr * .35, cy - rr * .4, rr * .3, rr * .18, -.5, 0, 7); x.fill(); ctx.drawImage(t, -PAD, -PAD);
   }
-  const FACE = {
-    wattle: (ctx, G, col) => glossy(ctx, col, x => { const sx = G.B.x + G.E.r * .8, sy = G.B.y + G.E.r * 1.2; x.beginPath(); x.moveTo(sx - G.E.r, sy); x.bezierCurveTo(sx - G.E.r * 1.6, sy + G.E.r * 2.2, sx - G.E.r * .4, sy + G.E.r * 4.2, sx + G.E.r * .4, sy + G.E.r * 3.4); x.bezierCurveTo(sx + G.E.r * 1.4, sy + G.E.r * 4.4, sx + G.E.r * 2.2, sy + G.E.r * 1.8, sx + G.E.r * 1.4, sy); x.closePath(); x.fill(); }, G, G.B.x + G.E.r, G.B.y + G.E.r * 3, G.E.r * 2.4),
-  };
+  const FACE = {};   // face extras (the wattle and the throat pouch were removed at the user's request)
   // ---------- beaks: the emoji's beak is removed and redrawn in its own colours, top/bottom shaded ----------
   // coordinates: base at (bx, by) on the head, beak points left. bh = base height, L = original beak length.
   const BEAKS = {
@@ -194,6 +192,7 @@
     spoon: { k: 1.4, s: t => t < .68 ? .5 : .5 + (t - .68) * 2.3 },
     chisel: { k: 1.35, s: t => 1 - .55 * t },
     needle: { k: 1.5, s: t => .42 - .22 * t },
+    decurved: { k: 1.8, s: t => .62 - .38 * t, bend: t => .6 * Math.pow(t, 2.3) },   // slender, curving down toward the tip (bee-eaters, flycatchers)
     dagger: { k: 1.45, s: t => .78 - .25 * t },
     cone: { shift: .14, k: .78, s: t => 1.22 },
     pouch: { k: 1.45, s: t => .72 - .1 * t, pouch: true },
@@ -222,7 +221,7 @@
     crowned: ["crown"], capped: ["cap"], crested: ["@crest"], plumed: ["@plume"], hooded: ["black hood"], headed: ["crown stripe"], masked: ["face mask"], browed: ["brow ridge"], eyed: ["eye ring"],
     cheeked: ["cheek patch"], eared: ["@ears"], faced: ["bare face"], fronted: ["forehead"], lored: ["lores"], billed: ["@beak"], throated: ["throat"], chinned: ["bib"], bibbed: ["bib"], gorgeted: ["iridescence"],
     necked: ["moustache"], collared: ["nape collar"], ringed: ["eye crescent"], naped: ["nape"], backed: ["two-tone"], mantled: ["white cheeks"], shouldered: ["racing stripe"], rumped: ["cheek blush"],
-    breasted: ["wattle"], chested: ["eyebrow"], bellied: ["fade"], vented: ["scales"], flanked: ["mottled"], sided: ["eye stripe"], spotted: ["spots"], speckled: ["speckles"], streaked: ["streaks"], striped: ["stripes"],
+    breasted: ["two-tone"], chested: ["eyebrow"], bellied: ["fade"], vented: ["scales"], flanked: ["mottled"], sided: ["eye stripe"], spotted: ["spots"], speckled: ["speckles"], streaked: ["streaks"], striped: ["stripes"],
     banded: ["bars"], tipped: ["@tipped"], tailed: ["tuft"], winged: ["frill"], legged: ["feather spikes"], footed: ["eye wattle"],
   };
   const ADJ_RULES = { spotted: "spots", speckled: "speckles", streaked: "streaks", striped: "stripes", banded: "bars", barred: "bars", ringed: "nape collar", collared: "nape collar", crested: "@crest", hooded: "black hood",
@@ -231,13 +230,13 @@
     [/toucan|aracari/, { beak: "oversized" }], [/hornbill/, { beak: "oversized" }], [/eagle|hawk|goshawk|harrier|kite|buzzard|kestrel|skua/, { beak: "hooked", marks: ["brow ridge"] }],
     [/falcon/, { beak: "hooked", marks: ["eye stripe"] }], [/vulture/, { beak: "hooked", marks: ["bare face"] }], [/owl/, { beak: "parrot", marks: ["facial disc"], tops: ["horned brow"] }],
     [/duck|merganser|teal/, { beak: "flat" }], [/flamingo/, { beak: "curved" }], [/ibis|curlew/, { beak: "curved" }], [/woodpecker/, { beak: "chisel", tops: ["flame crest"] }], [/nuthatch|treecreeper/, { beak: "chisel" }],
-    [/pelican/, { beak: "pouch" }], [/stork|heron|egret|bittern|crane|kingfisher|jacamar/, { beak: "dagger" }], [/hummingbird|sunbird|myzomela|honeyeater|bee-eater/, { beak: "needle", marks: ["iridescence"] }],
+    [/pelican/, { beak: "pouch" }], [/stork|heron|egret|bittern|crane|kingfisher|jacamar/, { beak: "dagger" }], [/hummingbird|sunbird|myzomela|honeyeater/, { beak: "needle", marks: ["iridescence"] }], [/bee-eater/, { beak: "decurved", marks: ["iridescence"] }], [/flycatcher/, { beak: "decurved" }],
     [/finch|grosbeak|bunting|sparrow|canary|waxbill|weaver|seedeater|conebill|parrotbill/, { beak: "cone" }], [/parrot|parakeet|lorikeet|cockatoo/, { beak: "parrot" }],
     [/cockatoo/, { tops: ["mohawk"] }], [/grebe/, { tops: ["double crest"] }], [/pigeon|dove/, { tops: ["crown"] }], [/pheasant/, { marks: ["eye wattle"] }], [/barbet|puffbird/, { marks: ["moustache"] }],
     [/nightjar/, { marks: ["mottled"] }], [/cormorant|booby/, { marks: ["bare face"] }], [/albatross|petrel|gull|tern/, { beak: "hooked" }], [/lapwing/, { tops: ["plume"] }],
   ];
   const EXTRAS = [["spots", 3], ["speckles", 3], ["cap", 3], ["cheek patch", 2], ["eye ring", 2], ["eye crescent", 2], ["eyebrow", 2], ["racing stripe", 1], ["scales", 1], ["mottled", 2], ["white cheeks", 2], ["moustache", 2],
-    ["@crest", 2], ["tuft", 2], ["@cheek", 2], ["fan crest", 1], ["frill", 1], ["casque", 1], ["feather spikes", 1], ["wattle", 1]];
+    ["@crest", 2], ["tuft", 2], ["@cheek", 2], ["fan crest", 1], ["frill", 1], ["casque", 1], ["feather spikes", 1], ["throat", 1]];   // throat patch took the wattle's slot so every name keeps its own bird
   const pickW = (r, list) => { const tot = list.reduce((a, x) => a + x[1], 0); let v = r() * tot; for (const [k, w] of list) { v -= w; if (v <= 0) return k; } return list[0][0]; };
   const ROLL = { "@crest": ["crest", "fan crest", "mohawk", "flame crest", "double crest", "crown"], "@plume": ["plume", "feather spikes"], "@ears": ["ear tufts", "horned brow"], "@cheek": ["cheek patch", "white cheeks", "cheek blush"],
     "@eye": ["eye ring", "eye wattle", "eye crescent"], "@beak": ["#beakcol"], "@tipped": ["#tips"] };
@@ -246,7 +245,7 @@
   const BK = { black: [.27, .01, 260], slate: [.42, .02, 250], horn: [.8, .05, 75], yellow: [.86, .15, 98], orange: [.72, .16, 58], red: [.6, .19, 30], pink: [.78, .1, 5], rose: [.65, .08, 10], blue: [.62, .07, 235], ivory: [.88, .04, 90] };
   const BEAK_TINT = [
     [/toucan|aracari/, []],
-    [/raven|drongo|magpie|jay|swift|swallow|martin|antbird|antshrike|kingfisher|hummingbird|sunbird|myzomela|honeyeater|cuckoo|monarch|waxwing|avocet|ibis|cotinga|pitta|bulbul|flowerpecker|dacnis|cockatoo|skua|grebe|cormorant|nightjar|drongo|shrike/, [BK.black, BK.black, BK.slate]],
+    [/raven|drongo|magpie|jay|swift|swallow|martin|antbird|antshrike|kingfisher|hummingbird|sunbird|myzomela|honeyeater|cuckoo|monarch|waxwing|avocet|ibis|cotinga|pitta|bulbul|flowerpecker|dacnis|cockatoo|skua|grebe|cormorant|nightjar|drongo|shrike|bee-eater|flycatcher/, [BK.black, BK.black, BK.slate]],
     [/blackbird|thrush|mockingbird/, [BK.orange, BK.yellow, BK.black]],
     [/starling|gull|heron|egret|bittern|barbet|trogon|canary/, [BK.yellow, BK.yellow, BK.orange]],
     [/finch|grosbeak|bunting|sparrow|weaver|parrotbill|conebill|seedeater/, [BK.horn, BK.ivory, BK.pink, BK.yellow, BK.slate]],
