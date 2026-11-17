@@ -1525,6 +1525,36 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     await env.DB.prepare(`UPDATE posts SET last_activity = ? WHERE id = ?`).bind(now, post_id).run();
   }
   __name(bumpPost, "bumpPost");
+  async function postResp(ids, me) {
+    const out = {};
+    for (let i = 0; i < ids.length; i += 30) {
+      const chunk = ids.slice(i, i + 30), ph = chunk.map(() => "?").join(",");
+      const { results = [] } = await env.DB.prepare(
+        `SELECT post_id, COUNT(DISTINCT who) AS n FROM (
+           SELECT post_id, COALESCE(username, 'b:' || browser_id) AS who FROM post_votes WHERE value > 0 AND post_id IN (${ph})
+           UNION ALL SELECT post_id, username FROM post_reactions WHERE post_id IN (${ph})
+           UNION ALL SELECT post_id, giver FROM worms WHERE post_id IN (${ph})) GROUP BY post_id`
+      ).bind(...chunk, ...chunk, ...chunk).all();
+      for (const id of chunk) out[id] = { n: 0, m: 0, emoji: null, worms: 0 };
+      for (const r of results) out[r.post_id].n = r.n;
+      if (me) {
+        const [{ results: f = [] }, { results: e = [] }, { results: w = [] }] = await Promise.all([
+          env.DB.prepare(`SELECT post_id FROM post_votes WHERE username = ? AND value > 0 AND post_id IN (${ph})`).bind(me, ...chunk).all(),
+          env.DB.prepare(`SELECT post_id, emoji FROM post_reactions WHERE username = ? AND post_id IN (${ph})`).bind(me, ...chunk).all(),
+          env.DB.prepare(`SELECT post_id, COUNT(*) AS c FROM worms WHERE giver = ? AND post_id IN (${ph}) GROUP BY post_id`).bind(me, ...chunk).all()
+        ]);
+        for (const r of e) out[r.post_id].emoji = r.emoji;
+        for (const r of w) out[r.post_id].worms = r.c;
+        const flapped = new Set(f.map((r) => r.post_id));
+        for (const id of chunk) {
+          const o = out[id];
+          o.m = flapped.has(id) ? 1 : o.emoji || o.worms ? 2 : 0;
+        }
+      }
+    }
+    return out;
+  }
+  __name(postResp, "postResp");
   async function getPostVoteSummary(postId, browserId) {
     const { results } = await env.DB.prepare(
       `SELECT value, browser_id FROM post_votes WHERE post_id = ?`
@@ -1976,8 +2006,12 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       if (flappedBy) {
         const pageLimit = Math.min(parseInt(url.searchParams.get("limit") || "50") || 50, 100);
         const { results: fl = [] } = await env.DB.prepare(
-          `SELECT post_id, created_at FROM post_votes WHERE username = ? AND value > 0${before ? " AND created_at < ?" : ""} ORDER BY created_at DESC LIMIT ?`
-        ).bind(...before ? [flappedBy, before, pageLimit] : [flappedBy, pageLimit]).all();
+          `SELECT post_id, MAX(t) AS created_at FROM (
+             SELECT post_id, created_at AS t FROM post_votes WHERE username = ? AND value > 0
+             UNION ALL SELECT post_id, created_at FROM post_reactions WHERE username = ?
+             UNION ALL SELECT post_id, created_at FROM worms WHERE giver = ? AND post_id IS NOT NULL)
+           GROUP BY post_id${before ? " HAVING MAX(t) < ?" : ""} ORDER BY created_at DESC LIMIT ?`
+        ).bind(...before ? [flappedBy, flappedBy, flappedBy, before, pageLimit] : [flappedBy, flappedBy, flappedBy, pageLimit]).all();
         const when = new Map(fl.map((r) => [r.post_id, r.created_at])), ids = [...when.keys()], rows2 = [];
         for (let i = 0; i < ids.length; i += 90) {
           const chunk = ids.slice(i, i + 90);
@@ -1993,7 +2027,10 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         const range = url.searchParams.get("range");
         const since2 = range === "all" ? "" : new Date(Date.now() - (range === "day" ? 1 : 7) * 864e5).toISOString();
         const { results: top = [] } = await env.DB.prepare(
-          rankSort === "flaps" ? `SELECT post_id, SUM(value) AS n FROM post_votes WHERE created_at >= ? GROUP BY post_id HAVING n > 0 ORDER BY n DESC LIMIT 500` : `SELECT post_id, COUNT(*) AS n FROM comments WHERE deleted = 0 AND (username IS NULL OR username != '__system__') AND created_at >= ? GROUP BY post_id ORDER BY n DESC LIMIT 500`
+          rankSort === "flaps" ? `SELECT post_id, COUNT(DISTINCT who) AS n FROM (
+               SELECT post_id, COALESCE(username, 'b:' || browser_id) AS who FROM post_votes WHERE value > 0 AND created_at >= ?1
+               UNION ALL SELECT post_id, username FROM post_reactions WHERE created_at >= ?1
+               UNION ALL SELECT post_id, giver FROM worms WHERE post_id IS NOT NULL AND created_at >= ?1) GROUP BY post_id ORDER BY n DESC LIMIT 500` : `SELECT post_id, COUNT(*) AS n FROM comments WHERE deleted = 0 AND (username IS NULL OR username != '__system__') AND created_at >= ? GROUP BY post_id ORDER BY n DESC LIMIT 500`
         ).bind(since2).all();
         const countOf = new Map(top.map((r) => [r.post_id, r.n]));
         const ids = [...countOf.keys()];
@@ -2484,10 +2521,74 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       if (post.is_huddle && !isHuddleMember(post, username)) return json({ error: "Not found" }, 404);
       if (!receiver || receiver === "__system__" || ["NewsBot", "ScienceBot", "NatureBot", "SportsBot"].includes(receiver) || String(post.browser_id || "").startsWith("bot-") && postId)
         return json({ error: "Worms only go to people" }, 400);
-      await env.DB.prepare(`INSERT INTO worms (id, giver, receiver, post_id, comment_id, created_at) VALUES (?, ?, ?, ?, ?, ?)`).bind(crypto.randomUUID(), username, receiver, postId, commentId, now).run();
+      const count = Math.max(1, Math.min(50, parseInt(body.count) || 1));
+      const ins = env.DB.prepare(`INSERT INTO worms (id, giver, receiver, post_id, comment_id, created_at) VALUES (?, ?, ?, ?, ?, ?)`);
+      await env.DB.batch(Array.from({ length: count }, () => ins.bind(crypto.randomUUID(), username, receiver, postId, commentId, now)));
       const col = commentId ? "comment_id" : "post_id", id = commentId || postId;
       const r = await env.DB.prepare(`SELECT COUNT(*) AS n, SUM(CASE WHEN giver = ? THEN 1 ELSE 0 END) AS m FROM worms WHERE ${col} = ?`).bind(username, id).first();
-      return json({ success: true, worms: r?.n || 0, mine: r?.m || 0 });
+      const pr = postId ? (await postResp([postId], username))[postId] : null;
+      return json({ success: true, worms: r?.n || 0, mine: r?.m || 0, given: count, ...pr ? { score: pr.n, myVote: pr.m } : {} });
+    } catch (err) {
+      return serverError(err);
+    }
+  }
+  if (url.pathname === "/post-responses") {
+    try {
+      const ids = (url.searchParams.get("post_ids") || "").split(",").filter(Boolean).slice(0, 120);
+      return json({ posts: ids.length ? await postResp(ids, username) : {} });
+    } catch (err) {
+      return serverError(err);
+    }
+  }
+  if (url.pathname === "/react-post" && request.method === "POST") {
+    if (!username) return signInRequired();
+    try {
+      if (await isBanned()) return json({ error: "Banned" }, 403);
+      const emoji = String(body.emoji || "").slice(0, 16);
+      if (!emoji) return json({ error: "Missing emoji" }, 400);
+      const post = await env.DB.prepare(`SELECT id, deleted, frozen, is_huddle FROM posts WHERE id = ?`).bind(String(body.post_id || "")).first();
+      if (!post || post.deleted) return json({ error: "That post is gone" }, 404);
+      if (post.frozen) return json({ error: "This post is archived" }, 403);
+      if (post.is_huddle) return json({ error: "Huddle posts don't take reactions" }, 400);
+      const cur = await env.DB.prepare(`SELECT id, emoji FROM post_reactions WHERE post_id = ? AND username = ?`).bind(post.id, username).first();
+      if (cur && cur.emoji === emoji) await env.DB.prepare(`DELETE FROM post_reactions WHERE id = ?`).bind(cur.id).run();
+      else if (cur) await env.DB.prepare(`UPDATE post_reactions SET emoji = ?, created_at = ? WHERE id = ?`).bind(emoji, now, cur.id).run();
+      else await env.DB.prepare(`INSERT INTO post_reactions (id, post_id, username, emoji, created_at) VALUES (?, ?, ?, ?, ?)`).bind(crypto.randomUUID(), post.id, username, emoji, now).run();
+      const pr = (await postResp([post.id], username))[post.id];
+      return json({ success: true, score: pr.n, myVote: pr.m, emoji: pr.emoji });
+    } catch (err) {
+      return serverError(err);
+    }
+  }
+  if (url.pathname === "/post-reactions") {
+    try {
+      const pid = url.searchParams.get("post_id") || "";
+      const post = await env.DB.prepare(`SELECT id, deleted, is_huddle, huddle_members, username FROM posts WHERE id = ?`).bind(pid).first();
+      if (!post || post.deleted || post.is_huddle && !seeAllHuddles && !isHuddleMember(post, username)) return json({ people: [] });
+      const [{ results: f = [] }, { results: e = [] }, { results: w = [] }] = await Promise.all([
+        env.DB.prepare(`SELECT username, created_at FROM post_votes WHERE post_id = ? AND value > 0 AND username IS NOT NULL`).bind(pid).all(),
+        env.DB.prepare(`SELECT username, emoji, created_at FROM post_reactions WHERE post_id = ?`).bind(pid).all(),
+        env.DB.prepare(`SELECT giver AS username, COUNT(*) AS c, MAX(created_at) AS created_at FROM worms WHERE post_id = ? GROUP BY giver`).bind(pid).all()
+      ]);
+      const by = /* @__PURE__ */ new Map(), row = /* @__PURE__ */ __name((u) => by.get(u) || (by.set(u, { username: u, flap: false, emoji: null, worms: 0, t: "" }), by.get(u)), "row");
+      for (const r of f) {
+        const o = row(r.username);
+        o.flap = true;
+        if (r.created_at > o.t) o.t = r.created_at;
+      }
+      for (const r of e) {
+        const o = row(r.username);
+        o.emoji = r.emoji;
+        if (r.created_at > o.t) o.t = r.created_at;
+      }
+      for (const r of w) {
+        const o = row(r.username);
+        o.worms = r.c;
+        if (r.created_at > o.t) o.t = r.created_at;
+      }
+      const extinct2 = await extinctNames();
+      const people = [...by.values()].sort((a, b) => b.t.localeCompare(a.t)).map((o) => extinct2.has(o.username) ? { ...o, username: EXTINCT_NAME } : o);
+      return json({ people });
     } catch (err) {
       return serverError(err);
     }
@@ -2530,9 +2631,8 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         if (existing?.id) {
           await env.DB.prepare(`DELETE FROM post_votes WHERE id = ?`).bind(existing.id).run();
         }
-        const newScore2 = prevScore - prevValue;
-        const newCount2 = existing?.id ? prevCount - 1 : prevCount;
-        return json({ success: true, score: newScore2, myVote: 0, voteCount: newCount2 });
+        const pr2 = (await postResp([body.post_id], username))[body.post_id];
+        return json({ success: true, score: pr2.n, myVote: pr2.m, voteCount: pr2.n });
       }
       if (existing?.id) {
         await env.DB.prepare(`UPDATE post_votes SET value = ?, username = ?, ip_hash = NULL, is_mod = ?, mod_user_id = ? WHERE id = ?`).bind(body.value, username, isModerator ? 1 : 0, isModerator ? authUser.sub : null, existing.id).run();
@@ -2553,9 +2653,8 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         ).run();
       }
       await bumpPost(body.post_id);
-      const newScore = prevScore - prevValue + body.value;
-      const newCount = existing?.id ? prevCount : prevCount + 1;
-      return json({ success: true, score: newScore, myVote: body.value, voteCount: newCount });
+      const pr = (await postResp([body.post_id], username))[body.post_id];
+      return json({ success: true, score: pr.n, myVote: pr.m, voteCount: pr.n });
     } catch (err) {
       return serverError(err);
     }
