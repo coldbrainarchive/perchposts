@@ -2537,6 +2537,20 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       return serverError(err);
     }
   }
+  if (url.pathname === "/worm-givers") {
+    try {
+      const cid = url.searchParams.get("comment_id"), pid = url.searchParams.get("post_id");
+      if (!cid && !pid) return json({ givers: [] });
+      const postId = pid || (await env.DB.prepare(`SELECT post_id FROM comments WHERE id = ?`).bind(cid).first())?.post_id;
+      const post = postId && await env.DB.prepare(`SELECT id, deleted, is_huddle, huddle_members, username FROM posts WHERE id = ?`).bind(postId).first();
+      if (!post || post.deleted || post.is_huddle && !seeAllHuddles && !isHuddleMember(post, username)) return json({ givers: [] });
+      const { results = [] } = await env.DB.prepare(`SELECT giver AS username, COUNT(*) AS c, MAX(created_at) AS t FROM worms WHERE ${cid ? "comment_id" : "post_id"} = ? GROUP BY giver ORDER BY t DESC`).bind(cid || pid).all();
+      const extinct2 = await extinctNames();
+      return json({ givers: results.map((r) => ({ username: extinct2.has(r.username) ? EXTINCT_NAME : r.username, c: r.c })) });
+    } catch (err) {
+      return serverError(err);
+    }
+  }
   if (url.pathname === "/my-worms") {
     if (!username) return signInRequired();
     try {
