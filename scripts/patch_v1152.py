@@ -50,4 +50,6 @@ css = ("body .ww-ov{flex-direction:column;align-items:center}"
        "body .ww-post{max-height:100%;overflow:hidden;pointer-events:none;border-radius:20px;box-shadow:0 12px 40px rgba(0,0,0,.6)}body .ww-post .feed-post-card{margin:0!important}"
        "body .ww-worms{padding:14px 18px 10px}body .ww-worms .pp-pick-worm{border-top:0}")
 patch("body .lb-ic{", css + "body .lb-ic{", 'styles')
+n=c.count('<span class="pp-pick-wl">Give worms</span>');print('worm panels to rename:',n)
+c=c.replace('<span class="pp-pick-wl">Give worms</span>','<span class="pp-pick-wl">Worm wallet</span>')
 open(dst, 'w', encoding='utf-8').write(c); print('Wrote', dst)
