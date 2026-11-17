@@ -3256,8 +3256,43 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       ).bind(JSON.stringify(postIds), browser_id, me, clearedSince).all();
       (votes || []).forEach((v, i) => {
         const who = v.username || `Anon`;
-        results.push({ id: `v-${v.post_id}-${v.browser_id}`, type: "vote", icon: "\u{1FABD}", text: `${who} gave your post a flap`, subtext: `"${(postTitleMap[v.post_id] || "").slice(0, 50)}"`, time: v.created_at, postId: v.post_id });
+        results.push({ id: `v-${v.post_id}-${v.browser_id}`, type: "vote", icon: "\u{1FABD}", text: `${who} flapped your post. Flap flap!`, subtext: `"${(postTitleMap[v.post_id] || "").slice(0, 50)}"`, time: v.created_at, postId: v.post_id });
       });
+    }
+    if (me) {
+      const { results: wg = [] } = await env.DB.prepare(
+        `SELECT giver, post_id, comment_id, MAX(created_at) AS created_at, COUNT(*) AS n FROM worms WHERE receiver = ? AND giver != ? AND created_at > ? GROUP BY giver, post_id, comment_id ORDER BY created_at DESC LIMIT 60`
+      ).bind(me, me, clearedSince).all();
+      if (wg.length) {
+        const cids = [...new Set(wg.filter((w) => w.comment_id).map((w) => w.comment_id))];
+        const cm = /* @__PURE__ */ new Map();
+        if (cids.length) {
+          const { results: cr = [] } = await env.DB.prepare(`SELECT id, post_id, content FROM comments WHERE id IN (${ID_LIST})`).bind(JSON.stringify(cids)).all();
+          for (const r of cr) cm.set(r.id, r);
+        }
+        const pids = [...new Set(wg.map((w) => w.post_id || cm.get(w.comment_id)?.post_id).filter(Boolean))];
+        const titles = /* @__PURE__ */ new Map();
+        if (pids.length) {
+          const { results: pr = [] } = await env.DB.prepare(`SELECT id, title FROM posts WHERE id IN (${ID_LIST})`).bind(JSON.stringify(pids)).all();
+          for (const r of pr) titles.set(r.id, r.title || "");
+        }
+        for (const w of wg) {
+          const c = w.comment_id ? cm.get(w.comment_id) : null;
+          if (w.comment_id && !c) continue;
+          const postId = w.post_id || c.post_id, many = w.n === 1 ? "a worm" : `${w.n} worms`;
+          results.push({
+            id: `w-${w.giver}-${w.comment_id || w.post_id}`,
+            type: "worm",
+            icon: "\u{1FAB1}",
+            text: c ? `${w.giver} fed you ${many} for your chirp. Yummy!` : `${w.giver} fed you ${many}. Yummy!`,
+            subtext: `"${(titles.get(postId) || "").slice(0, 50)}"`,
+            preview: c ? (String(c.content || "").split(/\s*\[ATTACH/)[0].trim() || "Photo").slice(0, 80) : void 0,
+            time: w.created_at,
+            postId,
+            targetId: w.comment_id || void 0
+          });
+        }
+      }
     }
     if (commentIds.length) {
       const ph = ID_LIST;
