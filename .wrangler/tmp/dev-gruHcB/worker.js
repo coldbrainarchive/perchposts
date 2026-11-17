@@ -2659,7 +2659,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const prevCount = preSummary.voteCount;
       if (body.value === 0) {
         if (existing?.id) {
-          await env.DB.prepare(`DELETE FROM post_votes WHERE id = ?`).bind(existing.id).run();
+          await env.DB.prepare(`DELETE FROM post_votes WHERE post_id = ? AND username = ?`).bind(body.post_id, username).run();
         }
         const pr2 = (await postResp([body.post_id], username))[body.post_id];
         return json({ success: true, score: pr2.n, myVote: pr2.m, voteCount: pr2.n });

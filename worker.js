@@ -2044,8 +2044,10 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const prevCount = preSummary.voteCount;
 
       if (body.value === 0) {
+        // remove every flap row you have on this post: older flaps were saved once per device, so one person
+        // can have several rows, and deleting just one left the post still flapped
         if (existing?.id) {
-          await env.DB.prepare(`DELETE FROM post_votes WHERE id = ?`).bind(existing.id).run();
+          await env.DB.prepare(`DELETE FROM post_votes WHERE post_id = ? AND username = ?`).bind(body.post_id, username).run();
         }
         const pr = (await postResp([body.post_id], username))[body.post_id];
         return json({ success: true, score: pr.n, myVote: pr.m, voteCount: pr.n });
