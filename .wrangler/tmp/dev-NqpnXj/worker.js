@@ -1698,7 +1698,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         row.names = JSON.stringify(fixed);
         await env.DB.prepare(`UPDATE nests SET names = ? WHERE device = ?`).bind(row.names, dev).run();
       }
-      if (row && (!body.fresh || Date.now() - Date.parse(row.issued_at) < NEST_WAIT)) return out(row);
+      if (row && Date.now() - Date.parse(row.issued_at) < NEST_WAIT) return out(row);
       const since = new Date(Date.now() - NEST_WAIT).toISOString();
       if (ip_hash && await siteSetting("signup_limit", "off") !== "off") {
         const { n } = await env.DB.prepare(`SELECT COUNT(*) AS n FROM nests WHERE net = ? AND issued_at > ?`).bind(ip_hash, since).first();
@@ -1754,8 +1754,9 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     }
     try {
       const nd = typeof body.nest_device === "string" && /^[0-9a-f]{32}$/.test(body.nest_device) ? body.nest_device : null;
-      const nestRow = nd && await env.DB.prepare(`SELECT names FROM nests WHERE device = ?`).bind(nd).first();
+      const nestRow = nd && await env.DB.prepare(`SELECT names, issued_at FROM nests WHERE device = ?`).bind(nd).first();
       if (!nestRow || !JSON.parse(nestRow.names).includes(uname.trim())) return json({ error: "Pick a bird from your nest. If the page has been open a long time, reload it." }, 400);
+      if (Date.now() - Date.parse(nestRow.issued_at) > NEST_WAIT + 6e4) return json({ error: "Your nest timed out. Pick a bird from your new eggs." }, 400);
       if (nestBlocked(uname.trim())) return json({ error: "That name isn't available any more. Please pick another bird from your nest." }, 400);
       const existing = await env.DB.prepare(`SELECT id FROM mod_users WHERE LOWER(username) = LOWER(?)`).bind(uname.trim()).first();
       if (existing) return json({ error: "Username already taken" }, 409);

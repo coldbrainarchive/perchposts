@@ -186,7 +186,7 @@ function _ppNest(root, api, onPick) {
   }
 
   // ---------- state: names and the clock come from the server; taps and the pick are kept in this browser ----------
-  let nest = null, eggs = [];
+  let nest = null, eggs = [], refreshing = false, timedOut = 0;   // the nest times out after 15 minutes: new eggs, old names released
   const dirs = [], unsubs = [];
   const save = () => { try { localStorage.setItem("pp_nest", JSON.stringify(nest)); } catch (e) {} };
   const loadLocal = () => { try { return JSON.parse(localStorage.getItem("pp_nest")); } catch (e) { return null; } };
@@ -198,11 +198,14 @@ function _ppNest(root, api, onPick) {
       .then(j => {
         if (!alive) return;
         const old = loadLocal(), same = old && Array.isArray(old.names) && old.names.join() === j.names.join();
+        const changed = !same && nest && nest.names && nest.names.join() !== j.names.join();
         nest = same ? old : { names: j.names, taps: j.names.map(() => 0), sel: null };
-        nest.until = Date.now() + j.left_ms; save();
+        nest.until = Date.now() + Math.max(j.left_ms, 0); save(); refreshing = j.left_ms <= 0;
+        if (changed) { timedOut = Date.now(); onPick(""); }
+        if (j.left_ms <= 0) later(() => get(true), 60000);   // no new eggs yet (busy network): try again in a minute
         _ppKit.ready.then(() => { if (alive) render(); });
       })
-      .catch(() => { if (!alive) return; hint.innerHTML = `Couldn't get your eggs. <b style="cursor:pointer;text-decoration:underline">Try again</b>`; hint.querySelector("b").onclick = () => get(fresh); });
+      .catch(() => { if (!alive) return; refreshing = false; hint.innerHTML = `Couldn't get your eggs. <b style="cursor:pointer;text-decoration:underline">Try again</b>`; hint.querySelector("b").onclick = () => get(fresh); });
   }
   function render() {
     unsubs.splice(0).forEach(u => u()); box.innerHTML = ""; eggs = [];
@@ -259,12 +262,13 @@ function _ppNest(root, api, onPick) {
       tag.append(f, nm);
     } else { tag.className = "ppn-tag empty"; tag.style.background = ""; tag.style.borderColor = ""; tag.textContent = "Crack an egg to meet your bird"; }
     const left = nest.until - Date.now(), ss = Math.max(0, Math.ceil(left / 1000)), clock = `${Math.floor(ss / 60)}:${String(ss % 60).padStart(2, "0")}`;
-    const fresh = hatched === 5 && left <= 0;
-    freshBtn.style.display = fresh ? "block" : "none";
-    hint.style.display = fresh ? "none" : "";              // the fresh-nest button takes the hint's place
-    hint.innerHTML = hatched === 0 || fresh ? "" :
-      hatched < 5 ? `Tap any hatchling to switch <span style="color:#475569">· ${5 - hatched} egg${5 - hatched > 1 ? "s" : ""} left</span>` :
-      `No more eggs. New nest in <b>${clock}</b>`;
+    if (left <= 0 && !refreshing) { refreshing = true; hint.textContent = "Your nest timed out. Fetching new eggs…"; get(true); return; }
+    freshBtn.style.display = "none"; hint.style.display = "";
+    const soon = `<span style="color:#475569">New nest in <b style="color:#94a3b8">${clock}</b></span>`;
+    hint.innerHTML = Date.now() - timedOut < 5000 ? `Your nest timed out, so here are new eggs` :
+      hatched === 0 ? soon :
+      hatched < 5 ? `Tap any hatchling to switch <span style="color:#475569">· ${5 - hatched} egg${5 - hatched > 1 ? "s" : ""} left · </span>${soon}` :
+      `No more eggs. ${soon}`;
   }
   function fitLid(lid, url, clan) {
     const e = _ppKit.eye(clan), pct = v => (v / e.W * 100) + "%", d = e.r * 2.35;
