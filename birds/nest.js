@@ -179,6 +179,12 @@ function _ppNest(root, api, onPick) {
       <g clip-path="url(#${id})" class="${part === "bot" ? "half" : ""}"><path d="${EGG}" fill="url(#g${id})"/><g clip-path="url(#e${id})">${sp}</g></g>
       ${part === "top" ? `<g clip-path="url(#e${id})"><path class="crack c1" d="${ck.first}"/><path class="crack c2" d="${ck.second}"/></g>` : ""}</svg>`;
   }
+  // the straws between the eggs are always there (empty nest too), so eggs drop in between them instead of straws popping in
+  function weaves() {
+    if (box.querySelector(".ppn-weave")) return;
+    SPOTS.forEach(([x, y], i) => { const w = document.createElementNS(NS, "svg"); w.setAttribute("class", "ppn-l ppn-weave"); w.setAttribute("viewBox", "0 0 320 222");
+      w.style.zIndex = 2 * Math.round(y) + 1; w.innerHTML = weaveFor(i, x, y); box.appendChild(w); });
+  }
   function weaveFor(i, x, y) {
     const r = rng(500 + i * 31); let s = "";
     for (let k = 0; k < 5; k++) {
@@ -196,7 +202,7 @@ function _ppNest(root, api, onPick) {
   function pick(i) { nest.sel = i; onPick(i == null ? "" : nest.names[i]); }
   // an empty nest: just the button (and why, if it timed out)
   function empty(msg) {
-    unsubs.splice(0).forEach(u => u()); box.innerHTML = ""; eggs = []; nest = null;
+    unsubs.splice(0).forEach(u => u()); box.querySelectorAll(".egg").forEach(e => e.remove()); eggs = []; nest = null; weaves();
     try { localStorage.removeItem("pp_nest"); } catch (e) {}
     onPick(""); tag.className = "ppn-tag empty"; tag.style.background = ""; tag.style.borderColor = ""; tag.textContent = "Your bird will appear here";
     busy = false; root.classList.add("ppn-empty"); freshBtn.style.display = "none"; hint.style.display = ""; hint.textContent = msg || "Tap nest to get your eggs";
@@ -218,7 +224,7 @@ function _ppNest(root, api, onPick) {
       .catch(() => { if (!alive) return; busy = false; hint.style.display = ""; hint.innerHTML = `Couldn't get your eggs. <b style="cursor:pointer;text-decoration:underline">Try again</b>`; hint.querySelector("b").onclick = () => get(fresh, peek); });
   }
   function render() {
-    unsubs.splice(0).forEach(u => u()); box.innerHTML = ""; eggs = [];
+    unsubs.splice(0).forEach(u => u()); box.querySelectorAll(".egg").forEach(e => e.remove()); eggs = []; weaves();
     const pats = _ppEggs.nestPatterns(nest.names);   // no two eggs in a nest with the same pattern
     nest.names.forEach((name, i) => {
       const [x, y] = SPOTS[i], clan = clanOf(name), b = document.createElement("button"), ck = crackFor(i, name), z = 2 * Math.round(y);
@@ -231,8 +237,6 @@ function _ppNest(root, api, onPick) {
       b.innerHTML = eggSVG(i, name, "bot", ck, pats[i]) + `<div class=bird><div class=face style="--dir:${dirs[i]}"><img alt=""><i class=lid></i></div></div>` + eggSVG(i, name, "top", ck, pats[i]);
       b.onclick = () => tap(i);
       box.appendChild(b); eggs.push(b);
-      const w = document.createElementNS(NS, "svg"); w.setAttribute("class", "ppn-l"); w.setAttribute("viewBox", "0 0 320 222");
-      w.style.zIndex = z + 1; w.innerHTML = weaveFor(i, x, y); box.appendChild(w);
       setStage(i, true);
       const img = b.querySelector(".bird img");
       const want = () => { const r = _ppKit.get(name, clan, "f"); if (r && !r.fail && !img.getAttribute("src")) { img.onload = () => img.classList.add("ok"); img.src = r.f; fitLid(b.querySelector(".lid"), r.f, clan); if (nest.sel === i) update(); } return r; };
@@ -311,7 +315,7 @@ function _ppNest(root, api, onPick) {
     later(wobbleLoop, 1600 + Math.random() * 2600);
   }
   root.querySelector(".ppn-wrap").addEventListener("click", () => { if (!nest && !busy) get(true); });   // an empty nest is the button
-  get(false, true);
+  weaves(); get(false, true);
   later(wobbleLoop, 1500); later(birdLoop, 1000); for (let i = 0; i < 5; i++) later(() => blinkLoop(i), 800 + Math.random() * 3000);
   const tick = setInterval(update, 1000);
   return () => { alive = false; clearInterval(tick); timers.forEach(clearTimeout); unsubs.forEach(u => u()); };
