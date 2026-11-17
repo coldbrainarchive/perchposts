@@ -2626,7 +2626,14 @@ async function handleRequest(request, env, ctx, corsHeaders) {
           const { results = [] } = await env.DB.prepare(
             `SELECT ${col} AS id, COUNT(*) AS n, SUM(CASE WHEN giver = ? THEN 1 ELSE 0 END) AS m FROM worms WHERE ${col} IN (${chunk.map(() => "?").join(",")}) GROUP BY ${col}`
           ).bind(username || "", ...chunk).all();
-          for (const r of results) out[key][r.id] = { n: r.n, m: r.m || 0 };
+          for (const r of results) out[key][r.id] = { n: r.n, m: r.m || 0, g: [] };
+          const have = chunk.filter((id) => out[key][id]);
+          if (have.length) {
+            const { results: gv = [] } = await env.DB.prepare(
+              `SELECT ${col} AS id, giver AS username, COUNT(*) AS c, MAX(created_at) AS t FROM worms WHERE ${col} IN (${have.map(() => "?").join(",")}) GROUP BY ${col}, giver ORDER BY t DESC`
+            ).bind(...have).all();
+            for (const r of gv) out[key][r.id].g.push({ username: r.username, c: r.c });
+          }
         }
       }
       return json(out);
