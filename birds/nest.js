@@ -30,6 +30,9 @@ const _ppNestCss = `
 @keyframes ppn-drop{0%{translate:0 var(--dy);animation-timing-function:cubic-bezier(.55,0,1,.45)}52%{translate:0 0;animation-timing-function:cubic-bezier(0,.55,.45,1)}68%{translate:0 -24px;animation-timing-function:cubic-bezier(.55,0,1,.45)}80%{translate:0 0;animation-timing-function:cubic-bezier(0,.55,.45,1)}90%{translate:0 -8px;animation-timing-function:cubic-bezier(.55,0,1,.45)}100%{translate:0 0}}
 .ppn .egg.drop{animation:ppn-drop 1s both;pointer-events:none}
 @media (prefers-reduced-motion:reduce){.ppn .egg.drop{animation:none}}
+@keyframes ppn-roll{0%{translate:0 0;rotate:0deg;opacity:1;animation-timing-function:cubic-bezier(.3,0,.6,1)}22%{translate:calc(var(--rx) * .18) -16px;rotate:calc(var(--rr) * .15);animation-timing-function:cubic-bezier(.4,0,.9,.6)}80%{opacity:1}100%{translate:var(--rx) 120px;rotate:var(--rr);opacity:0}}
+.ppn .egg.roll{animation:ppn-roll 1.1s both;pointer-events:none;z-index:950!important}
+@media (prefers-reduced-motion:reduce){.ppn .egg.roll{animation:none;opacity:0}}
 @keyframes ppn-blink{0%,100%{transform:scaleY(0)}45%,60%{transform:scaleY(1)}}
 @keyframes ppn-wob{0%,100%{rotate:0deg}20%{rotate:-7deg}45%{rotate:6deg}70%{rotate:-3deg}85%{rotate:2deg}}
 @keyframes ppn-hit{0%,100%{rotate:0deg;translate:0 0}25%{rotate:-9deg;translate:-1px 0}55%{rotate:8deg;translate:1px -2px}80%{rotate:-3deg}}
@@ -195,7 +198,7 @@ function _ppNest(root, api, onPick) {
   }
 
   // ---------- state: names and the clock come from the server; taps and the pick are kept in this browser ----------
-  let nest = null, eggs = [], dropNext = false, busy = false;   // a nest starts empty: tap for eggs; after 15 minutes the eggs go (names released) and it's empty again
+  let nest = null, eggs = [], dropNext = false, busy = false, leaving = false;   // a nest starts empty: tap for eggs; after 15 minutes the eggs go (names released) and it's empty again
   const dirs = [], unsubs = [];
   const save = () => { try { localStorage.setItem("pp_nest", JSON.stringify(nest)); } catch (e) {} };
   const loadLocal = () => { try { return JSON.parse(localStorage.getItem("pp_nest")); } catch (e) { return null; } };
@@ -279,7 +282,12 @@ function _ppNest(root, api, onPick) {
       tag.append(f, nm);
     } else { tag.className = "ppn-tag empty"; tag.style.background = ""; tag.style.borderColor = ""; tag.textContent = "Crack an egg to meet your bird"; }
     const left = nest.until - Date.now(), ss = Math.max(0, Math.ceil(left / 1000)), clock = `${Math.floor(ss / 60)}:${String(ss % 60).padStart(2, "0")}`;
-    if (left <= 0) return empty("Tap nest to get new eggs");
+    if (left <= 0) {   // time's up: the eggs roll out of the nest, then it's empty
+      if (leaving) return; leaving = true; hint.textContent = "";
+      eggs.forEach((b, i) => { const out = SPOTS[i][0] < 160 ? -1 : SPOTS[i][0] > 160 ? 1 : (i % 2 ? 1 : -1);
+        b.style.setProperty("--rx", out * (190 + i * 12) + "px"); b.style.setProperty("--rr", out * (420 + i * 40) + "deg"); b.style.animationDelay = (i * 110) + "ms"; b.classList.remove("hit", "wob", "drop"); b.classList.add("roll"); });
+      later(() => { leaving = false; empty("Tap nest to get new eggs"); }, 1100 + eggs.length * 110 + 60); return;
+    }
     hint.innerHTML = `<span style="color:#475569">New nest in <b style="color:#94a3b8">${clock}</b></span>`;   // just the clock
   }
   function fitLid(lid, url, clan) {
@@ -310,7 +318,7 @@ function _ppNest(root, api, onPick) {
     later(birdLoop, 700 + Math.random() * 1600);
   }
   function wobbleLoop() {
-    const un = nest ? eggs.filter((e, i) => nest.taps[i] < 3 && !e.classList.contains("hit") && !e.classList.contains("drop")) : [];
+    const un = nest && !leaving ? eggs.filter((e, i) => nest.taps[i] < 3 && !e.classList.contains("hit") && !e.classList.contains("drop")) : [];
     if (un.length) { const e = un[Math.floor(Math.random() * un.length)]; e.classList.remove("wob"); void e.offsetWidth; e.classList.add("wob"); }
     later(wobbleLoop, 1600 + Math.random() * 2600);
   }
