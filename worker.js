@@ -816,7 +816,15 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     await env.DB.prepare(`UPDATE posts SET last_activity = ? WHERE id = ?`).bind(now, post_id).run();
   }
 
-  // People who responded to each post: flapped, reacted or gave worms (each person counts once).
+  // Worms you have: what you had before trading (worm_start) + worms received - worms given
+  async function wormBalance(name) {
+    if (!name) return 0;
+    const r = await env.DB.prepare(`SELECT COALESCE((SELECT worm_start FROM mod_users WHERE username = ?1), 0)
+      + (SELECT COUNT(*) FROM worms WHERE receiver = ?1) - (SELECT COUNT(*) FROM worms WHERE giver = ?1) AS b`).bind(name).first();
+    return Math.max(0, r?.b || 0);
+  }
+
+  // People who responded to each post: flapped or gave worms (each person counts once).
   // m: 1 = you flapped, 2 = you reacted or gave worms but didn't flap, 0 = nothing. Also your emoji and worms given.
   async function postResp(ids, me) {
     const out = {};
@@ -825,17 +833,14 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const { results = [] } = await env.DB.prepare(
         `SELECT post_id, COUNT(DISTINCT who) AS n FROM (
            SELECT post_id, COALESCE(username, 'b:' || browser_id) AS who FROM post_votes WHERE value > 0 AND post_id IN (${ph})
-           UNION ALL SELECT post_id, username FROM post_reactions WHERE post_id IN (${ph})
            UNION ALL SELECT post_id, giver FROM worms WHERE post_id IN (${ph})) GROUP BY post_id`
-      ).bind(...chunk, ...chunk, ...chunk).all();
+      ).bind(...chunk, ...chunk).all();
       for (const id of chunk) out[id] = { n: 0, m: 0, emoji: null, worms: 0 };
       for (const r of results) out[r.post_id].n = r.n;
       if (me) {
-        const [{ results: f = [] }, { results: e = [] }, { results: w = [] }] = await Promise.all([
+        const [{ results: f = [] }, { results: w = [] }] = await Promise.all([
           env.DB.prepare(`SELECT post_id FROM post_votes WHERE username = ? AND value > 0 AND post_id IN (${ph})`).bind(me, ...chunk).all(),
-          env.DB.prepare(`SELECT post_id, emoji FROM post_reactions WHERE username = ? AND post_id IN (${ph})`).bind(me, ...chunk).all(),
           env.DB.prepare(`SELECT post_id, COUNT(*) AS c FROM worms WHERE giver = ? AND post_id IN (${ph}) GROUP BY post_id`).bind(me, ...chunk).all()]);
-        for (const r of e) out[r.post_id].emoji = r.emoji;
         for (const r of w) out[r.post_id].worms = r.c;
         const flapped = new Set(f.map(r => r.post_id));
         for (const id of chunk) { const o = out[id]; o.m = flapped.has(id) ? 1 : (o.emoji || o.worms) ? 2 : 0; }
@@ -1355,10 +1360,9 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         const { results: fl = [] } = await env.DB.prepare(
           `SELECT post_id, MAX(t) AS created_at FROM (
              SELECT post_id, created_at AS t FROM post_votes WHERE username = ? AND value > 0
-             UNION ALL SELECT post_id, created_at FROM post_reactions WHERE username = ?
              UNION ALL SELECT post_id, created_at FROM worms WHERE giver = ? AND post_id IS NOT NULL)
            GROUP BY post_id${before ? " HAVING MAX(t) < ?" : ""} ORDER BY created_at DESC LIMIT ?`
-        ).bind(...(before ? [flappedBy, flappedBy, flappedBy, before, pageLimit] : [flappedBy, flappedBy, flappedBy, pageLimit])).all();
+        ).bind(...(before ? [flappedBy, flappedBy, before, pageLimit] : [flappedBy, flappedBy, pageLimit])).all();
         const when = new Map(fl.map(r => [r.post_id, r.created_at])), ids = [...when.keys()], rows = [];
         for (let i = 0; i < ids.length; i += 90) {
           const chunk = ids.slice(i, i + 90);
@@ -1379,7 +1383,6 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         const { results: top = [] } = await env.DB.prepare(rankSort === "flaps"
           ? `SELECT post_id, COUNT(DISTINCT who) AS n FROM (
                SELECT post_id, COALESCE(username, 'b:' || browser_id) AS who FROM post_votes WHERE value > 0 AND created_at >= ?1
-               UNION ALL SELECT post_id, username FROM post_reactions WHERE created_at >= ?1
                UNION ALL SELECT post_id, giver FROM worms WHERE post_id IS NOT NULL AND created_at >= ?1) GROUP BY post_id ORDER BY n DESC LIMIT 500`
           : `SELECT post_id, COUNT(*) AS n FROM comments WHERE deleted = 0 AND (username IS NULL OR username != '__system__') AND created_at >= ? GROUP BY post_id ORDER BY n DESC LIMIT 500`
         ).bind(since).all();
@@ -1905,15 +1908,24 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       if (!receiver || receiver === "__system__" || ["NewsBot", "ScienceBot", "NatureBot", "SportsBot"].includes(receiver) || String(post.browser_id || "").startsWith("bot-") && postId)
         return json({ error: "Worms only go to people" }, 400);
       const count = Math.max(1, Math.min(50, parseInt(body.count) || 1));
+      if (receiver.toLowerCase() === username.toLowerCase()) return json({ error: "You can't give worms to yourself" }, 400);
+      const have = await wormBalance(username);
+      if (have < count) return json({ error: have ? `You only have ${have} worm${have === 1 ? "" : "s"}` : "You don't have any worms to give", balance: have }, 400);
       const ins = env.DB.prepare(`INSERT INTO worms (id, giver, receiver, post_id, comment_id, created_at) VALUES (?, ?, ?, ?, ?, ?)`);
       await env.DB.batch(Array.from({ length: count }, () => ins.bind(crypto.randomUUID(), username, receiver, postId, commentId, now)));
       const col = commentId ? "comment_id" : "post_id", id = commentId || postId;
       const r = await env.DB.prepare(`SELECT COUNT(*) AS n, SUM(CASE WHEN giver = ? THEN 1 ELSE 0 END) AS m FROM worms WHERE ${col} = ?`).bind(username, id).first();
       const pr = postId ? (await postResp([postId], username))[postId] : null;
-      return json({ success: true, worms: r?.n || 0, mine: r?.m || 0, given: count, ...(pr ? { score: pr.n, myVote: pr.m } : {}) });
+      return json({ success: true, worms: r?.n || 0, mine: r?.m || 0, given: count, balance: have - count, ...(pr ? { score: pr.n, myVote: pr.m } : {}) });
     } catch (err) {
       return serverError(err);
     }
+  }
+
+  // ── /my-worms ── how many worms you have to give
+  if (url.pathname === "/my-worms") {
+    if (!username) return signInRequired();
+    try { return json({ balance: await wormBalance(username) }); } catch (err) { return serverError(err); }
   }
 
   // ── /post-responses?post_ids=a,b ── the bird number for each post (people who responded) and what you did
@@ -1932,8 +1944,8 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     if (!username) return signInRequired();
     try {
       if (await isBanned()) return json({ error: "Banned" }, 403);
+      return json({ error: "Posts take flaps and worms" }, 400);
       const emoji = String(body.emoji || "").slice(0, 16);
-      if (!emoji) return json({ error: "Missing emoji" }, 400);
       const post = await env.DB.prepare(`SELECT id, deleted, frozen, is_huddle FROM posts WHERE id = ?`).bind(String(body.post_id || "")).first();
       if (!post || post.deleted) return json({ error: "That post is gone" }, 404);
       if (post.frozen) return json({ error: "This post is archived" }, 403);
@@ -1955,9 +1967,9 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const pid = url.searchParams.get("post_id") || "";
       const post = await env.DB.prepare(`SELECT id, deleted, is_huddle, huddle_members, username FROM posts WHERE id = ?`).bind(pid).first();
       if (!post || post.deleted || (post.is_huddle && !seeAllHuddles && !isHuddleMember(post, username))) return json({ people: [] });
-      const [{ results: f = [] }, { results: e = [] }, { results: w = [] }] = await Promise.all([
+      const e = [];
+      const [{ results: f = [] }, { results: w = [] }] = await Promise.all([
         env.DB.prepare(`SELECT username, created_at FROM post_votes WHERE post_id = ? AND value > 0 AND username IS NOT NULL`).bind(pid).all(),
-        env.DB.prepare(`SELECT username, emoji, created_at FROM post_reactions WHERE post_id = ?`).bind(pid).all(),
         env.DB.prepare(`SELECT giver AS username, COUNT(*) AS c, MAX(created_at) AS created_at FROM worms WHERE post_id = ? GROUP BY giver`).bind(pid).all()]);
       const by = new Map(), row = u => by.get(u) || (by.set(u, { username: u, flap: false, emoji: null, worms: 0, t: "" }), by.get(u));
       for (const r of f) { const o = row(r.username); o.flap = true; if (r.created_at > o.t) o.t = r.created_at; }
@@ -2181,7 +2193,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         SELECT m.id, m.email, m.username, m.role, m.created_at, m.last_active, m.deleted_at, m.failed_logins, m.locked_until,
           (SELECT p.ip_hash FROM posts p WHERE p.username = m.username AND p.ip_hash IS NOT NULL ORDER BY p.created_at DESC LIMIT 1) as ip_hash,
           (SELECT p.browser_id FROM posts p WHERE p.username = m.username AND p.browser_id IS NOT NULL ORDER BY p.created_at DESC LIMIT 1) as browser_id,
-          (SELECT COUNT(*) FROM worms w WHERE w.receiver = m.username) as worm_count
+          MAX(0, m.worm_start + (SELECT COUNT(*) FROM worms w WHERE w.receiver = m.username) - (SELECT COUNT(*) FROM worms w WHERE w.giver = m.username)) as worm_count
         FROM mod_users m WHERE m.deleted_at IS NULL ORDER BY m.last_active DESC, m.created_at DESC`).all();
       const members = (results || []).map(u => ({
         id: u.id,
@@ -2467,7 +2479,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
 
       // Worm count: worms other people have given this person (on their posts and chirps)
       const wname = uname || (mod_user_id ? (await env.DB.prepare(`SELECT username FROM mod_users WHERE id = ?`).bind(mod_user_id).first())?.username : null);
-      const worm_count = wname ? ((await env.DB.prepare(`SELECT COUNT(*) AS c FROM worms WHERE receiver = ?`).bind(wname).first())?.c || 0) : 0;
+      const worm_count = await wormBalance(wname);
       const modRow = uname ? await env.DB.prepare(`SELECT role FROM mod_users WHERE username = ?`).bind(uname).first() : null;
       const role = modRow?.role || null;
       return json({ joined_at, worm_count, role });
