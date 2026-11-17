@@ -1537,10 +1537,8 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     for (let i = 0; i < ids.length; i += 30) {
       const chunk = ids.slice(i, i + 30), ph = chunk.map(() => "?").join(",");
       const { results = [] } = await env.DB.prepare(
-        `SELECT post_id, COUNT(DISTINCT who) AS n FROM (
-           SELECT post_id, COALESCE(username, 'b:' || browser_id) AS who FROM post_votes WHERE value > 0 AND post_id IN (${ph})
-           UNION ALL SELECT post_id, giver FROM worms WHERE post_id IN (${ph})) GROUP BY post_id`
-      ).bind(...chunk, ...chunk).all();
+        `SELECT post_id, COUNT(DISTINCT COALESCE(username, 'b:' || browser_id)) AS n FROM post_votes WHERE value > 0 AND post_id IN (${ph}) GROUP BY post_id`
+      ).bind(...chunk).all();
       for (const id of chunk) out[id] = { n: 0, m: 0, emoji: null, worms: 0 };
       for (const r of results) out[r.post_id].n = r.n;
       if (me) {
@@ -2030,9 +2028,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         const range = url.searchParams.get("range");
         const since2 = range === "all" ? "" : new Date(Date.now() - (range === "day" ? 1 : 7) * 864e5).toISOString();
         const { results: top = [] } = await env.DB.prepare(
-          rankSort === "flaps" ? `SELECT post_id, COUNT(DISTINCT who) AS n FROM (
-               SELECT post_id, COALESCE(username, 'b:' || browser_id) AS who FROM post_votes WHERE value > 0 AND created_at >= ?1
-               UNION ALL SELECT post_id, giver FROM worms WHERE post_id IS NOT NULL AND created_at >= ?1) GROUP BY post_id ORDER BY n DESC LIMIT 500` : `SELECT post_id, COUNT(*) AS n FROM comments WHERE deleted = 0 AND (username IS NULL OR username != '__system__') AND created_at >= ? GROUP BY post_id ORDER BY n DESC LIMIT 500`
+          rankSort === "flaps" ? `SELECT post_id, COUNT(DISTINCT COALESCE(username, 'b:' || browser_id)) AS n FROM post_votes WHERE value > 0 AND created_at >= ? GROUP BY post_id ORDER BY n DESC LIMIT 500` : `SELECT post_id, COUNT(*) AS n FROM comments WHERE deleted = 0 AND (username IS NULL OR username != '__system__') AND created_at >= ? GROUP BY post_id ORDER BY n DESC LIMIT 500`
         ).bind(since2).all();
         const countOf = new Map(top.map((r) => [r.post_id, r.n]));
         const ids = [...countOf.keys()];
@@ -3062,7 +3058,9 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const worm_count = await wormBalance(wname);
       const modRow = uname ? await env.DB.prepare(`SELECT role FROM mod_users WHERE username = ?`).bind(uname).first() : null;
       const role = modRow?.role || null;
-      return json({ joined_at, worm_count, role });
+      const flaps = wname ? (await env.DB.prepare(`SELECT COUNT(DISTINCT v.post_id || '|' || COALESCE(v.username, 'b:' || v.browser_id)) AS n FROM post_votes v JOIN posts p ON p.id = v.post_id
+        WHERE v.value > 0 AND p.username = ?1 AND p.deleted = 0 AND (v.username IS NULL OR v.username != ?1)`).bind(wname).first())?.n || 0 : 0;
+      return json({ joined_at, worm_count, role, flaps });
     } catch (err) {
       return serverError(err);
     }

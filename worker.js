@@ -824,17 +824,15 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     return Math.max(0, r?.b || 0);
   }
 
-  // People who responded to each post: flapped or gave worms (each person counts once).
-  // m: 1 = you flapped, 2 = you reacted or gave worms but didn't flap, 0 = nothing. Also your emoji and worms given.
+  // The bird number on each post: people who flapped it (worms are counted separately, see /worm-counts).
+  // m: 1 = you flapped, 2 = you gave worms but didn't flap, 0 = nothing. Also the worms you gave.
   async function postResp(ids, me) {
     const out = {};
     for (let i = 0; i < ids.length; i += 30) {
       const chunk = ids.slice(i, i + 30), ph = chunk.map(() => "?").join(",");
       const { results = [] } = await env.DB.prepare(
-        `SELECT post_id, COUNT(DISTINCT who) AS n FROM (
-           SELECT post_id, COALESCE(username, 'b:' || browser_id) AS who FROM post_votes WHERE value > 0 AND post_id IN (${ph})
-           UNION ALL SELECT post_id, giver FROM worms WHERE post_id IN (${ph})) GROUP BY post_id`
-      ).bind(...chunk, ...chunk).all();
+        `SELECT post_id, COUNT(DISTINCT COALESCE(username, 'b:' || browser_id)) AS n FROM post_votes WHERE value > 0 AND post_id IN (${ph}) GROUP BY post_id`
+      ).bind(...chunk).all();
       for (const id of chunk) out[id] = { n: 0, m: 0, emoji: null, worms: 0 };
       for (const r of results) out[r.post_id].n = r.n;
       if (me) {
@@ -1381,9 +1379,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         // Count the flaps / chirps made in the range (on posts of any age): "Most chirps today" = the posts
         // that got the most chirps today. Before, it only looked at posts created in the range.
         const { results: top = [] } = await env.DB.prepare(rankSort === "flaps"
-          ? `SELECT post_id, COUNT(DISTINCT who) AS n FROM (
-               SELECT post_id, COALESCE(username, 'b:' || browser_id) AS who FROM post_votes WHERE value > 0 AND created_at >= ?1
-               UNION ALL SELECT post_id, giver FROM worms WHERE post_id IS NOT NULL AND created_at >= ?1) GROUP BY post_id ORDER BY n DESC LIMIT 500`
+          ? `SELECT post_id, COUNT(DISTINCT COALESCE(username, 'b:' || browser_id)) AS n FROM post_votes WHERE value > 0 AND created_at >= ? GROUP BY post_id ORDER BY n DESC LIMIT 500`
           : `SELECT post_id, COUNT(*) AS n FROM comments WHERE deleted = 0 AND (username IS NULL OR username != '__system__') AND created_at >= ? GROUP BY post_id ORDER BY n DESC LIMIT 500`
         ).bind(since).all();
         const countOf = new Map(top.map(r => [r.post_id, r.n]));
@@ -2498,7 +2494,11 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const worm_count = await wormBalance(wname);
       const modRow = uname ? await env.DB.prepare(`SELECT role FROM mod_users WHERE username = ?`).bind(uname).first() : null;
       const role = modRow?.role || null;
-      return json({ joined_at, worm_count, role });
+      // Flaps: like karma, the flaps other people gave this person's posts. post_votes is small, so read it and look
+      // each post up by id (never scan posts).
+      const flaps = wname ? ((await env.DB.prepare(`SELECT COUNT(DISTINCT v.post_id || '|' || COALESCE(v.username, 'b:' || v.browser_id)) AS n FROM post_votes v JOIN posts p ON p.id = v.post_id
+        WHERE v.value > 0 AND p.username = ?1 AND p.deleted = 0 AND (v.username IS NULL OR v.username != ?1)`).bind(wname).first())?.n || 0) : 0;
+      return json({ joined_at, worm_count, role, flaps });
     } catch (err) {
       return serverError(err);
     }
