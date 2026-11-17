@@ -27,6 +27,9 @@ const _ppNestCss = `
 .ppn .face.bob{animation:ppn-bob .45s ease-in-out}
 .ppn .face.tilt{animation:ppn-tilt .7s ease-in-out}
 .ppn .face.peek{animation:ppn-peek .8s ease-in-out}
+@keyframes ppn-drop{0%{translate:0 var(--dy);animation-timing-function:cubic-bezier(.55,0,1,.45)}52%{translate:0 0;animation-timing-function:cubic-bezier(0,.55,.45,1)}68%{translate:0 -24px;animation-timing-function:cubic-bezier(.55,0,1,.45)}80%{translate:0 0;animation-timing-function:cubic-bezier(0,.55,.45,1)}90%{translate:0 -8px;animation-timing-function:cubic-bezier(.55,0,1,.45)}100%{translate:0 0}}
+.ppn .egg.drop{animation:ppn-drop 1s both;pointer-events:none}
+@media (prefers-reduced-motion:reduce){.ppn .egg.drop{animation:none}}
 @keyframes ppn-blink{0%,100%{transform:scaleY(0)}45%,60%{transform:scaleY(1)}}
 @keyframes ppn-wob{0%,100%{rotate:0deg}20%{rotate:-7deg}45%{rotate:6deg}70%{rotate:-3deg}85%{rotate:2deg}}
 @keyframes ppn-hit{0%,100%{rotate:0deg;translate:0 0}25%{rotate:-9deg;translate:-1px 0}55%{rotate:8deg;translate:1px -2px}80%{rotate:-3deg}}
@@ -42,7 +45,7 @@ const _ppNestCss = `
 .ppn-tag .tf{width:40px;height:40px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
 .ppn-tag .tf img{width:85px;height:85px;margin:-22.5px;display:block;max-width:none}
 .ppn-tag .nm{flex:1;text-align:center;font-size:16px;font-weight:700;color:#0a0a0a;word-break:break-word;padding-right:40px}
-.ppn-fresh{margin:0 0 10px;background:#2a2116;color:#fde68a;border:1.5px solid #6b4f1d;border-radius:999px;padding:9px 18px;font-size:14px;font-weight:700;cursor:pointer;display:none}
+.ppn-fresh{margin:4px auto 12px;background:#2a2116;color:#fde68a;border:1.5px solid #6b4f1d;border-radius:999px;padding:12px 26px;font-size:15px;font-weight:800;cursor:pointer;display:none;touch-action:manipulation}.ppn-fresh:disabled{opacity:.6;cursor:default}
 @media (prefers-reduced-motion:reduce){.ppn .egg.wob,.ppn .egg.hit,.ppn .face.bob,.ppn .face.tilt,.ppn .face.peek,.ppn .lid.blink{animation:none}.ppn .egg.hatched .bird{animation:none;transform:none;opacity:1}.ppn .shell-top{transition:opacity .2s}}`;
 
 let _ppNestMem = null;
@@ -113,7 +116,7 @@ function _ppNest(root, api, onPick) {
 
   root.className = "ppn";
   root.innerHTML = `<div class=ppn-wrap><svg class=ppn-l viewBox="0 0 320 222"></svg><div></div><svg class=ppn-l viewBox="0 0 320 222" style="z-index:900"></svg></div>
-    <button type=button class=ppn-fresh>🥚 New eggs are ready. Tap for a fresh nest</button><div class=ppn-hint></div><div class="ppn-tag empty">Crack an egg to meet your bird</div>`;
+    <button type=button class=ppn-fresh>Tap to get your eggs</button><div class=ppn-hint></div><div class="ppn-tag empty">Crack an egg to meet your bird</div>`;
   const [back, box, front] = root.querySelector(".ppn-wrap").children, freshBtn = root.querySelector(".ppn-fresh"),
     hint = root.querySelector(".ppn-hint"), tag = root.querySelector(".ppn-tag");
 
@@ -186,26 +189,33 @@ function _ppNest(root, api, onPick) {
   }
 
   // ---------- state: names and the clock come from the server; taps and the pick are kept in this browser ----------
-  let nest = null, eggs = [], refreshing = false, timedOut = 0;   // the nest times out after 15 minutes: new eggs, old names released
+  let nest = null, eggs = [], dropNext = false;   // a nest starts empty: tap for eggs; after 15 minutes the eggs go (names released) and it's empty again
   const dirs = [], unsubs = [];
   const save = () => { try { localStorage.setItem("pp_nest", JSON.stringify(nest)); } catch (e) {} };
   const loadLocal = () => { try { return JSON.parse(localStorage.getItem("pp_nest")); } catch (e) { return null; } };
   function pick(i) { nest.sel = i; onPick(i == null ? "" : nest.names[i]); }
-  function get(fresh) {
-    hint.textContent = fresh ? "Fetching new eggs…" : "";
-    fetch(`${api}/nest`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ device: _ppNestDev(), fresh: !!fresh }) })
-      .then(r => r.json().then(j => { if (!r.ok || !Array.isArray(j.names)) throw new Error(j.error || "nest"); return j; }))
+  // an empty nest: just the button (and why, if it timed out)
+  function empty(msg) {
+    unsubs.splice(0).forEach(u => u()); box.innerHTML = ""; eggs = []; nest = null;
+    try { localStorage.removeItem("pp_nest"); } catch (e) {}
+    onPick(""); tag.className = "ppn-tag empty"; tag.style.background = ""; tag.style.borderColor = ""; tag.textContent = "Your bird will appear here";
+    freshBtn.style.display = "block"; freshBtn.disabled = false; hint.style.display = msg ? "" : "none"; hint.textContent = msg || "";
+  }
+  // peek: only look for a nest that's still running (page load); otherwise lay new eggs
+  function get(fresh, peek) {
+    if (fresh) { freshBtn.disabled = true; hint.style.display = ""; hint.textContent = "Laying your eggs…"; }
+    fetch(`${api}/nest`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ device: _ppNestDev(), fresh: !!fresh, peek: !!peek }) })
+      .then(r => r.json().then(j => { if (!r.ok || (!Array.isArray(j.names) && j.names !== null)) throw new Error(j.error || "nest"); return j; }))
       .then(j => {
         if (!alive) return;
+        if (!j.names) return empty("");
+        if (j.left_ms <= 0) return empty("Lots of new birds on this network right now. Try again in a few minutes.");
         const old = loadLocal(), same = old && Array.isArray(old.names) && old.names.join() === j.names.join();
-        const changed = !same && nest && nest.names && nest.names.join() !== j.names.join();
         nest = same ? old : { names: j.names, taps: j.names.map(() => 0), sel: null };
-        nest.until = Date.now() + Math.max(j.left_ms, 0); save(); refreshing = j.left_ms <= 0;
-        if (changed) { timedOut = Date.now(); onPick(""); }
-        if (j.left_ms <= 0) later(() => get(true), 60000);   // no new eggs yet (busy network): try again in a minute
+        nest.until = Date.now() + j.left_ms; save(); freshBtn.style.display = "none"; hint.style.display = ""; dropNext = !!fresh && !same;
         _ppKit.ready.then(() => { if (alive) render(); });
       })
-      .catch(() => { if (!alive) return; refreshing = false; hint.innerHTML = `Couldn't get your eggs. <b style="cursor:pointer;text-decoration:underline">Try again</b>`; hint.querySelector("b").onclick = () => get(fresh); });
+      .catch(() => { if (!alive) return; freshBtn.disabled = false; hint.style.display = ""; hint.innerHTML = `Couldn't get your eggs. <b style="cursor:pointer;text-decoration:underline">Try again</b>`; hint.querySelector("b").onclick = () => get(fresh, peek); });
   }
   function render() {
     unsubs.splice(0).forEach(u => u()); box.innerHTML = ""; eggs = [];
@@ -230,6 +240,9 @@ function _ppNest(root, api, onPick) {
     });
     if (nest.sel != null && !(nest.taps[nest.sel] >= 3)) nest.sel = null;
     pick(nest.sel); update();
+    if (dropNext) { dropNext = false;   // new eggs fall in from the top of the screen and bounce into the nest
+      eggs.forEach((b, i) => { const r = b.getBoundingClientRect(); b.style.setProperty("--dy", -(r.bottom + 40) + "px"); b.style.animationDelay = (i * 140) + "ms"; b.classList.add("drop");
+        b.addEventListener("animationend", e => { if (e.animationName === "ppn-drop") { b.classList.remove("drop"); b.style.animationDelay = ""; } }); }); }
   }
   function setStage(i, quiet) {
     const b = eggs[i], t = nest.taps[i];
@@ -262,13 +275,8 @@ function _ppNest(root, api, onPick) {
       tag.append(f, nm);
     } else { tag.className = "ppn-tag empty"; tag.style.background = ""; tag.style.borderColor = ""; tag.textContent = "Crack an egg to meet your bird"; }
     const left = nest.until - Date.now(), ss = Math.max(0, Math.ceil(left / 1000)), clock = `${Math.floor(ss / 60)}:${String(ss % 60).padStart(2, "0")}`;
-    if (left <= 0 && !refreshing) { refreshing = true; hint.textContent = "Your nest timed out. Fetching new eggs…"; get(true); return; }
-    freshBtn.style.display = "none"; hint.style.display = "";
-    const soon = `<span style="color:#475569">New nest in <b style="color:#94a3b8">${clock}</b></span>`;
-    hint.innerHTML = Date.now() - timedOut < 5000 ? `Your nest timed out, so here are new eggs` :
-      hatched === 0 ? soon :
-      hatched < 5 ? `Tap any hatchling to switch <span style="color:#475569">· ${5 - hatched} egg${5 - hatched > 1 ? "s" : ""} left · </span>${soon}` :
-      `No more eggs. ${soon}`;
+    if (left <= 0) return empty("Your nest timed out. Tap for new eggs.");
+    hint.innerHTML = `<span style="color:#475569">New nest in <b style="color:#94a3b8">${clock}</b></span>`;   // just the clock
   }
   function fitLid(lid, url, clan) {
     const e = _ppKit.eye(clan), pct = v => (v / e.W * 100) + "%", d = e.r * 2.35;
@@ -298,12 +306,12 @@ function _ppNest(root, api, onPick) {
     later(birdLoop, 700 + Math.random() * 1600);
   }
   function wobbleLoop() {
-    const un = nest ? eggs.filter((e, i) => nest.taps[i] < 3 && !e.classList.contains("hit")) : [];
+    const un = nest ? eggs.filter((e, i) => nest.taps[i] < 3 && !e.classList.contains("hit") && !e.classList.contains("drop")) : [];
     if (un.length) { const e = un[Math.floor(Math.random() * un.length)]; e.classList.remove("wob"); void e.offsetWidth; e.classList.add("wob"); }
     later(wobbleLoop, 1600 + Math.random() * 2600);
   }
-  freshBtn.onclick = () => { freshBtn.style.display = "none"; get(true); };
-  get(false);
+  freshBtn.onclick = () => get(true);
+  get(false, true);
   later(wobbleLoop, 1500); later(birdLoop, 1000); for (let i = 0; i < 5; i++) later(() => blinkLoop(i), 800 + Math.random() * 3000);
   const tick = setInterval(update, 1000);
   return () => { alive = false; clearInterval(tick); timers.forEach(clearTimeout); unsubs.forEach(u => u()); };

@@ -1007,6 +1007,8 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       }
       // a nest lasts NEST_WAIT (15 min); after that it times out and the device gets new eggs, so names don't sit in limbo
       if (row && Date.now() - Date.parse(row.issued_at) < NEST_WAIT) return out(row);
+      // the page asks with peek on load: an empty nest until the person taps for eggs
+      if (body.peek) return json({ names: null, left_ms: 0 });
       const since = new Date(Date.now() - NEST_WAIT).toISOString();
       if (ip_hash && (await siteSetting("signup_limit", "off")) !== "off") {
         const { n } = await env.DB.prepare(`SELECT COUNT(*) AS n FROM nests WHERE net = ? AND issued_at > ?`).bind(ip_hash, since).first();
