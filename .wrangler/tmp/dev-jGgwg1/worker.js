@@ -2647,8 +2647,10 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       if (!body.post_id || !body.browser_id || ![1, 0].includes(body.value))
         return json({ error: "Missing or invalid fields" }, 400);
       if (await isBanned()) return json({ error: "Banned" }, 403);
-      const votedPost = await env.DB.prepare(`SELECT frozen FROM posts WHERE id = ?`).bind(body.post_id).first();
+      const votedPost = await env.DB.prepare(`SELECT frozen, username FROM posts WHERE id = ?`).bind(body.post_id).first();
       if (votedPost?.frozen) return json({ error: "This post is archived" }, 403);
+      if (body.value === 1 && votedPost?.username && votedPost.username.toLowerCase() === username.toLowerCase())
+        return json({ error: "You can't flap your own post" }, 400);
       const [existing, preSummary] = await Promise.all([
         // Your vote is found by your account, never by a device id the request sends (those are visible on posts)
         env.DB.prepare(`SELECT id, value FROM post_votes WHERE post_id = ? AND username = ?`).bind(body.post_id, username).first(),
