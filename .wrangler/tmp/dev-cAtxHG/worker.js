@@ -2675,7 +2675,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         `).bind(
           crypto.randomUUID(),
           body.post_id,
-          body.browser_id,
+          "u:" + username.toLowerCase(),
           body.value,
           username,
           null,

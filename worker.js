@@ -2056,6 +2056,9 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         return json({ success: true, score: pr.n, myVote: pr.m, voteCount: pr.n });
       }
 
+      // Flaps belong to the account. The table still has the old one-per-device rule UNIQUE(post_id, browser_id), so the
+      // row's browser_id is the account ("u:<name>"), not the device: otherwise a second account on the same phone
+      // couldn't flap a post the first account had flapped (the insert failed and nothing happened)
       if (existing?.id) {
         await env.DB.prepare(`UPDATE post_votes SET value = ?, username = ?, ip_hash = NULL, is_mod = ?, mod_user_id = ? WHERE id = ?`)
           .bind(body.value, username, isModerator ? 1 : 0, isModerator ? authUser.sub : null, existing.id).run();
@@ -2063,7 +2066,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         await env.DB.prepare(`
           INSERT INTO post_votes (id, post_id, browser_id, value, username, ip_hash, is_mod, mod_user_id, created_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).bind(crypto.randomUUID(), body.post_id, body.browser_id, body.value, username, null,
+        `).bind(crypto.randomUUID(), body.post_id, "u:" + username.toLowerCase(), body.value, username, null,
             isModerator ? 1 : 0, isModerator ? authUser.sub : null, now).run();
       }
       await bumpPost(body.post_id);
