@@ -784,6 +784,12 @@ async function handleRequest(request, env, ctx, corsHeaders) {
 
   // ── D1 helpers ───────────────────────────────────────────────────────────────
 
+  // Site switches (mod panel → Flock). signup_limit: off (unlimited) | day | week — 4 new accounts per network
+  const SIGNUP_CAP = 4, SIGNUP_WINDOWS = { day: 86400000, week: 7 * 86400000 };
+  async function siteSetting(key, dflt) {
+    try { return (await env.DB.prepare(`SELECT value FROM site_settings WHERE key = ?`).bind(key).first())?.value ?? dflt; } catch { return dflt; }
+  }
+
   async function isBanned() {
     if (isAdmin) return false; // nothing can lock an admin out, including a shared browser or IP
     const bid = (body.browser_id || "").trim();
@@ -1001,7 +1007,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       }
       if (row && (!body.fresh || Date.now() - Date.parse(row.issued_at) < NEST_WAIT)) return out(row);
       const since = new Date(Date.now() - NEST_WAIT).toISOString();
-      if (ip_hash) {
+      if (ip_hash && (await siteSetting("signup_limit", "off")) !== "off") {
         const { n } = await env.DB.prepare(`SELECT COUNT(*) AS n FROM nests WHERE net = ? AND issued_at > ?`).bind(ip_hash, since).first();
         if (n >= NEST_NET_CAP) {
           if (row) return out(row);
@@ -1027,6 +1033,23 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     }
   }
 
+  // ── /site-settings ── mods can see them, admins change them ─────────────────────
+  if (url.pathname === "/site-settings") {
+    if (!isModerator) return json({ error: "Not allowed" }, 403);
+    try {
+      if (request.method === "POST") {
+        if (!isAdmin) return json({ error: "Only admins can change this" }, 403);
+        if (body.signup_limit !== undefined) {
+          if (!["off", "day", "week"].includes(body.signup_limit)) return json({ error: "Bad value" }, 400);
+          await env.DB.prepare(`INSERT INTO site_settings (key, value) VALUES ('signup_limit', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).bind(body.signup_limit).run();
+        }
+      }
+      return json({ signup_limit: await siteSetting("signup_limit", "off"), cap: SIGNUP_CAP, can_edit: isAdmin });
+    } catch (err) {
+      return serverError(err);
+    }
+  }
+
   // ── /register ─────────────────────────────────────────────────────────────────
 
   if (url.pathname === "/register" && request.method === "POST") {
@@ -1047,12 +1070,20 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       // Retired names stay taken: the site knows people by name, so a reused one would inherit someone's posts
       const existing = await env.DB.prepare(`SELECT id FROM mod_users WHERE LOWER(username) = LOWER(?)`).bind(uname.trim()).first();
       if (existing) return json({ error: "Username already taken" }, 409);
+      // Sign-up limit (mod panel switch): at most SIGNUP_CAP new birds per network per day / week
+      const lim = await siteSetting("signup_limit", "off");
+      if (SIGNUP_WINDOWS[lim] && ip_hash) {
+        const since = new Date(Date.now() - SIGNUP_WINDOWS[lim]).toISOString();
+        const { n } = await env.DB.prepare(`SELECT COUNT(*) AS n FROM signups WHERE net = ? AND created_at > ?`).bind(ip_hash, since).first();
+        if (n >= SIGNUP_CAP) return json({ error: `${SIGNUP_CAP} birds have already hatched on this network ${lim === "day" ? "today" : "this week"}. Please try again later.` }, 429);
+      }
       const id = crypto.randomUUID();
       const hash = await hashPassword(password);
       await env.DB.prepare(
         `INSERT INTO mod_users (id, email, password_hash, username, role, created_at) VALUES (?, ?, ?, ?, 'user', ?)`
       ).bind(id, `${uname.trim().toLowerCase()}@users.local`, hash, uname.trim(), now).run();
       await env.DB.prepare(`DELETE FROM nests WHERE device = ?`).bind(nd).run();
+      await env.DB.prepare(`INSERT INTO signups (net, created_at) VALUES (?, ?)`).bind(ip_hash || null, now).run().catch(() => {});
       if (bid) {
         await env.DB.prepare(`UPDATE posts SET username = ? WHERE browser_id = ? AND is_mod = 0 AND username IS NULL`).bind(uname.trim(), bid).run();
         await env.DB.prepare(`UPDATE comments SET username = ? WHERE browser_id = ? AND is_mod = 0 AND username IS NULL`).bind(uname.trim(), bid).run();
