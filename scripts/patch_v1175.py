@@ -33,10 +33,10 @@ patch("(0,L.jsxs)(`button`,{type:`button`,className:`feed-post-action-pill`,onCl
 patch("children:c.is_huddle?(()=>{const _a=Un(c.created_at);return _a===`just now`?`New`:_a.replace(/ ago$/,` old`)})():Un(c.created_at)})",
       "children:c.is_huddle?(()=>{const _a=Un(c.created_at);return _a===`just now`?`New`:_a.replace(/ ago$/,` old`)})():`Created ${Un(c.created_at)}`})", 'post page says Created')
 
-css = ("body .feed-post-board-row.pc-head{display:flex;align-items:center;gap:8px;padding-right:0!important}"
+css = ("body .feed-post-board-row.pc-head{display:flex;align-items:flex-start;gap:8px;padding-right:0!important}"
        "body .pc-head .feed-post-board-group{flex:1;min-width:0}"
-       "body .pc-badges{display:flex;gap:4px;align-items:center;flex-shrink:0}"
-       "body .pc-time{flex-shrink:0;display:inline-flex;align-items:center;gap:4px;font-size:12.5px;font-weight:600;color:#64748b;white-space:nowrap}"
+       "body .pc-badges{display:flex;gap:4px;align-items:center;flex-shrink:0;min-height:var(--pc-h,22px)}"
+       "body .pc-time{flex-shrink:0;min-height:var(--pc-h,22px);display:inline-flex;align-items:center;gap:4px;font-size:12.5px;font-weight:600;color:#64748b;white-space:nowrap}"
        "body .pc-time.pc-act{color:#c084fc}body .pc-time .pp-ic svg{width:13px!important;height:13px!important}"
        "body .feed-post-actions .pc-share{margin-left:auto;width:34px;padding:0!important;justify-content:center}"
        "body .feed-post-actions .pc-share.pc-said{width:auto;padding:0 12px!important}")
