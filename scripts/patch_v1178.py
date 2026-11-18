@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Patch v1177 -> v1178: on post cards and the post page, the board / country tags are outlined (usernames stay solid) like the
+"""Patch v1177 -> v1178: everywhere (cards, post page, search / tag pickers, new-post picker), the board / country / region tags are outlined (usernames stay solid) like the
 link-preview reel's tags (coloured outline + coloured text, no solid fill) instead of solid blocks of colour."""
 import sys
 src = '_deploy/assets/index-DUcNPOLc-v1177.js'
@@ -16,7 +16,7 @@ patch("return(0,L.jsxs)(`span`,{style:{display:`inline-flex`,alignItems:`center`
       "return(0,L.jsxs)(`span`,{className:`pp-tag`,style:{\"--pc\":_bc,display:`inline-flex`,alignItems:`center`,gap:t?4:6,height:t?22:26,padding:t?`0 7px`:`0 8px`,borderRadius:999,border:`1px solid rgba(0,0,0,0.15)`,background:_bc,", 'board pill colour')
 patch("return(0,L.jsxs)(`span`,{className:`user-pill`,style:{color:N?`#ffffff`:`#0a0a0a`,",
       "return(0,L.jsxs)(`span`,{className:`user-pill`,style:{\"--pc\":o?`#ffffff`:s?`#c084fc`:N?`#ef4444`:c,color:N?`#ffffff`:`#0a0a0a`,", 'user pill colour')
-sel = lambda x: ",".join(f"body .feed-post-board-row {s}" for s in x)
+sel = lambda x: ",".join(f"body {s}" for s in x)
 P = [".pp-tag"]
 css = (sel(P) + "{background:transparent!important;color:var(--pc)!important;border:1.5px solid var(--pc)!important;box-sizing:border-box}"
        )
