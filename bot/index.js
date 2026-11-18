@@ -20,6 +20,9 @@ const SKIPPED_LINKS = /\/\/www\.cbsnews\.com\/(?:video|moneywatch|essentials)\/|
 // Ads dressed as news, from any site: sign-up offers for betting and prediction apps, promo/coupon codes, sponsored pages
 const PROMO_TEXT = /\b(?:promo|bonus|coupon|referral|voucher|discount)\s+codes?\b|\bbonus\s+bets?\b|\bfree\s+bets?\b|\bsign[- ]?up\s+(?:bonus|offer)s?\b|\bdeposit\s+match\b|\bodds\s+boosts?\b|\b(?:sponsored|paid)\s+(?:content|post|partner(?:ship)?)\b/i;
 const isPromo = (...texts) => PROMO_TEXT.test(texts.filter(Boolean).join(" "));
+// Entertainment is film/TV, music, games and arts, not celebrity gossip: skip stories about people's private lives
+const GOSSIP_TEXT = /\b(?:dating|date\s+night|spotted|ex-(?:wife|husband|girlfriend|boyfriend)|wedding\s+(?:photos|dress)|divorc\w*|break[- ]?up|split\s+from|engaged|engagement\s+ring|pregnan\w*|baby\s+bump|red\s+carpet|net\s+worth|feud\w*|slams?|cheat(?:ed|ing)|boyfriend|girlfriend|romance\s+rumou?rs?|kardashian\w*|jenner|royal\s+family|bikini|shirtless|plastic\s+surgery|fashion\s+police|outfit|nip\s*slip)\b/i;
+const isGossip = (...texts) => GOSSIP_TEXT.test(texts.filter(Boolean).join(" "));
 
 function normalizeUrl(url) {
   if (!url) return url;
@@ -190,6 +193,9 @@ const BOARD_BOTS = {
   "general":        { username: "NewsBot",     browser_id: "bot-newsbot" },
   "sports":         { username: "SportsBot",   browser_id: "bot-sportsbot" },
   "science-nature": { username: "ScienceBot",  browser_id: "bot-sciencebot" },
+  "nature":         { username: "NatureBot",   browser_id: "bot-naturebot" },
+  // Entertainment posts as NewsBot: a new bot name would change the people-only posts index (HUMAN_POSTS)
+  "entertainment":  { username: "NewsBot",     browser_id: "bot-newsbot" },
 };
 
 async function createLog(runType) {
@@ -388,6 +394,7 @@ async function run() {
           const resolvedTitle = looksLikeSlug(rssTitle) ? (og?.title || null) : (rssTitle || og?.title || null);
           if (!resolvedTitle || looksLikeSlug(resolvedTitle)) { stats.skippedBadTitle.push({ url, title: rssTitle || url }); continue; }
           if (isPromo(resolvedTitle, og?.description)) continue;
+          if (board === "entertainment" && isGossip(resolvedTitle, og?.description || item.contentSnippet)) continue;
 
           const attachment = {
             type: "link",
