@@ -2084,6 +2084,13 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         ).all();
         return json({ posts: await publicRows(await addCommentCounts(env, results2.map((p) => boolify(p, POST_BOOL_FIELDS)))), next_before: null });
       }
+      if (url.searchParams.get("bots") === "1") {
+        const pageLimit = Math.min(parseInt(url.searchParams.get("limit") || "50") || 50, 100);
+        const { results: results2 = [] } = await env.DB.prepare(
+          `SELECT rowid AS _rid, * FROM posts INDEXED BY idx_posts_created_at WHERE username IN (${BOTS.map(() => "?").join(",")}) AND ${LIVE_POSTS}${before ? " AND created_at < ?" : ""} ORDER BY created_at DESC LIMIT ?`
+        ).bind(...BOTS, ...before ? [before] : [], pageLimit).all();
+        return json({ posts: await publicRows(await addCommentCounts(env, results2.map((p) => boolify(p, POST_BOOL_FIELDS)))), next_before: results2.length === pageLimit ? results2[results2.length - 1].created_at : null });
+      }
       if (!search && !since && !until && !isHuddleBoard && (activityFilter || board || continent || country || username2 || before)) {
         const pageLimit = Math.min(parseInt(url.searchParams.get("limit") || "50") || 50, 100);
         const page = await getPostsPage(env, { activity: activityFilter, board, continent, country, username: username2, before, limit: pageLimit });

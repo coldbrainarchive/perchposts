@@ -1440,6 +1440,16 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         return json({ posts: await publicRows(await addCommentCounts(env, results.map(p => boolify(p, POST_BOOL_FIELDS)))), next_before: null });
       }
 
+      // Bot News space: only the bots' posts, newest first. Most posts are bot posts, so walking the created_at
+      // index stops after one page; ?before=<created_at> pages back.
+      if (url.searchParams.get("bots") === "1") {
+        const pageLimit = Math.min(parseInt(url.searchParams.get("limit") || "50") || 50, 100);
+        const { results = [] } = await env.DB.prepare(
+          `SELECT rowid AS _rid, * FROM posts INDEXED BY idx_posts_created_at WHERE username IN (${BOTS.map(() => "?").join(",")}) AND ${LIVE_POSTS}${before ? " AND created_at < ?" : ""} ORDER BY created_at DESC LIMIT ?`
+        ).bind(...BOTS, ...(before ? [before] : []), pageLimit).all();
+        return json({ posts: await publicRows(await addCommentCounts(env, results.map(p => boolify(p, POST_BOOL_FIELDS)))), next_before: results.length === pageLimit ? results[results.length - 1].created_at : null });
+      }
+
       // Filtered views and "load older" pages read one page at a time instead of scanning every post
       if (!search && !since && !until && !isHuddleBoard && (activityFilter || board || continent || country || username || before)) {
         const pageLimit = Math.min(parseInt(url.searchParams.get("limit") || "50") || 50, 100);
