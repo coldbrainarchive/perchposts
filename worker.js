@@ -1944,6 +1944,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       if (have < count) return json({ error: have ? `You only have ${have} worm${have === 1 ? "" : "s"}` : "You don't have any worms to give", balance: have }, 400);
       const ins = env.DB.prepare(`INSERT INTO worms (id, giver, receiver, post_id, comment_id, created_at) VALUES (?, ?, ?, ?, ?, ?)`);
       await env.DB.batch(Array.from({ length: count }, () => ins.bind(crypto.randomUUID(), username, receiver, postId, commentId, now)));
+      await bumpPost(post.id); // worms count as activity: the post rises in Flock
       const col = commentId ? "comment_id" : "post_id", id = commentId || postId;
       const r = await env.DB.prepare(`SELECT COUNT(*) AS n, SUM(CASE WHEN giver = ? THEN 1 ELSE 0 END) AS m FROM worms WHERE ${col} = ?`).bind(username, id).first();
       const pr = postId ? (await postResp([postId], username))[postId] : null;
@@ -2168,7 +2169,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         return json({ error: "Not an emoji" }, 400);
       }
       if (await isBanned()) return json({ error: "Banned" }, 403);
-      const reactedPost = await env.DB.prepare(`SELECT p.frozen FROM comments c JOIN posts p ON p.id = c.post_id WHERE c.id = ?`).bind(body.comment_id).first();
+      const reactedPost = await env.DB.prepare(`SELECT p.id, p.frozen FROM comments c JOIN posts p ON p.id = c.post_id WHERE c.id = ?`).bind(body.comment_id).first();
       if (reactedPost?.frozen) return json({ error: "This post is archived" }, 403);
       // One reaction per bird per chirp (like iMessage): reacting replaces your previous emoji there.
       // Matched by the signed-in account only (never a client-sent device id), so it holds across your
@@ -2184,6 +2185,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
             INSERT INTO comment_reactions (id, comment_id, browser_id, emoji, username, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
           `).bind(crypto.randomUUID(), body.comment_id, body.browser_id, em, username, now).run();
+          if (reactedPost?.id) await bumpPost(reactedPost.id); // a new chirp reaction counts as activity (Flock)
         }
       }
       return json({ success: true });
