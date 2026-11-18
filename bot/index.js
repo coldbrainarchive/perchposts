@@ -341,8 +341,32 @@ async function run() {
   process.once("SIGINT", stopEarly);
   process.once("SIGTERM", stopEarly);
 
+  // The last feed in the list (BBC World) lands on top of the site. Other feeds from the same outlet often
+  // carry its stories, and repeats are skipped, so it picks its story first and posts it after everyone else.
+  const anchor = feeds.length > 1 ? feeds[feeds.length - 1] : null;
+  let held = null;
+  const postOne = async ({ content, board, feed, url, tkey, title, link }) => {
+    const ok = await postArticle({ content, board, continent: feed.continent || null, country: feed.country || null });
+    if (ok === "duplicate") {
+      // The site already has this article, usually an old live blog that was updated
+      seen.add(url);
+      if (tkey) seen.add(tkey);
+      stats.skippedAlreadySeen.push({ url, title });
+    } else if (ok) {
+      seen.add(url);
+      if (tkey) seen.add(tkey);
+      posted++;
+      postedArticles.push({ title: decodeEntities(title), url: link, board, continent: feed.continent || null, country: feed.country || null });
+      console.log(`[${board}][${feed.continent || "—"}][${feed.country || "—"}] ${title}`);
+      await new Promise(r => setTimeout(r, 300));
+    } else {
+      stats.postFailed.push({ url, title });
+    }
+    return ok;
+  };
+
   try {
-    for (const feed of feeds) {
+    for (const feed of anchor ? [anchor, ...feeds.slice(0, -1)] : feeds) {
       let feedData;
       try {
         const res = await fetch(feed.url, { headers: FETCH_HEADERS, signal: AbortSignal.timeout(15000) });
@@ -408,29 +432,28 @@ async function run() {
           };
           const content = ATTACH_MARKER + JSON.stringify(attachment) + "]";
 
-          const ok = await postArticle({ content, board, continent: feed.continent || null, country: feed.country || null });
-          if (ok === "duplicate") {
-            // The site already has this article, usually an old live blog that was updated
+          const job = { content, board, feed, url, tkey, title: resolvedTitle, link: og?.url || url };
+          if (feed === anchor) {
+            // Claim it now so no other feed posts it; it is posted at the very end
+            held = job;
             seen.add(url);
             if (tkey) seen.add(tkey);
-            stats.skippedAlreadySeen.push({ url, title: resolvedTitle });
-          } else if (ok) {
-            seen.add(url);
-            if (tkey) seen.add(tkey);
-            posted++;
             postedThisFeed++;
-            postedArticles.push({ title: decodeEntities(resolvedTitle), url: og?.url || url, board, continent: feed.continent || null, country: feed.country || null });
-            console.log(`[${board}][${feed.continent || "—"}][${feed.country || "—"}] ${resolvedTitle}`);
-            await new Promise(r => setTimeout(r, 300));
-          } else {
-            stats.postFailed.push({ url, title: resolvedTitle });
+            continue;
           }
+          const ok = await postOne(job);
+          if (ok && ok !== "duplicate") postedThisFeed++;
         } catch (err) {
           // One bad article must not stop the run
           console.error(`Skipped an article after an error: ${err.message}`);
           stats.postFailed.push({ url: String(item.link || item.guid || "unknown"), title: String(item.title || "unknown") });
         }
       }
+    }
+    if (held) {
+      const ok = await postOne(held);
+      // If the post failed, let a later run try this story again
+      if (!ok) { seen.delete(held.url); if (held.tkey) seen.delete(held.tkey); }
     }
   } catch (err) {
     await saveProgress();
