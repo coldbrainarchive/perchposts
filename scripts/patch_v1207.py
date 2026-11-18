@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Patch v1206 -> v1207 (preview): on photo / video slides the flaps / chirps / share bar grows into a panel that
+"""Patch v1206 -> v1207 : on photo / video slides the flaps / chirps / share bar grows into a panel that
 holds the name + tags + time, the title and VIEW POST ↗ above the buttons. Swiping onto a media post the panel opens
 out of the bar; on text / link posts it folds back to the plain bar. The slide itself shows only the media."""
 import sys
