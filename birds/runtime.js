@@ -14,7 +14,7 @@ const loadSet = (into, suffix) => Promise.all(BASE_FILES.map(([em, f]) => new Pr
   const im = new Image(); im.onload = () => { into[em] = im; res(); }; im.onerror = rej; im.src = `/birds/${f}${suffix}.png?v=${VER}`;
 })));
 let ok = false, bigKit = null, bigLoad = null;
-const ready = Promise.all([loadSet(BASE1, ""), loadSet(BASE2, "@2x")]).then(() => { ok = true; pump(); }).catch(() => {
+const ready = Promise.all([loadSet(BASE1, ""), loadSet(BASE2, "@2x")]).then(() => { ok = true; pump(); setTimeout(() => big(), 1500); }).catch(() => {
   // base images missing: every bird stays the plain emoji
   for (const r of cache.values()) r.done = r.fail = true;
   for (const s of subs.values()) s.forEach(f => f());
@@ -28,7 +28,7 @@ const key = (n, c, kind) => (kind === "t" ? "t" : "f") + "|" + c + "|" + n;
 function get(n, c, kind) {
   const k = key(n, c, kind), r = cache.get(k);
   if (r) return r.done ? r : null;
-  cache.set(k, { done: false }); queue.push([n, c, kind === "t" ? "t" : "f"]); pump(); return null;
+  cache.set(k, { done: false }); (kind === "t" ? queue.push : queue.unshift).call(queue, [n, c, kind === "t" ? "t" : "f"]); pump(); return null; // big birds first
 }
 function sub(n, c, fn, kind) { const k = key(n, c, kind); let s = subs.get(k); if (!s) subs.set(k, s = new Set()); s.add(fn); return () => s.delete(fn); }
 function pump() { if (running || !ok || !queue.length) return; running = true; setTimeout(step, 0); }
