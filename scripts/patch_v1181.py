@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Patch v1180 -> v1181 (preview): on post cards, a poster's name pill is folded into a round bird icon (ring in
+"""Patch v1180 -> v1181 : on post cards, a poster's name pill is folded into a round bird icon (ring in
 their colour). Tap it: it slides open into the full name pill. Tap the open pill: what tapping a name did before.
 Tapping anywhere else (or opening another) folds it back. borbie/admins, bots and news posts are unchanged;
 the post page keeps the full name."""
