@@ -17,6 +17,8 @@ if (!BOT_KEY) { console.error("BOT_KEY env var is required"); process.exit(1); }
 // are affiliate shopping guides; CBS's real business news lives under /news/), and CBS Sports' gambling
 // sections (/betting/ and /prediction/ are sportsbook and prediction-market promotions; real sports news is under /nfl/news/ etc.)
 const SKIPPED_LINKS = /\/\/www\.cbsnews\.com\/(?:video|moneywatch|essentials)\/|\/\/www\.cbssports\.com\/(?:betting|prediction)\//;
+// Reads feed dates, including ones written like "18 November 2026 - 22:00" (NL Times)
+const feedDate = s => { if (!s) return null; let d = new Date(s); if (isNaN(d)) d = new Date(String(s).replace(/\s+-\s+(?=\d{1,2}:\d{2})/, " ")); return isNaN(d) ? null : d; };
 // Ads dressed as news, from any site: sign-up offers for betting and prediction apps, promo/coupon codes, sponsored pages
 const PROMO_TEXT = /\b(?:promo|bonus|coupon|referral|voucher|discount)\s+codes?\b|\bbonus\s+bets?\b|\bfree\s+bets?\b|\bsign[- ]?up\s+(?:bonus|offer)s?\b|\bdeposit\s+match\b|\bodds\s+boosts?\b|\b(?:sponsored|paid)\s+(?:content|post|partner(?:ship)?)\b/i;
 const isPromo = (...texts) => PROMO_TEXT.test(texts.filter(Boolean).join(" "));
@@ -380,7 +382,7 @@ async function run() {
 
           // Date filter — skip articles older than the lookback (only on subsequent runs)
           if (!isFirstRun) {
-            const pubDate = item.isoDate ? new Date(item.isoDate) : item.pubDate ? new Date(item.pubDate) : null;
+            const pubDate = item.isoDate ? new Date(item.isoDate) : feedDate(item.pubDate);
             if (!pubDate || isNaN(pubDate) || pubDate < oldestPubDate) continue;
           }
 

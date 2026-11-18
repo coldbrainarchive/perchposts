@@ -7,6 +7,8 @@ const ATTACH_MARKER = "\n\n[ATTACH:";
 // are affiliate shopping guides; CBS's real business news lives under /news/), and CBS Sports' gambling
 // sections (/betting/ and /prediction/ are sportsbook and prediction-market promotions; real sports news is under /nfl/news/ etc.)
 const SKIPPED_LINKS = /\/\/www\.cbsnews\.com\/(?:video|moneywatch|essentials)\/|\/\/www\.cbssports\.com\/(?:betting|prediction)\//;
+// Reads feed dates, including ones written like "18 November 2026 - 22:00" (NL Times)
+const feedDate = s => { if (!s) return null; let d = new Date(s); if (isNaN(d)) d = new Date(String(s).replace(/\s+-\s+(?=\d{1,2}:\d{2})/, " ")); return isNaN(d) ? null : d; };
 // Ads dressed as news, from any site: sign-up offers for betting and prediction apps, promo/coupon codes, sponsored pages
 const PROMO_TEXT = /\b(?:promo|bonus|coupon|referral|voucher|discount)\s+codes?\b|\bbonus\s+bets?\b|\bfree\s+bets?\b|\bsign[- ]?up\s+(?:bonus|offer)s?\b|\bdeposit\s+match\b|\bodds\s+boosts?\b|\b(?:sponsored|paid)\s+(?:content|post|partner(?:ship)?)\b/i;
 const isPromo = (...texts) => PROMO_TEXT.test(texts.filter(Boolean).join(" "));
@@ -363,7 +365,7 @@ async function run(env) {
       if (seen.has(url) || (tkey && seen.has(tkey))) { skippedSeen++; continue; }
 
       if (!isFirstRun) {
-        const pubDate = item.isoDate ? new Date(item.isoDate) : null;
+        const pubDate = feedDate(item.isoDate);
         if (!pubDate || isNaN(pubDate) || pubDate < oldestPubDate) continue;
       }
 
