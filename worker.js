@@ -1387,15 +1387,21 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       // Most flaps / Most chirps: posts from the last day / week / all time ranked by flaps or chirps
       // (sort=flaps|chirps, range=day|week|all, default week). post_votes and comments are small, so rank
       // there, then load those posts. Each post gets a "rank" field with its count.
-      const flappedBy = url.searchParams.get("flapped_by");
+      // Profile "Activity" tab (?activity_by=, or the older ?flapped_by=): posts the person flapped, fed worms
+      // (to the post or one of its chirps) or chirped on, newest action first. Each post gets act {f, w, c}:
+      // flapped (0/1), worms given, chirps written. Huddles are left out by LIVE_POSTS.
+      const flappedBy = url.searchParams.get("activity_by") || url.searchParams.get("flapped_by");
       if (flappedBy) {
         const pageLimit = Math.min(parseInt(url.searchParams.get("limit") || "50") || 50, 100);
         const { results: fl = [] } = await env.DB.prepare(
-          `SELECT post_id, MAX(t) AS created_at FROM (
-             SELECT post_id, created_at AS t FROM post_votes WHERE username = ? AND value > 0
-             UNION ALL SELECT post_id, created_at FROM worms WHERE giver = ? AND post_id IS NOT NULL)
+          `SELECT post_id, MAX(t) AS created_at, SUM(k = 'f') AS f, SUM(k = 'w') AS w, SUM(k = 'c') AS c FROM (
+             SELECT post_id, created_at AS t, 'f' AS k FROM post_votes WHERE username = ? AND value > 0
+             UNION ALL SELECT post_id, created_at, 'w' FROM worms WHERE giver = ? AND post_id IS NOT NULL
+             UNION ALL SELECT cm.post_id, w.created_at, 'w' FROM worms w JOIN comments cm ON cm.id = w.comment_id WHERE w.giver = ? AND w.post_id IS NULL
+             UNION ALL SELECT post_id, created_at, 'c' FROM comments WHERE username = ? AND deleted = 0)
            GROUP BY post_id${before ? " HAVING MAX(t) < ?" : ""} ORDER BY created_at DESC LIMIT ?`
-        ).bind(...(before ? [flappedBy, flappedBy, before, pageLimit] : [flappedBy, flappedBy, pageLimit])).all();
+        ).bind(flappedBy, flappedBy, flappedBy, flappedBy, ...(before ? [before] : []), pageLimit).all();
+        const acts = new Map(fl.map(r => [r.post_id, { f: r.f ? 1 : 0, w: r.w || 0, c: r.c || 0 }]));
         const when = new Map(fl.map(r => [r.post_id, r.created_at])), ids = [...when.keys()], rows = [];
         for (let i = 0; i < ids.length; i += 90) {
           const chunk = ids.slice(i, i + 90);
@@ -1403,7 +1409,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
           rows.push(...results);
         }
         rows.sort((a, b) => (when.get(b.id) || "").localeCompare(when.get(a.id) || ""));
-        const posts = await publicRows(await addCommentCounts(env, rows.map(p => ({ ...boolify(p, POST_BOOL_FIELDS), flapped_at: when.get(p.id) }))));
+        const posts = await publicRows(await addCommentCounts(env, rows.map(p => ({ ...boolify(p, POST_BOOL_FIELDS), flapped_at: when.get(p.id), act: acts.get(p.id) }))));
         return json({ posts, next_before: fl.length === pageLimit ? fl[fl.length - 1].created_at : null });
       }
 
