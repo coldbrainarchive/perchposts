@@ -311,7 +311,7 @@ function boolify(row, fields) {
 // goes in as one JSON value: IN (${ID_LIST}) with .bind(JSON.stringify(ids))
 const ID_LIST = `SELECT value FROM json_each(?)`;
 const LIVE_POSTS = `deleted = 0 AND (archived = 0 OR archived IS NULL) AND (is_huddle = 0 OR is_huddle IS NULL)`;
-const BOARD_NAMES = { general: "General", sports: "Sports", "science-nature": "Science", random: "Random", announcements: "Announcements", cage: "The Cage" };
+const BOARD_NAMES = { general: "General", sports: "Sports", "science-nature": "Science", nature: "Nature", entertainment: "Entertainment", random: "Random", announcements: "Announcements", cage: "The Cage" };
 // country/continent have no index: scan at most this many recent rows per page
 const REGION_WINDOW = 4000;
 // Each country's home region, matching the page's country list exactly. Every bot feed has a country
