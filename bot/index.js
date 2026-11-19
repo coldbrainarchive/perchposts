@@ -200,6 +200,57 @@ const BOARD_BOTS = {
   "entertainment":  { username: "NewsBot",     browser_id: "bot-newsbot" },
 };
 
+// --- Arranging an hour's batch (top of the site first) ---
+
+// Takes turns between groups so no group bunches up: [a1,a2,b1,c1,c2] -> a1,b1,c1,a2,c2
+function takeTurns(groups) {
+  const out = [], qs = groups.map(g => [...g]);
+  while (qs.some(q => q.length)) for (const q of qs) if (q.length) out.push(q.shift());
+  return out;
+}
+function groupBy(list, key) {
+  const m = new Map();
+  for (const x of list) { const k = key(x); if (!m.has(k)) m.set(k, []); m.get(k).push(x); }
+  return [...m.values()];
+}
+// Biggest tier first; inside a tier, outer groups take turns (starting point moves each hour so the
+// same region doesn't always lead), and inside each outer group the inner groups take turns too.
+// An outlet with many feeds (BBC has 19) mustn't fill a whole tier: each extra story from the same
+// outlet drops one tier, so the big names stay near the top without crowding everyone else out.
+const outletOf = j => { try { return new URL(j.feed.url).hostname.replace(/^(www|feeds|rss)\./, ""); } catch { return j.feed.url; } };
+function byTier(list, outer, inner, turn) {
+  const seenOutlet = new Map(), eff = new Map();
+  for (const j of list) {
+    const o = outletOf(j), n = seenOutlet.get(o) || 0;
+    seenOutlet.set(o, n + 1);
+    eff.set(j, Math.min(4, (Number.isFinite(j.feed.tier) ? j.feed.tier : 3) + n));
+  }
+  const tier = j => eff.get(j);
+  const out = [];
+  for (const t of [...new Set(list.map(tier))].sort((a, b) => a - b)) {
+    let groups = groupBy(list.filter(j => tier(j) === t), outer).map(g => takeTurns(groupBy(g, inner)));
+    if (groups.length) { const s = turn % groups.length; groups = [...groups.slice(s), ...groups.slice(0, s)]; }
+    out.push(...takeTurns(groups));
+  }
+  return out;
+}
+function arrange(jobs, turn = new Date().getUTCHours()) {
+  const tier = j => (Number.isFinite(j.feed.tier) ? j.feed.tier : 3);
+  const world = jobs.filter(j => tier(j) === 0).sort((a, b) => (a.feed.top || 99) - (b.feed.top || 99));
+  const rest = jobs.filter(j => tier(j) !== 0);
+  const region = j => j.feed.continent || "—", country = j => j.feed.country || "—";
+  const gen = byTier(rest.filter(j => j.board === "general"), region, country, turn);
+  const sec = byTier(rest.filter(j => j.board !== "general"), j => j.board, region, turn);
+  // Spread the other sections evenly through the general news
+  const out = [...world];
+  let g = 0, s = 0;
+  while (g < gen.length || s < sec.length) {
+    const takeSec = s < sec.length && (g >= gen.length || (s + 1) / (sec.length + 1) <= (g + 1) / (gen.length + 1));
+    out.push(takeSec ? sec[s++] : gen[g++]);
+  }
+  return out;
+}
+
 async function createLog(runType) {
   try {
     const res = await fetch(`${WORKER_URL}/bot-log-create`, {
@@ -341,55 +392,111 @@ async function run() {
   process.once("SIGINT", stopEarly);
   process.once("SIGTERM", stopEarly);
 
-  // The last feed in the list (BBC World) lands on top of the site. Other feeds from the same outlet often
-  // carry its stories, and repeats are skipped, so it picks its story first and posts it after everyone else.
-  const anchor = feeds.length > 1 ? feeds[feeds.length - 1] : null;
-  let held = null;
-  const postOne = async ({ content, board, feed, url, tkey, title, link }) => {
-    const ok = await postArticle({ content, board, continent: feed.continent || null, country: feed.country || null });
-    if (ok === "duplicate") {
-      // The site already has this article, usually an old live blog that was updated
-      seen.add(url);
-      if (tkey) seen.add(tkey);
-      stats.skippedAlreadySeen.push({ url, title });
-    } else if (ok) {
-      seen.add(url);
-      if (tkey) seen.add(tkey);
-      posted++;
-      postedArticles.push({ title: decodeEntities(title), url: link, board, continent: feed.continent || null, country: feed.country || null });
-      console.log(`[${board}][${feed.continent || "—"}][${feed.country || "—"}] ${title}`);
-      await new Promise(r => setTimeout(r, 300));
-    } else {
-      stats.postFailed.push({ url, title });
+  // Each run gathers the whole hour first, arranges it, then releases it in one go at the top of the hour.
+  // Order (top of the site first): the world desks (tier 0, by their "top" number), then everything else
+  // from the biggest outlets (tier 1) down to the smallest (tier 4). Inside a tier the regions take turns,
+  // and sports / entertainment / science / nature are spread evenly through the general news.
+  const tierOf = f => (Number.isFinite(f.tier) ? f.tier : 3);
+  const isWorld = f => tierOf(f) === 0;
+  const collected = [];
+  const keysOf = j => [j.url, j.tkey].filter(Boolean);
+  // World desks gather first, so their stories aren't taken by a regional feed from the same outlet
+  const order = [...feeds.filter(isWorld).sort((a, b) => (a.top || 99) - (b.top || 99)), ...feeds.filter(f => !isWorld(f))];
+
+  // Fetch every feed's XML a few at a time (the slow part, opening each article, stays in order below)
+  const xmlOf = new Map();
+  {
+    let next = 0;
+    const worker = async () => {
+      while (next < order.length) {
+        const feed = order[next++];
+        try {
+          const res = await fetch(feed.url, { headers: FETCH_HEADERS, signal: AbortSignal.timeout(15000) });
+          if (!res.ok) { xmlOf.set(feed, { error: `HTTP ${res.status}` }); continue; }
+          xmlOf.set(feed, { xml: await res.text() });
+        } catch (err) { xmlOf.set(feed, { error: err.message }); }
+      }
+    };
+    await Promise.all(Array.from({ length: 8 }, worker));
+  }
+
+  const release = async () => {
+    if (!collected.length) return;
+    const list = arrange(collected);
+    const payload = list.map(j => {
+      const bot = BOARD_BOTS[j.board] || BOARD_BOTS["general"];
+      return { content: j.content, board: j.board, username: bot.username, browser_id: bot.browser_id, continent: j.feed.continent || null, country: j.feed.country || null };
+    });
+    let out = null;
+    for (let attempt = 1; attempt <= 3 && !out; attempt++) {
+      try {
+        const res = await fetch(`${WORKER_URL}/bot-release`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-bot-key": BOT_KEY },
+          body: JSON.stringify({ posts: payload }),
+          signal: AbortSignal.timeout(60000),
+        });
+        if (res.ok) out = await res.json();
+        else console.error(`  Release failed (try ${attempt} of 3): HTTP ${res.status} ${await res.text()}`);
+      } catch (err) { console.error(`  Could not reach the site (try ${attempt} of 3): ${err.cause?.code || err.message}`); }
+      if (!out && attempt < 3) await new Promise(r => setTimeout(r, 3000));
     }
-    return ok;
+    if (!out) {
+      // Safety net: post one at a time, bottom first, so the top story still ends up on top
+      console.error("  Batch release failed — posting one at a time instead.");
+      const results = new Array(list.length);
+      for (let i = list.length - 1; i >= 0; i--) {
+        const j = list[i];
+        const ok = await postArticle({ content: j.content, board: j.board, continent: j.feed.continent || null, country: j.feed.country || null });
+        results[i] = ok === "duplicate" ? { duplicate: true } : { ok: !!ok };
+      }
+      out = { results };
+    }
+    list.forEach((j, i) => {
+      const r = out?.results?.[i];
+      if (r?.ok) {
+        posted++;
+        postedArticles.push({ title: decodeEntities(j.title), url: j.link, board: j.board, continent: j.feed.continent || null, country: j.feed.country || null });
+      } else if (r?.duplicate) {
+        stats.skippedAlreadySeen.push({ url: j.url, title: j.title });   // stays seen
+      } else {
+        stats.postFailed.push({ url: j.url, title: j.title });
+        keysOf(j).forEach(k => seen.delete(k));                        // let a later run try it again
+      }
+    });
+    // Log top of the site first
+    list.forEach((j, i) => { if (out?.results?.[i]?.ok) console.log(`[${j.board}][${j.feed.continent || "—"}][${j.feed.country || "—"}] ${j.title}`); });
+    collected.length = 0;
   };
+  // A run that is stopped mid-way releases what it has instead of losing it
+  process.removeAllListeners("SIGINT"); process.removeAllListeners("SIGTERM");
+  const stopNow = async () => { console.error("Run stopped early — releasing what was gathered."); await release(); await saveProgress(); process.exit(1); };
+  process.once("SIGINT", stopNow);
+  process.once("SIGTERM", stopNow);
 
   try {
-    for (const feed of anchor ? [anchor, ...feeds.slice(0, -1)] : feeds) {
+    for (const feed of order) {
+      const got = xmlOf.get(feed);
       let feedData;
-      try {
-        const res = await fetch(feed.url, { headers: FETCH_HEADERS, signal: AbortSignal.timeout(15000) });
-        if (!res.ok) {
-          const msg = `${feed.url} — HTTP ${res.status}`;
-          console.error(`Could not fetch ${msg}`);
-          stats.feedErrors.push(msg);
-          continue;
-        }
-        const xml = await res.text();
-        feedData = await parser.parseString(xml);
-      } catch (err) {
+      if (!got || got.error) {
+        const msg = `${feed.url} — ${got?.error || "not fetched"}`;
+        console.error(`Could not fetch ${msg}`);
+        stats.feedErrors.push(msg);
+        continue;
+      }
+      try { feedData = await parser.parseString(got.xml); }
+      catch (err) {
         const msg = `${feed.url} — ${err.message}`;
         console.error(`Could not fetch ${msg}`);
         stats.feedErrors.push(msg);
         continue;
       }
 
-      let postedThisFeed = 0;
+      let takenThisFeed = 0;
 
       for (const item of (feedData.items || []).slice(0, 15)) {
         try {
-          if (postedThisFeed >= maxPerFeed) break;
+          if (takenThisFeed >= maxPerFeed) break;
 
           const url = normalizeUrl(item.link || item.guid);
           if (!url || SKIPPED_LINKS.test(url)) continue;
@@ -409,7 +516,6 @@ async function run() {
             const pubDate = item.isoDate ? new Date(item.isoDate) : feedDate(item.pubDate);
             if (!pubDate || isNaN(pubDate) || pubDate < oldestPubDate) continue;
           }
-
 
           const snippet = String(item.contentSnippet || item.summary || "").trim();
           if (isPromo(rssTitle, snippet)) continue;                      // ads and betting promos
@@ -432,17 +538,11 @@ async function run() {
           };
           const content = ATTACH_MARKER + JSON.stringify(attachment) + "]";
 
+          // Claim it now (so no later feed takes the same story); it goes out with the release
           const job = { content, board, feed, url, tkey, title: resolvedTitle, link: og?.url || url };
-          if (feed === anchor) {
-            // Claim it now so no other feed posts it; it is posted at the very end
-            held = job;
-            seen.add(url);
-            if (tkey) seen.add(tkey);
-            postedThisFeed++;
-            continue;
-          }
-          const ok = await postOne(job);
-          if (ok && ok !== "duplicate") postedThisFeed++;
+          keysOf(job).forEach(k => seen.add(k));
+          collected.push(job);
+          takenThisFeed++;
         } catch (err) {
           // One bad article must not stop the run
           console.error(`Skipped an article after an error: ${err.message}`);
@@ -450,12 +550,18 @@ async function run() {
         }
       }
     }
-    if (held) {
-      const ok = await postOne(held);
-      // If the post failed, let a later run try this story again
-      if (!ok) { seen.delete(held.url); if (held.tkey) seen.delete(held.tkey); }
+
+    // Hold everything until the top of the hour (runs start a few minutes early), then release it at once
+    const t = new Date(), mins = t.getUTCMinutes();
+    if (mins >= 45 && !process.env.NO_WAIT) {
+      const topOfHour = new Date(t); topOfHour.setUTCHours(t.getUTCHours() + 1, 0, 0, 0);
+      const wait = topOfHour - t;
+      console.log(`Gathered ${collected.length} article(s); releasing in ${Math.round(wait / 1000)}s at ${topOfHour.toISOString()}`);
+      await new Promise(r => setTimeout(r, wait));
     }
+    await release();
   } catch (err) {
+    await release().catch(() => {});
     await saveProgress();
     throw err;
   }

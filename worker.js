@@ -1257,6 +1257,46 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     }
   }
 
+  // ── /bot-release ───────────────────────────────────────────────────────────────
+  // The news bots gather a whole hour, then release it here in one go, so it lands all at once.
+  // posts[] comes top-first; each gets a timestamp 1 ms apart so the feed shows them in that order.
+  if (url.pathname === "/bot-release" && request.method === "POST") {
+    if (!isBot) return json({ error: "Unauthorized" }, 401);
+    try {
+      const list = Array.isArray(body.posts) ? body.posts.slice(0, 400) : [];
+      const base = Date.now();
+      const results = [], stmts = [], claims = [];
+      for (let i = 0; i < list.length; i++) {
+        const p = list[i] || {};
+        if (!p.content) { results.push({ ok: false, error: "Missing content" }); continue; }
+        const at = new Date(base - i).toISOString();
+        const claim = await claimBotPost(env, botPostKeys(p.content), at);
+        if (claim.duplicate) { results.push({ ok: false, duplicate: true }); continue; }
+        claims.push(...(claim.claimed || []));
+        const id = crypto.randomUUID();
+        stmts.push(env.DB.prepare(`
+          INSERT INTO posts (id, title, content, username, ip_hash, browser_id, last_activity,
+            is_mod, is_admin, moderator, mod_user_id, continent, country, board, community_id,
+            is_huddle, huddle_members, created_at)
+          VALUES (?, NULL, ?, ?, ?, ?, ?, 0, 0, 0, NULL, ?, ?, ?, NULL, 0, NULL, ?)
+        `).bind(id, p.content, (typeof p.username === "string" && p.username.trim()) || "NewsBot", ip_hash,
+          p.browser_id || null, at, p.continent || null, p.country || null, p.board || "General", at));
+        results.push({ ok: true, id });
+      }
+      if (stmts.length) {
+        // One batch: the whole hour appears together, or (if it fails) not at all and can be tried again.
+        // The feed lists newest rowid first, so the bottom post is written first and the top post last.
+        await env.DB.batch(stmts.reverse()).catch(async err => {
+          for (const key of claims) await env.DB.prepare(`DELETE FROM bot_links WHERE url = ?`).bind(key).run().catch(() => {});
+          throw err;
+        });
+      }
+      return json({ success: true, posted: stmts.length, results });
+    } catch (err) {
+      return serverError(err);
+    }
+  }
+
   // ── /get-post ──────────────────────────────────────────────────────────────────
 
   if (url.pathname === "/get-post") {
