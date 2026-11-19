@@ -1276,6 +1276,9 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       // Caged birds can only write in The Cage: no starting huddles either
       if (caged && isHuddle) return json({ error: "Caged" }, 403);
       if (caged) {
+        // Cage posts have no country or region (the page doesn't offer one; this covers anything sent directly)
+        body.country = null;
+        body.continent = null;
         body.board = "The Cage";
         body.category = "The Cage";
         body.community_id = "cage";
