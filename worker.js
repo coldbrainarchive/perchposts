@@ -1273,6 +1273,8 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       if (!isHuddle && !body.content) return json({ error: "Missing fields" }, 400);
       if (isHuddle && !body.huddle_members) return json({ error: "Missing huddle_members" }, 400);
       const caged = !isBot && !isModerator && await isJailed();
+      // Caged birds can only write in The Cage: no starting huddles either
+      if (caged && isHuddle) return json({ error: "Caged" }, 403);
       if (caged) {
         body.board = "The Cage";
         body.category = "The Cage";
@@ -1846,6 +1848,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   if (url.pathname === "/invite-to-huddle") {
     try {
       if (!username) return signInRequired();
+      if (!isModerator && await isJailed()) return json({ error: "Caged" }, 403);
       const { post_id, invite_username } = body;
       if (!post_id || !invite_username) return json({ error: "Missing fields" }, 400);
       const post = await env.DB.prepare(`SELECT * FROM posts WHERE id = ? AND deleted = 0`).bind(post_id).first();
@@ -1962,6 +1965,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   if (url.pathname === "/edit-huddle-title") {
     try {
       if (!username) return signInRequired();
+      if (!isModerator && await isJailed()) return json({ error: "Caged" }, 403);
       const { post_id, title } = body;
       if (!post_id) return json({ error: "Missing post_id" }, 400);
       const post = await env.DB.prepare(`SELECT * FROM posts WHERE id = ? AND deleted = 0`).bind(post_id).first();
