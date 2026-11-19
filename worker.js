@@ -2457,12 +2457,19 @@ async function handleRequest(request, env, ctx, corsHeaders) {
           (SELECT p.browser_id FROM posts p WHERE p.username = m.username AND p.browser_id IS NOT NULL ORDER BY p.created_at DESC LIMIT 1) as browser_id,
           MAX(0, m.worm_start + (SELECT COUNT(*) FROM worms w WHERE w.receiver = m.username) - (SELECT COUNT(*) FROM worms w WHERE w.giver = m.username)) as worm_count
         FROM mod_users m WHERE m.deleted_at IS NULL ORDER BY m.last_active DESC, m.created_at DESC`).all();
+      // Flaps (like on the bird card): flaps other people gave each bird's posts. Starts from post_votes (small) and
+      // looks each post up by id, so the posts table is never scanned.
+      const { results: fl = [] } = await env.DB.prepare(`SELECT p.username AS u, COUNT(DISTINCT v.post_id || '|' || COALESCE(v.username, 'b:' || v.browser_id)) AS n
+        FROM post_votes v CROSS JOIN posts p ON p.id = v.post_id
+        WHERE v.value > 0 AND p.deleted = 0 AND p.username IS NOT NULL AND (v.username IS NULL OR v.username != p.username) GROUP BY p.username`).all();
+      const flapsOf = new Map(fl.map(r => [r.u, r.n]));
       const members = (results || []).map(u => ({
         id: u.id,
         email: u.email,
         created_at: u.created_at,
         last_active: u.last_active || null,
         worm_count: u.worm_count || 0,
+        flaps: flapsOf.get(u.username) || 0,
         failed_logins: u.failed_logins || 0,
         locked_until: u.locked_until && u.locked_until > now ? u.locked_until : null,
         user_metadata: { username: u.username, role: u.role, ip_hash: u.ip_hash || null, browser_id: u.browser_id || null }
