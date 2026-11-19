@@ -18,6 +18,8 @@ if (!BOT_KEY) { console.error("BOT_KEY env var is required"); process.exit(1); }
 // sections (/betting/ and /prediction/ are sportsbook and prediction-market promotions; real sports news is under /nfl/news/ etc.)
 // Any site's /sponsored/ section is paid content (e.g. Latin American Post law-firm ads)
 const SKIPPED_LINKS = /\/\/www\.cbsnews\.com\/(?:video|moneywatch|essentials)\/|\/\/www\.cbssports\.com\/(?:betting|prediction)\/|\/sponsored\//;
+// Links in an outlet's sport section, e.g. /sport/, /sports/football/, /motorsport/ (a whole path segment)
+const SPORT_LINK = /^https?:\/\/[^/]+(?:\/[^/?#]+)*?\/(?:sports?|motorsport)\//i;
 // Reads feed dates, including ones written like "18 November 2026 - 22:00" (NL Times)
 const feedDate = s => { if (!s) return null; let d = new Date(s); if (isNaN(d)) d = new Date(String(s).replace(/\s+-\s+(?=\d{1,2}:\d{2})/, " ")); return isNaN(d) ? null : d; };
 // Ads dressed as news, from any site: sign-up offers for betting and prediction apps, promo/coupon codes, sponsored pages
@@ -520,7 +522,8 @@ async function run() {
 
           const snippet = String(item.contentSnippet || item.summary || "").trim();
           if (isPromo(rssTitle, snippet)) continue;                      // ads and betting promos
-          const board = feed.board || "general";
+          // General feeds also carry their outlet's sport stories (RTÉ, CNA, SMH, Arab News…): those go to Sports
+          const board = (feed.board || "general") === "general" && SPORT_LINK.test(url) ? "sports" : (feed.board || "general");
           const rssImage = extractRSSImage(item);
 
           const og = await fetchOgData(url);

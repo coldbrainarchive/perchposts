@@ -6,6 +6,7 @@ const ATTACH_MARKER = "\n\n[ATTACH:";
 // Links the bot never posts: CBS News videos and sponsored pages (/moneywatch/ and /essentials/
 // are affiliate shopping guides; CBS's real business news lives under /news/), and CBS Sports' gambling
 // sections (/betting/ and /prediction/ are sportsbook and prediction-market promotions; real sports news is under /nfl/news/ etc.)
+const SPORT_LINK = /^https?:\/\/[^/]+(?:\/[^/?#]+)*?\/(?:sports?|motorsport)\//i;
 const SKIPPED_LINKS = /\/\/www\.cbsnews\.com\/(?:video|moneywatch|essentials)\/|\/\/www\.cbssports\.com\/(?:betting|prediction)\/|\/sponsored\//;
 // Reads feed dates, including ones written like "18 November 2026 - 22:00" (NL Times)
 const feedDate = s => { if (!s) return null; let d = new Date(s); if (isNaN(d)) d = new Date(String(s).replace(/\s+-\s+(?=\d{1,2}:\d{2})/, " ")); return isNaN(d) ? null : d; };
@@ -371,7 +372,7 @@ async function run(env) {
 
       const snippet = String(item.contentSnippet || "").trim();
       if (isPromo(rssTitle, snippet)) continue;                          // ads and betting promos
-      const board = feed.board || "general";
+      const board = (feed.board || "general") === "general" && SPORT_LINK.test(url) ? "sports" : (feed.board || "general");
       const rssImage = extractRSSImage(item);
 
       const og = await fetchOgData(url);

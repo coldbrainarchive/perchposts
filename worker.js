@@ -1269,11 +1269,36 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const list = Array.isArray(body.posts) ? body.posts.slice(0, 400) : [];
       const base = Date.now();
       const results = [], stmts = [], claims = [];
+      // Check every post for repeats in ONE database call. One call per post took ~20 s for an hour's batch, so
+      // posts stamped :00:00 only showed up around :00:20 and the "new posts" pill came late.
+      const keysOf = list.map(p => botPostKeys((p || {}).content));
+      const cutoff = new Date(Date.now() - REPEAT_TITLE_DAYS * 86400000).toISOString();
+      const cstmts = [], cidx = [];
+      keysOf.forEach((k, i) => {
+        if (!(list[i] || {}).content) return;
+        const at = new Date(base - i).toISOString();
+        if (k.link) { cidx.push([i, "link"]); cstmts.push(env.DB.prepare(`INSERT OR IGNORE INTO bot_links (url, created_at) VALUES (?, ?)`).bind(k.link, at)); }
+        if (k.title) { cidx.push([i, "title"]); cstmts.push(env.DB.prepare(
+          `INSERT INTO bot_links (url, created_at) VALUES (?, ?) ON CONFLICT(url) DO UPDATE SET created_at = excluded.created_at WHERE bot_links.created_at < ?`
+        ).bind(k.title, at, cutoff)); }
+      });
+      let pre = null;
+      if (cstmts.length) {
+        try {
+          const rs = await env.DB.batch(cstmts);
+          pre = new Map();
+          rs.forEach((r, j) => {
+            const [i, kind] = cidx[j], c = pre.get(i) || { duplicate: false, claimed: [] };
+            if (r.meta.changes === 0) c.duplicate = true; else c.claimed.push(keysOf[i][kind]);
+            pre.set(i, c);
+          });
+        } catch (err) { console.error("bot-release: batched repeat check failed, checking one by one:", err.message); pre = null; }
+      }
       for (let i = 0; i < list.length; i++) {
         const p = list[i] || {};
         if (!p.content) { results.push({ ok: false, error: "Missing content" }); continue; }
         const at = new Date(base - i).toISOString();
-        const claim = await claimBotPost(env, botPostKeys(p.content), at);
+        const claim = pre ? (pre.get(i) || { duplicate: false, claimed: [] }) : await claimBotPost(env, keysOf[i], at);
         if (claim.duplicate) { results.push({ ok: false, duplicate: true }); continue; }
         claims.push(...(claim.claimed || []));
         const id = crypto.randomUUID();
