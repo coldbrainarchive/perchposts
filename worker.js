@@ -359,6 +359,8 @@ const COUNTRY_REGION = Object.fromEntries(
 );
 // A post's region: its own tag, else its country's home region
 const regionOf = p => p.continent || COUNTRY_REGION[p.country] || null;
+// World desks (tagged "World") count for both World and their outlet's home region: BBC World shows in Europe too
+const inRegion = (p, region) => regionOf(p) === region || (p.continent === "World" && COUNTRY_REGION[p.country] === region);
 // Region tabs also show posts whose headline, description or text names the region or one of its
 // countries, so a BBC story about Kenya shows under Africa. Whole words, exact case, never the link.
 const REGION_WORDS = {
@@ -407,7 +409,7 @@ function readableText(post) {
 const inHomeRegion = (p, country) =>
   p.country === country && (!p.continent || p.continent === "World" || !COUNTRY_REGION[country] || p.continent === COUNTRY_REGION[country]);
 const regionWhere = region => ({
-  sql: `(continent = ? OR (continent IS NULL AND country IN (${ID_LIST})))`,
+  sql: `(continent = ? OR ((continent IS NULL OR continent = 'World') AND country IN (${ID_LIST})))`,
   params: [region, JSON.stringify(REGION_COUNTRIES[region] || [])]
 });
 const countryWhere = country => COUNTRY_REGION[country]
@@ -435,7 +437,7 @@ async function getPostsPage(env, { activity, board, continent, country, username
     (!userSet || userSet.has((p.username || "").toLowerCase()));
   const matches = p =>
     matchesBoardAndUser(p) &&
-    (!continent || regionOf(p) === continent) &&
+    (!continent || inRegion(p, continent)) &&
     (!country || inHomeRegion(p, country));
   const page = posts => posts.map(p => boolify(p, POST_BOOL_FIELDS));
 
