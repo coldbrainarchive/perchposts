@@ -6,7 +6,7 @@ const ATTACH_MARKER = "\n\n[ATTACH:";
 // Links the bot never posts: CBS News videos and sponsored pages (/moneywatch/ and /essentials/
 // are affiliate shopping guides; CBS's real business news lives under /news/), and CBS Sports' gambling
 // sections (/betting/ and /prediction/ are sportsbook and prediction-market promotions; real sports news is under /nfl/news/ etc.)
-const SPORT_LINK = /^https?:\/\/[^/]+(?:\/[^/?#]+)*?\/(?:sports?|motorsport)\//i;
+const SPORT_LINK = /^https?:\/\/[^/]+(?:\/[^/?#]+)*?\/(?:sports?|motorsports?|tennis|football|soccer|cricket|rugby(?:-union|-league)?|golf|nfl|nba|mlb|nhl|afl|nrl|f1|formula-?(?:1|one)|athletics|boxing|cycling|racing)\//i;
 const SKIPPED_LINKS = /\/\/www\.cbsnews\.com\/(?:video|moneywatch|essentials)\/|\/\/www\.cbssports\.com\/(?:betting|prediction)\/|\/sponsored\//;
 // Reads feed dates, including ones written like "18 November 2026 - 22:00" (NL Times)
 const feedDate = s => { if (!s) return null; let d = new Date(s); if (isNaN(d)) d = new Date(String(s).replace(/\s+-\s+(?=\d{1,2}:\d{2})/, " ")); return isNaN(d) ? null : d; };
