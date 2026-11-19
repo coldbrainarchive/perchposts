@@ -820,6 +820,9 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     }
     return false;
   }
+  // Photos, videos and GIFs in a post or chirp (uploaded files live under /media/). Caged birds can't post them.
+  const hasMedia = text => /\[ATTACHMENTS:|\[ATTACH:\s*\{\s*"type"\s*:\s*"(?:image|images|video|gif)"|\/media\//.test(String(text || ""));
+  const CAGED_MEDIA = "You’re Caged! Caged birds can't post photos or videos.";
   const SLUR_MSG = "That has a slur in it, so it wasn't posted. Swearing is fine here, slurs aren't.";
   const AI_FLAG_CATS = { S1: "violent threats", S3: "sex crimes", S4: "child sexual abuse", S9: "weapons of mass harm", S10: "hate speech" };
   async function aiCheck({ kind, id, postId, text, uname, bid }) {
@@ -1002,6 +1005,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
 
   if (url.pathname === "/upload" && request.method === "POST") {
     if (!username) return signInRequired();
+    if (!isModerator && await isJailed()) return json({ error: CAGED_MEDIA }, 403);
     const ALLOWED = /^(image\/(jpeg|png|gif|webp)|video\/(mp4|webm|quicktime))$/;
     const MAX_VIDEO = 100_000_000, MAX_IMAGE = 50_000_000;   // 100 MB videos, 50 MB photos (photos are shrunk on the phone first)
     const reqType = (request.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
@@ -1275,6 +1279,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const caged = !isBot && !isModerator && await isJailed();
       // Caged birds can only write in The Cage: no starting huddles either
       if (caged && isHuddle) return json({ error: "Caged" }, 403);
+      if (caged && hasMedia(body.content)) return json({ error: CAGED_MEDIA }, 403);
       if (caged) {
         // Cage posts have no country or region (the page doesn't offer one; this covers anything sent directly)
         body.country = null;
@@ -1806,6 +1811,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         const post = await env.DB.prepare(`SELECT board, community_id FROM posts WHERE id = ?`).bind(body.post_id).first();
         const postBoard = (post?.board || post?.community_id || "").toLowerCase();
         if (!post || (postBoard !== "cage" && postBoard !== "the cage")) return json({ error: "Caged" }, 403);
+        if (hasMedia(body.content)) return json({ error: CAGED_MEDIA }, 403);
       }
       const checked = !isModerator && !!target && !target.is_huddle;
       if (checked && hasSlur(userText(body.content))) return json({ error: SLUR_MSG }, 400);
