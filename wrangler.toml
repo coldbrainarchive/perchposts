@@ -10,6 +10,10 @@ binding = "DB"
 database_name = "daboysforum-db"
 database_id = "e35f001b-d7d2-47cb-8ac2-ee6c556a4a16"
 
+# Workers AI: Llama Guard checks public posts/chirps when the "AI check" switch is on (mod panel → Settings)
+[ai]
+binding = "AI"
+
 [[r2_buckets]]
 binding = "MEDIA"
 bucket_name = "daboysforum-media"

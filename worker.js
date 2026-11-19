@@ -793,6 +793,69 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     try { return (await env.DB.prepare(`SELECT value FROM site_settings WHERE key = ?`).bind(key).first())?.value ?? dflt; } catch { return dflt; }
   }
 
+  // ── Content checks (public posts and chirps from members; not bots, mods, huddles or DMs) ──────────
+  // 1. Slurs are refused outright. Swearing is fine ("fuck", "cunt" etc. are never blocked): only words that
+  //    are hate slurs. Catches look-alike spellings (n1gg3r), stretched letters and spaced-out letters.
+  // 2. With the "AI check" switch on (mod panel → Settings), Llama Guard reads each one right after it's
+  //    posted. If it's flagged for hate, threats or sexual abuse, the post/chirp is hidden, the bird goes to
+  //    The Cage, and mods get a notification. Mod panel → Flagged: "Not bad" undoes both, "Confirm" keeps them.
+  const userText = (...parts) => parts.map(p => String(p || "").split(/\s*\[ATTACH/)[0]).join("\n").trim();
+  const SLUR_WORD = /^(?:n+i+g{2,}(?:e+r+|a+h?|u+h+)[sz]?|kikes?|spics?|wetbacks?|gooks?|ragheads?|towelheads?|jigaboos?|zipperheads?|beaners?|pakis?|dark(?:ie|y)s?|fagg?ots?|boongs?)$/;
+  const SLUR_PAIR = /^(?:porchmonkeys?|sandn+i+g{2,}(?:e+r+|a+h?)[sz]?)$/;
+  function hasSlur(text) {
+    let t = String(text || "").normalize("NFKD").replace(/[̀-ͯ​-‏⁠﻿]/g, "").toLowerCase();
+    t = t.replace(/[0]/g, "o").replace(/[1!|]/g, "i").replace(/3/g, "e").replace(/[4@]/g, "a").replace(/[5$]/g, "s").replace(/7/g, "t");
+    t = t.replace(/([a-z])\1{2,}/g, "$1$1");
+    const words = t.split(/[^a-z]+/).filter(Boolean);
+    for (let i = 0; i < words.length; i++) {
+      if (SLUR_WORD.test(words[i])) return true;
+      if (i + 1 < words.length && SLUR_PAIR.test(words[i] + words[i + 1])) return true;
+    }
+    // s p a c e d / d.o.t.t.e.d letters
+    let run = "";
+    for (const w of [...words, ""]) {
+      if (w.length === 1) { run += w; continue; }
+      if (run.length >= 4 && (SLUR_WORD.test(run) || SLUR_PAIR.test(run))) return true;
+      run = "";
+    }
+    return false;
+  }
+  const SLUR_MSG = "That has a slur in it, so it wasn't posted. Swearing is fine here, slurs aren't.";
+  const AI_FLAG_CATS = { S1: "violent threats", S3: "sex crimes", S4: "child sexual abuse", S9: "weapons of mass harm", S10: "hate speech" };
+  async function aiCheck({ kind, id, postId, text, uname, bid }) {
+    try {
+      if (!env.AI || !text || text.length < 2) return;
+      if ((await siteSetting("ai_check", "off")) !== "on") return;
+      const r = await env.AI.run("@cf/meta/llama-guard-3-8b", { messages: [{ role: "user", content: text.slice(0, 4000) }] });
+      let cats = [];
+      if (r && typeof r.response === "object" && r.response) { if (r.response.safe === false) cats = r.response.categories || []; }
+      else { const m = String(r?.response || "").trim().match(/^unsafe\b([\s\S]*)$/i); if (m) cats = m[1].match(/S\d+/g) || []; }
+      cats = [...new Set(cats.map(c => String(c).trim().toUpperCase()))].filter(c => AI_FLAG_CATS[c]);
+      if (!cats.length) return;
+      const table = kind === "post" ? "posts" : "comments";
+      const hid = (await env.DB.prepare(`UPDATE ${table} SET deleted = 1 WHERE id = ? AND deleted = 0`).bind(id).run()).meta.changes > 0 ? 1 : 0;
+      const already = uname ? await env.DB.prepare(`SELECT 1 FROM jailed WHERE username = ? LIMIT 1`).bind(uname).first() : null;
+      let caged = 0;
+      if (uname && !already) {
+        await env.DB.prepare(`INSERT OR IGNORE INTO jailed (id, browser_id, username, ip_hash, created_at) VALUES (?, ?, ?, NULL, ?)`)
+          .bind(crypto.randomUUID(), bid || null, uname, new Date().toISOString()).run();
+        caged = 1;
+      }
+      const why = cats.map(c => AI_FLAG_CATS[c]).join(", ");
+      await env.DB.prepare(`INSERT INTO ai_flags (id, kind, target_id, post_id, username, browser_id, categories, excerpt, hid, caged, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)`)
+        .bind(crypto.randomUUID(), kind, id, postId || null, uname || null, bid || null, cats.join(","), text.slice(0, 600), hid, caged, new Date().toISOString()).run();
+      const { results: mods = [] } = await env.DB.prepare(`SELECT username FROM mod_users WHERE role IN ('admin', 'mod') AND deleted_at IS NULL AND username IS NOT NULL`).all();
+      const msg = JSON.stringify({
+        // Starts with the plain name, so the notification shows that bird's picture
+        text: `${uname || "Someone"} had a ${kind === "post" ? "post" : "chirp"} flagged for ${why}. It's hidden and they're in The Cage. Review it in Mod Panel → Flagged.`,
+        postId: postId || undefined, icon: "SHIELD", preview: text.slice(0, 80),
+      });
+      for (const m of mods) await env.DB.prepare(`INSERT INTO system_notifications (id, user_id, message) VALUES (?, ?, ?)`).bind(crypto.randomUUID(), m.username, msg).run();
+    } catch (err) {
+      console.error("ai check failed:", err && err.message);
+    }
+  }
+
   async function isBanned() {
     if (isAdmin) return false; // nothing can lock an admin out, including a shared browser or IP
     const bid = (body.browser_id || "").trim();
@@ -1049,8 +1112,39 @@ async function handleRequest(request, env, ctx, corsHeaders) {
           if (!["off", "day", "week"].includes(body.signup_limit)) return json({ error: "Bad value" }, 400);
           await env.DB.prepare(`INSERT INTO site_settings (key, value) VALUES ('signup_limit', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).bind(body.signup_limit).run();
         }
+        if (body.ai_check !== undefined) {
+          if (!["on", "off"].includes(body.ai_check)) return json({ error: "Bad value" }, 400);
+          await env.DB.prepare(`INSERT INTO site_settings (key, value) VALUES ('ai_check', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).bind(body.ai_check).run();
+        }
       }
-      return json({ signup_limit: await siteSetting("signup_limit", "off"), cap: SIGNUP_CAP, can_edit: isAdmin });
+      return json({ signup_limit: await siteSetting("signup_limit", "off"), ai_check: await siteSetting("ai_check", "off"), cap: SIGNUP_CAP, can_edit: isAdmin });
+    } catch (err) {
+      return serverError(err);
+    }
+  }
+
+  // ── /ai-flags ── what the AI check flagged (mods). POST {id, verdict: "ok" | "confirm"} reviews one ─────────
+  if (url.pathname === "/ai-flags") {
+    if (!isModerator) return json({ error: "Not allowed" }, 403);
+    try {
+      if (request.method === "POST") {
+        const f = await env.DB.prepare(`SELECT * FROM ai_flags WHERE id = ?`).bind(String(body.id || "")).first();
+        if (!f) return json({ error: "Not found" }, 404);
+        if (!["ok", "confirm"].includes(body.verdict)) return json({ error: "Bad value" }, 400);
+        if (body.verdict === "ok") {
+          // Not bad: put the post/chirp back, and let the bird out of The Cage if the AI put them there
+          // (and nothing else of theirs is still waiting for review)
+          if (f.hid) await env.DB.prepare(`UPDATE ${f.kind === "post" ? "posts" : "comments"} SET deleted = 0 WHERE id = ?`).bind(f.target_id).run();
+          if (f.caged && f.username) {
+            const other = await env.DB.prepare(`SELECT 1 FROM ai_flags WHERE username = ? AND id != ? AND status IN ('open', 'confirmed') LIMIT 1`).bind(f.username, f.id).first();
+            if (!other) await env.DB.prepare(`DELETE FROM jailed WHERE username = ?`).bind(f.username).run();
+          }
+        }
+        await env.DB.prepare(`UPDATE ai_flags SET status = ?, reviewed_by = ?, reviewed_at = ? WHERE id = ?`)
+          .bind(body.verdict === "ok" ? "ok" : "confirmed", username, now, f.id).run();
+      }
+      const { results = [] } = await env.DB.prepare(`SELECT * FROM ai_flags ORDER BY created_at DESC LIMIT 100`).all();
+      return json({ flags: results.map(f => ({ ...f, why: String(f.categories || "").split(",").map(c => AI_FLAG_CATS[c] || c).join(", ") })), ai_check: await siteSetting("ai_check", "off") });
     } catch (err) {
       return serverError(err);
     }
@@ -1200,6 +1294,8 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       if (!caged && !isModerator && !isBot && [body.board, body.category, body.community_id].some(v => ["cage", "the cage"].includes(String(v || "").trim().toLowerCase()))) {
         return json({ error: "Only caged birds can post in The Cage" }, 403);
       }
+      const checked = !isBot && !isModerator && !isHuddle;
+      if (checked && hasSlur(userText(body.title, body.content))) return json({ error: SLUR_MSG }, 400);
       // Bots can't post an article twice
       let botClaim = null;
       if (isBot) {
@@ -1253,6 +1349,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         const newPost = { id, title: body.title || null, username, huddle_members: "[]" };
         for (const name of invitees) if (!extinct.has(name)) await sendInvite(newPost, username, name);
       }
+      if (checked) ctx.waitUntil(aiCheck({ kind: "post", id, postId: id, text: userText(body.title, body.content), uname: username, bid: body.browser_id }));
       const post = await env.DB.prepare(`SELECT * FROM posts WHERE id = ?`).bind(id).first();
       return json({ success: true, post: boolify(post, POST_BOOL_FIELDS) });
     } catch (err) {
@@ -1705,6 +1802,8 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         const postBoard = (post?.board || post?.community_id || "").toLowerCase();
         if (!post || (postBoard !== "cage" && postBoard !== "the cage")) return json({ error: "Caged" }, 403);
       }
+      const checked = !isModerator && !!target && !target.is_huddle;
+      if (checked && hasSlur(userText(body.content))) return json({ error: SLUR_MSG }, 400);
       const parentCommentId = typeof body.parent_comment_id === "string" && body.parent_comment_id.trim()
         ? body.parent_comment_id.trim() : null;
       const id = crypto.randomUUID();
@@ -1721,6 +1820,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         isModerator ? (authUser.sub ?? null) : null,
         now
       ).run();
+      if (checked) ctx.waitUntil(aiCheck({ kind: "chirp", id, postId: body.post_id, text: userText(body.content), uname: username, bid: body.browser_id }));
       await bumpPost(body.post_id);
       // Notify huddle members on new comment
       const huddlePost = await env.DB.prepare(`SELECT is_huddle, huddle_members, title, username AS post_username FROM posts WHERE id = ?`).bind(body.post_id).first();
