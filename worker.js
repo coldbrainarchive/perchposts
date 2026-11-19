@@ -2752,6 +2752,8 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     const { to_username, content: dmContent, reply_to_id: dmReplyId } = body;
     if (!to_username || !dmContent?.trim()) return json({ error: "Missing fields" }, 400);
     if (to_username === authUser.username) return json({ error: "Cannot message yourself" }, 400);
+    // Caged birds can only write in The Cage
+    if (!isModerator && await isJailed()) return json({ error: "Caged" }, 403);
     await env.DB.prepare(
       `INSERT INTO private_messages (id, from_username, to_username, content, created_at, reply_to_id) VALUES (?, ?, ?, ?, ?, ?)`
     ).bind(crypto.randomUUID(), authUser.username, to_username, dmContent.trim(), now, dmReplyId || null).run();
