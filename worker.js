@@ -402,15 +402,16 @@ function readableText(post) {
   }
   return parts.join(" ");
 }
-// A country pill keeps to that country's home region, so BBC Africa stays out of the UK pill
+// A country pill keeps to that country's home region, so BBC Africa stays out of the UK pill.
+// World desks (NYT World, BBC World...) are tagged "World", which is no other region, so they stay in.
 const inHomeRegion = (p, country) =>
-  p.country === country && (!p.continent || !COUNTRY_REGION[country] || p.continent === COUNTRY_REGION[country]);
+  p.country === country && (!p.continent || p.continent === "World" || !COUNTRY_REGION[country] || p.continent === COUNTRY_REGION[country]);
 const regionWhere = region => ({
   sql: `(continent = ? OR (continent IS NULL AND country IN (${ID_LIST})))`,
   params: [region, JSON.stringify(REGION_COUNTRIES[region] || [])]
 });
 const countryWhere = country => COUNTRY_REGION[country]
-  ? { sql: `(country = ? AND (continent IS NULL OR continent = ?))`, params: [country, COUNTRY_REGION[country]] }
+  ? { sql: `(country = ? AND (continent IS NULL OR continent = 'World' OR continent = ?))`, params: [country, COUNTRY_REGION[country]] }
   : { sql: `country = ?`, params: [country] };
 
 function boardVariants(board) {
