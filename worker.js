@@ -2864,6 +2864,52 @@ async function handleRequest(request, env, ctx, corsHeaders) {
 
   // ── /search-users ─────────────────────────────────────────────────────────────
 
+  // ── /my-huddles ── the huddles you own or are in (for Share → Send to a huddle), most recently active first.
+  // Never other people's huddles, even for admins with "see all huddles" on.
+  if (url.pathname === "/my-huddles") {
+    if (!authUser?.username) return signInRequired();
+    try {
+      const me = authUser.username;
+      const { results = [] } = await env.DB.prepare(
+        `SELECT id, title, username, huddle_members, last_activity FROM posts INDEXED BY idx_posts_huddles
+         WHERE is_huddle = 1 AND deleted = 0 AND (archived = 0 OR archived IS NULL) AND (frozen = 0 OR frozen IS NULL)
+           AND (LOWER(username) = LOWER(?) OR LOWER(huddle_members) LIKE LOWER(?) OR LOWER(huddle_members) LIKE LOWER(?))
+         ORDER BY last_activity DESC LIMIT 40`
+      ).bind(me, `%"${me}"%`, `%"${me}:%`).all();
+      const huddles = results.filter(p => isHuddleMember(p, me)).map(p => ({
+        id: p.id, title: p.title || "Huddle",
+        members: [...new Set([p.username, ...JSON.parse(p.huddle_members || "[]").map(normMember)].filter(Boolean))],
+      }));
+      return json({ huddles });
+    } catch (err) {
+      return serverError(err);
+    }
+  }
+
+  // ── /share-card?id= ── what a post shared into a huddle shows: title, photo, site, live flap / chirp counts.
+  // Public posts only (huddles never show as a shared card).
+  if (url.pathname === "/share-card") {
+    try {
+      const id = String(url.searchParams.get("id") || "").slice(0, 80);
+      const p = id && await env.DB.prepare(`SELECT id, title, content, username, is_huddle, deleted, archived, board, community_id FROM posts WHERE id = ?`).bind(id).first();
+      if (!p || p.is_huddle || p.deleted || (p.archived && !isModerator)) return json({ gone: true });
+      const [f, c] = await env.DB.batch([
+        env.DB.prepare(`SELECT COUNT(DISTINCT COALESCE(username, 'b:' || browser_id)) AS n FROM post_votes WHERE post_id = ? AND value > 0`).bind(id),
+        env.DB.prepare(`SELECT COUNT(*) AS n FROM comments WHERE post_id = ? AND deleted = 0 AND (username IS NULL OR username != '__system__')`).bind(id),
+      ]);
+      let image = null, site = null, text = "";
+      const raw = String(p.content || ""), at = raw.search(/\s*\[ATTACH/);
+      text = (at >= 0 ? raw.slice(0, at) : raw).trim().slice(0, 160);
+      const m = raw.match(/\[ATTACH(?:MENTS)?:([\s\S]*)\]\s*$/);
+      let lt = "";
+      if (m) { try { const a = JSON.parse(m[1]); const one = Array.isArray(a) ? a[0] : a; image = one?.image || (one?.type === "image" ? one.url : null) || null; if (one?.url && one.type === "link") { site = new URL(one.url).hostname.replace(/^www\./, ""); lt = one.title || ""; if (!text) text = String(one.description || "").slice(0, 160); } } catch {} }
+      const names = await extinctNames();
+      return json({ id, title: p.title || lt || "", text, image, site, by: names.has(p.username) ? EXTINCT_NAME : (p.username || null), board: p.board || p.community_id || null, flaps: f.results?.[0]?.n || 0, chirps: c.results?.[0]?.n || 0 });
+    } catch (err) {
+      return serverError(err);
+    }
+  }
+
   if (url.pathname === "/search-users") {
     const q = (url.searchParams.get("q") || "").trim();
     if (!q) return json({ users: [] });
