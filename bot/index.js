@@ -28,6 +28,20 @@ const isPromo = (...texts) => PROMO_TEXT.test(texts.filter(Boolean).join(" "));
 // Entertainment is film/TV, music, games and arts, not celebrity gossip: skip stories about people's private lives
 const GOSSIP_TEXT = /\b(?:dating|date\s+night|spotted|ex-(?:wife|husband|girlfriend|boyfriend)|wedding\s+(?:photos|dress)|divorc\w*|break[- ]?up|split\s+from|engaged|engagement\s+ring|pregnan\w*|baby\s+bump|red\s+carpet|net\s+worth|feud\w*|slams?|cheat(?:ed|ing)|boyfriend|girlfriend|romance\s+rumou?rs?|kardashian\w*|jenner|royal\s+family|bikini|shirtless|plastic\s+surgery|fashion\s+police|outfit|nip\s*slip)\b/i;
 const isGossip = (...texts) => GOSSIP_TEXT.test(texts.filter(Boolean).join(" "));
+// Science feeds also carry their outlet's business and politics stories (SCMP, BBC Tech,
+// The Hindu Sci-Tech...). A title clearly about markets, trade, politics, courts or pay strikes goes to General.
+const OFF_TOPIC_TITLE = /\b(?:shares?\s+(?:fall|fell|drop\w*|rise|rose|soar\w*|tumble\w*|plunge\w*|jump\w*|slump\w*|surge\w*)|stock\s+market|wall\s+street|ipo|stock\s+(?:market\s+)?debut|market\s+debut|valuation|investors?|earnings|quarterly\s+(?:results|profits?)|imports?|exports?|tariffs?|trade\s+(?:deal|war|surplus|deficit|talks)|gdp|inflation|interest\s+rates?|economy|economic|recession|elections?|parliament|senate|congress|lawmakers?|minister|presidential|white\s+house|sanctions?|lawsuit|sued|court|sentenced|charged\s+with|on\s+strike|strike\s+(?:action|over)|\d+-hour\s+strike|pay\s+dispute|church|pastor|succession\s+crisis|jobs?\s+(?:cuts?|strain|market)|layoffs?|graduates?)\b/i;
+// Entertainment feeds sometimes run sport retrospectives: those go to Sports
+const SPORTY_TITLE = /\b(?:nfl|nba|mlb|nhl|afl|nrl|premier\s+league|champions\s+league|world\s+cup|cricket|footballers?|rugby|olympics?|quarterback|grand\s+slam)\b/i;
+// Non-English stories (e.g. The Conversation's French articles) are skipped: more foreign than English stopwords
+const FOREIGN_WORDS = /\b(?:les|des|une|est|dans|avec|pour|sur|entre|qui|au|aux|del|los|las|una|por|para|con|como|das|und|der|die|ist|nicht|mit|não|uma|com|pelo|sobre)\b/gi;
+const ENGLISH_WORDS = /\b(?:the|and|of|to|in|is|are|for|with|on|at|from|by|after|over|as|how|why|what|a|an)\b/gi;
+const notEnglish = t => { const s = String(t || ""); const f = (s.match(FOREIGN_WORDS) || []).length, e = (s.match(ENGLISH_WORDS) || []).length; return f >= 2 && f > e; };
+// Entertainment keeps its industry news (studios, layoffs, art-world court cases); only church/election stories leave
+const ENT_OFF_TITLE = /\b(?:church|pastors?|succession\s+crisis|elections?|presidential)\b/i;
+const topicFor = (board, title) => board === "science-nature" && OFF_TOPIC_TITLE.test(title || "") ? "general"
+  : board === "entertainment" && ENT_OFF_TITLE.test(title || "") ? "general"
+  : board === "entertainment" && SPORTY_TITLE.test(title || "") ? "sports" : board;
 
 function normalizeUrl(url) {
   if (!url) return url;
@@ -529,6 +543,7 @@ async function run() {
           const og = await fetchOgData(url);
           const resolvedTitle = looksLikeSlug(rssTitle) ? (og?.title || null) : (rssTitle || og?.title || null);
           if (!resolvedTitle || looksLikeSlug(resolvedTitle)) { stats.skippedBadTitle.push({ url, title: rssTitle || url }); continue; }
+          if (notEnglish(resolvedTitle)) continue;                         // English-language site
           if (isPromo(resolvedTitle, og?.description)) continue;
           if (board === "entertainment" && isGossip(resolvedTitle, og?.description || item.contentSnippet)) continue;
 
@@ -543,7 +558,7 @@ async function run() {
           const content = ATTACH_MARKER + JSON.stringify(attachment) + "]";
 
           // Claim it now (so no later feed takes the same story); it goes out with the release
-          const job = { content, board, feed, url, tkey, title: resolvedTitle, link: og?.url || url };
+          const job = { content, board: topicFor(board, decodeEntities(resolvedTitle)), feed, url, tkey, title: resolvedTitle, link: og?.url || url };
           keysOf(job).forEach(k => seen.add(k));
           collected.push(job);
           takenThisFeed++;
