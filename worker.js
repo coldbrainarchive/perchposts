@@ -1149,7 +1149,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   }
 
   // ── /visitors ── admins: who is online now (pinged in the last 3 minutes), today's visitors and the last
-  // 14 days, split into members (signed in) and guests. ?d=<admin's local date>; ?hide_me=1 leaves out the
+  // 14 days (or ?by=month / ?by=year), split into members (signed in) and guests. ?d=<admin's local date>; ?hide_me=1 leaves out the
   // admin's own visits, including their devices while signed out (any device that was ever signed in as them).
   if (url.pathname === "/visitors") {
     if (!isAdmin) return json({ error: "Not allowed" }, 403);
@@ -1171,12 +1171,20 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         const members = [...new Set(rows.filter(r => r.username).map(r => r.username))].sort((a, b) => a.localeCompare(b));
         return { members, guests: rows.filter(r => !r.username).length };
       };
-      // Tidy up: presence older than a day, visit rows older than 90 days
-      ctx.waitUntil(env.DB.batch([
-        env.DB.prepare(`DELETE FROM presence WHERE last_seen < ?`).bind(new Date(Date.now() - 86400000).toISOString()),
-        env.DB.prepare(`DELETE FROM daily_visits WHERE day < ?`).bind(new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10)),
-      ]).catch(() => {}));
-      return json({ online: split(on.results || []), today: { day: today, ...split(td.results || []) }, days: days.results || [], hide_me: hideMe });
+      // Tidy up presence older than a day. daily_visits is kept forever (all-time history, user's choice).
+      ctx.waitUntil(env.DB.prepare(`DELETE FROM presence WHERE last_seen < ?`).bind(new Date(Date.now() - 86400000).toISOString()).run().catch(() => {}));
+      // ?by=month (last 12 months) or ?by=year (every year): unique members / guests in each period
+      const by = url.searchParams.get("by");
+      let periods = null;
+      if (by === "month" || by === "year") {
+        const len = by === "month" ? 7 : 4;
+        const pFrom = by === "month" ? new Date(Date.UTC(+today.slice(0, 4), +today.slice(5, 7) - 12, 1)).toISOString().slice(0, 7) : "0000";
+        const { results = [] } = await env.DB.prepare(
+          `SELECT substr(day, 1, ${len}) AS day, COUNT(DISTINCT username) AS members, COUNT(DISTINCT CASE WHEN username IS NULL THEN vid END) AS guests, COUNT(*) AS visits FROM daily_visits WHERE substr(day, 1, ${len}) > ?${notMe} GROUP BY 1 ORDER BY 1 DESC`
+        ).bind(pFrom, ...meB).all();
+        periods = results;
+      }
+      return json({ online: split(on.results || []), today: { day: today, ...split(td.results || []) }, days: days.results || [], periods, by: periods ? by : "day", hide_me: hideMe });
     } catch (err) {
       return serverError(err);
     }
