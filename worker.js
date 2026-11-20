@@ -691,6 +691,32 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       .bind(crypto.randomUUID(), userId, message).run();
   }
 
+  // @tags in a post or chirp: notify each tagged bird (up to 5 per post/chirp) that exists and can see it.
+  // Huddles: members only. Not yourself, not extinct birds, and nothing from caged birds. The notification
+  // opens the post, or jumps to the chirp (targetId -> /post/<id>?highlight=<chirp id>).
+  async function notifyMentions({ by, text, postId, commentId }) {
+    try {
+      if (!by || !postId) return;
+      const raw = String(text || "");
+      const me = by.toLowerCase();
+      const names = [...new Set([...raw.matchAll(/(^|[^\w@])@([a-z][a-z0-9-]{1,40})/gi)].map(m => m[2].toLowerCase()))].filter(n => n !== me).slice(0, 5);
+      if (!names.length) return;
+      if (!isModerator && await isJailed()) return;
+      const { results = [] } = await env.DB.prepare(`SELECT username FROM mod_users WHERE lower(username) IN (${names.map(() => "?").join(",")}) AND deleted_at IS NULL`).bind(...names).all();
+      if (!results.length) return;
+      const post = await env.DB.prepare(`SELECT is_huddle, huddle_members, username FROM posts WHERE id = ?`).bind(postId).first();
+      if (!post) return;
+      const extinct = await extinctNames();
+      const preview = raw.replace(/\s+/g, " ").trim().slice(0, 80);
+      for (const { username: who } of results) {
+        if (!who || extinct.has(who)) continue;
+        if (post.is_huddle && !isHuddleMember(post, who)) continue;
+        const msg = JSON.stringify({ text: `${by} tagged you in ${commentId ? "a chirp" : "a post"}`, postId, targetId: commentId || undefined, preview, icon: "AT" });
+        await env.DB.prepare(`INSERT INTO system_notifications (id, user_id, message) VALUES (?, ?, ?)`).bind(crypto.randomUUID(), who, msg).run();
+      }
+    } catch (e) { console.error("notifyMentions", e); }
+  }
+
   // Other people's browser IDs go out scrambled (same scramble each time, so grouping still works);
   // your own (sent as ?bid=) comes back as is, so the page can tell which votes/reactions are yours.
   async function maskBid(id, mine) {
@@ -1429,6 +1455,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         for (const name of invitees) if (!extinct.has(name)) await sendInvite(newPost, username, name);
       }
       if (checked) ctx.waitUntil(aiCheck({ kind: "post", id, postId: id, text: userText(body.title, body.content), uname: username, bid: body.browser_id }));
+      ctx.waitUntil(notifyMentions({ by: username, text: userText(body.title, body.content, first), postId: id }));
       const post = await env.DB.prepare(`SELECT * FROM posts WHERE id = ?`).bind(id).first();
       return json({ success: true, post: boolify(post, POST_BOOL_FIELDS) });
     } catch (err) {
@@ -1907,6 +1934,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         now
       ).run();
       if (checked) ctx.waitUntil(aiCheck({ kind: "chirp", id, postId: body.post_id, text: userText(body.content), uname: username, bid: body.browser_id }));
+      ctx.waitUntil(notifyMentions({ by: username, text: userText(body.content), postId: body.post_id, commentId: id }));
       await bumpPost(body.post_id);
       // Notify huddle members on new comment
       const huddlePost = await env.DB.prepare(`SELECT is_huddle, huddle_members, title, username AS post_username FROM posts WHERE id = ?`).bind(body.post_id).first();
@@ -3160,10 +3188,10 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         const reqIds = [];
         (huddleN || []).forEach(n => {
           let text = n.message, postId = undefined, req = undefined;
-          let preview, icon;
-          try { const parsed = JSON.parse(n.message); text = parsed.text || text; postId = parsed.postId; req = parsed.req; preview = parsed.preview; icon = parsed.icon; } catch {}
+          let preview, icon, targetId;
+          try { const parsed = JSON.parse(n.message); text = parsed.text || text; postId = parsed.postId; req = parsed.req; preview = parsed.preview; icon = parsed.icon; targetId = parsed.targetId; } catch {}
           if (req) reqIds.push(req);
-          results.push({ id: `hsys-${n.id}`, type: "system", icon: icon || (req ? "📨" : "👥"), text, postId, time: n.created_at, req, preview, preClear: n.preClear || undefined });
+          results.push({ id: `hsys-${n.id}`, type: "system", icon: icon || (req ? "📨" : "👥"), text, postId, targetId, time: n.created_at, req, preview, preClear: n.preClear || undefined });
         });
         // Invitations and requests carry their state, and whether this bird is the one who answers them
         if (reqIds.length) {
