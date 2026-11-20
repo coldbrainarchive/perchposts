@@ -1162,9 +1162,12 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const notMe = hideMe ? ` AND (username IS NULL OR username != ?) AND vid NOT IN (SELECT vid FROM daily_visits WHERE username = ?)` : "";
       const meB = hideMe ? [me, me] : [];
       const cut = new Date(Date.now() - 3 * 60000).toISOString();
+      // ?on=<date>: the "Today" box shows that day instead (calendar in the panel)
+      const oq = url.searchParams.get("on");
+      const onDay = oq && /^\d{4}-\d{2}-\d{2}$/.test(oq) ? oq : today;
       const [on, td, days] = await env.DB.batch([
         env.DB.prepare(`SELECT vid, username FROM presence WHERE last_seen >= ?${notMe}`).bind(cut, ...meB),
-        env.DB.prepare(`SELECT vid, username FROM daily_visits WHERE day = ?${notMe}`).bind(today, ...meB),
+        env.DB.prepare(`SELECT vid, username FROM daily_visits WHERE day = ?${notMe}`).bind(onDay, ...meB),
         env.DB.prepare(`SELECT day, COUNT(DISTINCT username) AS members, SUM(username IS NULL) AS guests FROM daily_visits WHERE day >= ? AND day <= ?${notMe} GROUP BY day ORDER BY day DESC`).bind(from, today, ...meB),
       ]);
       const split = rows => {
@@ -1184,7 +1187,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         ).bind(pFrom, ...meB).all();
         periods = results;
       }
-      return json({ online: split(on.results || []), today: { day: today, ...split(td.results || []) }, days: days.results || [], periods, by: periods ? by : "day", hide_me: hideMe });
+      return json({ online: split(on.results || []), today: { day: onDay, ...split(td.results || []) }, first_day: (await env.DB.prepare(`SELECT MIN(day) AS d FROM daily_visits`).first())?.d || today, days: days.results || [], periods, by: periods ? by : "day", hide_me: hideMe });
     } catch (err) {
       return serverError(err);
     }
