@@ -3,7 +3,7 @@
 //         wink: 0..1 (1 = eye closed), look: [dx, dy] pupil offset }
 (function (root) {
   const F = "#14151b", L = "#c084fc", CX = 56, CY = 50, R = 38, D = Math.PI / 180;
-  const MERIDIANS = [17.6, 41.1, -17.6, -41.1, 162.4, 138.9, -162.4, -138.9];
+  const MERIDIANS = Array.from({ length: 12 }, (_, k) => 15 + 30 * k);   // evenly spaced all the way round
   // eye A is the one we see; eye B is the other side of the head (mirror about the beak axis)
   const EYE_LAT = Math.asin(15.2 / R), EYE_COS = Math.cos(EYE_LAT), EYE_A = Math.asin(-11.5 / (R * EYE_COS)) / D;
   const EYES = [{ lon: EYE_A, px: 0.28 }, { lon: -180 - EYE_A, px: -0.28 }];
@@ -23,7 +23,6 @@
         : `<path d="M ${CX} ${CY - R} A ${f(rx)} ${R} 0 0 ${Math.sin(p) > 0 ? 1 : 0} ${CX} ${CY + R}"${o}/>`;
     };
     for (const lam of MERIDIANS) s += one(lam, 1);
-    for (const lam of SIDE_MERIDIANS) s += one(lam, extra);
     return s;
   }
 
