@@ -2562,6 +2562,19 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         const owner = await env.DB.prepare(`SELECT c.is_admin, m.role FROM comments c LEFT JOIN mod_users m ON m.username = c.username WHERE c.id = ?`).bind(body.comment_id).first();
         if (owner?.is_admin || owner?.role === "admin") return json({ error: "Mods can't change an admin's chirp" }, 403);
       }
+      // Mods: pin, lock, cage and flag. Archiving, restoring and banning are for admins.
+      if (!isAdmin && ["archive_post", "unarchive_post", "hide_archive", "restore_post", "ban", "unban"].includes(t)) {
+        return json({ error: "Only admins can do that" }, 403);
+      }
+      // Caging lifts a ban, so a mod can't cage a banned bird (that would unban them)
+      if (!isAdmin && t === "jail") {
+        const cond = [], args = [];
+        if (body.username) { cond.push("username = ?"); args.push(body.username); }
+        if (body.browser_id) { cond.push("browser_id = ?"); args.push(body.browser_id); }
+        if (cond.length && await env.DB.prepare(`SELECT 1 FROM bans WHERE ${cond.join(" OR ")} LIMIT 1`).bind(...args).first()) {
+          return json({ error: "They're banned. Only an admin can change that." }, 403);
+        }
+      }
       if (!isAdmin && ["ban", "jail"].includes(t) && body.username) {
         const target = await env.DB.prepare(`SELECT role FROM mod_users WHERE LOWER(username) = LOWER(?)`).bind(body.username).first();
         if (target?.role === "admin") return json({ error: "Mods can't do that to an admin" }, 403);
@@ -2608,8 +2621,9 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         // Cage the author (real bird accounts only, not news bots), unless they're already in
         let caged = 0;
         const isBird = row.username && row.role === "user" && !String(row.browser_id || "").startsWith("bot-");
-        if (isBird && !await env.DB.prepare(`SELECT 1 FROM jailed WHERE username = ? LIMIT 1`).bind(row.username).first()) {
-          await env.DB.prepare(`DELETE FROM bans WHERE username = ?`).bind(row.username).run();
+        // (a banned bird stays banned: that's stricter than The Cage)
+        const banned = isBird && !!await env.DB.prepare(`SELECT 1 FROM bans WHERE username = ? LIMIT 1`).bind(row.username).first();
+        if (isBird && !banned && !await env.DB.prepare(`SELECT 1 FROM jailed WHERE username = ? LIMIT 1`).bind(row.username).first()) {
           await env.DB.prepare(`INSERT OR IGNORE INTO jailed (id, browser_id, username, ip_hash, created_at) VALUES (?, ?, ?, NULL, ?)`)
             .bind(crypto.randomUUID(), row.browser_id || null, row.username, now).run();
           caged = 1;
@@ -2621,7 +2635,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         const { results: admins = [] } = await env.DB.prepare(`SELECT username FROM mod_users WHERE role = 'admin' AND deleted_at IS NULL AND username IS NOT NULL`).all();
         const msg = JSON.stringify({
           // Starts with the plain name, so the notification shows that bird's picture
-          text: `${row.username || "Someone"} had a ${isPost ? "post" : "chirp"} flagged by ${username}${reason ? ` ("${reason}")` : ""}. It's hidden${caged || isBird ? " and they're in The Cage" : ""}. Review it in Mod Panel → Flagged.`,
+          text: `${row.username || "Someone"} had a ${isPost ? "post" : "chirp"} flagged by ${username}${reason ? ` ("${reason}")` : ""}. It's hidden${banned ? " (they're already banned)" : isBird ? " and they're in The Cage" : ""}. Review it in Mod Panel → Flagged.`,
           postId: row.post_id || undefined, icon: "SHIELD", preview: excerpt.slice(0, 80),
         });
         for (const a of admins) if (a.username !== username) await env.DB.prepare(`INSERT INTO system_notifications (id, user_id, message) VALUES (?, ?, ?)`).bind(crypto.randomUUID(), a.username, msg).run();
