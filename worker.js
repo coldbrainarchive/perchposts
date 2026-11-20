@@ -1127,6 +1127,61 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     }
   }
 
+  // ── /ping ── visitor counter. Open, visible pages POST {vid, d} every 2 minutes. vid = the device's random
+  // browser id, d = the visitor's local date. Who is signed in comes from the token only. No IP is stored.
+  // presence: one row per device (last_seen); daily_visits: one row per device per day.
+  if (url.pathname === "/ping" && request.method === "POST") {
+    try {
+      const vid = typeof body.vid === "string" ? body.vid : "";
+      if (isBot || !/^[A-Za-z0-9_-]{8,64}$/.test(vid)) return json({ ok: true });
+      const now = new Date(), iso = now.toISOString();
+      let day = typeof body.d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.d) ? body.d : iso.slice(0, 10);
+      if (!(Math.abs(Date.parse(day + "T12:00:00Z") - now.getTime()) < 2.5 * 86400000)) day = iso.slice(0, 10);
+      const who = authUser?.username || null;
+      await env.DB.batch([
+        env.DB.prepare(`INSERT INTO presence (vid, username, last_seen) VALUES (?, ?, ?) ON CONFLICT(vid) DO UPDATE SET username = excluded.username, last_seen = excluded.last_seen`).bind(vid, who, iso),
+        env.DB.prepare(`INSERT INTO daily_visits (day, vid, username) VALUES (?, ?, ?) ON CONFLICT(day, vid) DO UPDATE SET username = excluded.username WHERE daily_visits.username IS NULL AND excluded.username IS NOT NULL`).bind(day, vid, who),
+      ]);
+      return json({ ok: true });
+    } catch (err) {
+      return json({ ok: false });
+    }
+  }
+
+  // ── /visitors ── admins: who is online now (pinged in the last 3 minutes), today's visitors and the last
+  // 14 days, split into members (signed in) and guests. ?d=<admin's local date>; ?hide_me=1 leaves out the
+  // admin's own visits, including their devices while signed out (any device that was ever signed in as them).
+  if (url.pathname === "/visitors") {
+    if (!isAdmin) return json({ error: "Not allowed" }, 403);
+    try {
+      const me = authUser.username || "";
+      const hideMe = url.searchParams.get("hide_me") === "1";
+      const dq = url.searchParams.get("d");
+      const today = dq && /^\d{4}-\d{2}-\d{2}$/.test(dq) ? dq : new Date().toISOString().slice(0, 10);
+      const from = new Date(Date.parse(today + "T00:00:00Z") - 13 * 86400000).toISOString().slice(0, 10);
+      const notMe = hideMe ? ` AND (username IS NULL OR username != ?) AND vid NOT IN (SELECT vid FROM daily_visits WHERE username = ?)` : "";
+      const meB = hideMe ? [me, me] : [];
+      const cut = new Date(Date.now() - 3 * 60000).toISOString();
+      const [on, td, days] = await env.DB.batch([
+        env.DB.prepare(`SELECT vid, username FROM presence WHERE last_seen >= ?${notMe}`).bind(cut, ...meB),
+        env.DB.prepare(`SELECT vid, username FROM daily_visits WHERE day = ?${notMe}`).bind(today, ...meB),
+        env.DB.prepare(`SELECT day, COUNT(DISTINCT username) AS members, SUM(username IS NULL) AS guests FROM daily_visits WHERE day >= ? AND day <= ?${notMe} GROUP BY day ORDER BY day DESC`).bind(from, today, ...meB),
+      ]);
+      const split = rows => {
+        const members = [...new Set(rows.filter(r => r.username).map(r => r.username))].sort((a, b) => a.localeCompare(b));
+        return { members, guests: rows.filter(r => !r.username).length };
+      };
+      // Tidy up: presence older than a day, visit rows older than 90 days
+      ctx.waitUntil(env.DB.batch([
+        env.DB.prepare(`DELETE FROM presence WHERE last_seen < ?`).bind(new Date(Date.now() - 86400000).toISOString()),
+        env.DB.prepare(`DELETE FROM daily_visits WHERE day < ?`).bind(new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10)),
+      ]).catch(() => {}));
+      return json({ online: split(on.results || []), today: { day: today, ...split(td.results || []) }, days: days.results || [], hide_me: hideMe });
+    } catch (err) {
+      return serverError(err);
+    }
+  }
+
   // ── /ai-flags ── what the AI check flagged (mods). POST {id, verdict: "ok" | "confirm"} reviews one ─────────
   if (url.pathname === "/ai-flags") {
     if (!isModerator) return json({ error: "Not allowed" }, 403);
