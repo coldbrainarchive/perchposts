@@ -10,7 +10,7 @@ const BOARDS = {
   random: ["Random", "🎲", "#c084fc"], announcements: ["Announcements", "📢", "#f472b6"], cage: ["The Cage", "🪹", "#f43f5e"],
 };
 const SHORT = { "United States": "USA", "United Kingdom": "UK", "United Arab Emirates": "UAE" };
-const IMG_VER = "21"; // bump to redraw every cached card
+const IMG_VER = "22"; // bump to redraw every cached card
 const MEDIA_RE = /^https:\/\/daboysforumip\.coldbrainarchive\.workers\.dev\/media\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 function parse(content) {
@@ -91,7 +91,7 @@ async function photo(url, ref = "") {
 
 const h = (type, style, children) => ({ type, props: { style, children } });
 // Bird-globe logo (brand/bird-globe.svg). The old plain globe is brand/old-globe-favicon.svg.
-const GLOBE = "data:image/svg+xml;base64," + btoa(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="15 9 82 82"><defs><clipPath id="cf"><circle cx="56" cy="50" r="38"/></clipPath></defs><circle cx="56" cy="50" r="38" fill="#14151b"/><g fill="none" stroke="#c084fc" stroke-width="3.2" clip-path="url(#cf)"><line x1="18" y1="50" x2="94" y2="50"/><path d="M 16 30 Q 56 37 96 30"/><path d="M 16 70 Q 56 63 96 70"/><path d="M 56 12 A 11.49 38 0 0 1 56 88"/><path d="M 56 12 A 24.98 38 0 0 1 56 88"/><path d="M 56 12 A 11.49 38 0 0 0 56 88"/><path d="M 56 12 A 24.98 38 0 0 0 56 88"/></g><g clip-path="url(#cf)"></g><circle cx="56" cy="50" r="38" fill="none" stroke="#c084fc" stroke-width="4.6"/></svg>`);
+const GLOBE = "data:image/svg+xml;base64," + btoa(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="15 9 82 82"><defs><clipPath id="cf"><circle cx="56" cy="50" r="38"/></clipPath></defs><circle cx="56" cy="50" r="38" fill="#14151b"/><g fill="none" stroke="#c084fc" stroke-width="3.2" clip-path="url(#cf)"><line x1="18" y1="50" x2="94" y2="50"/><path d="M 16 30 Q 56 37 96 30"/><path d="M 16 70 Q 56 63 96 70"/><path d="M 56 12 A 9.84 38 0 0 1 56 88"/><path d="M 56 12 A 9.84 38 0 0 0 56 88"/><path d="M 56 12 A 26.87 38 0 0 1 56 88"/><path d="M 56 12 A 26.87 38 0 0 0 56 88"/></g><g clip-path="url(#cf)"></g><circle cx="56" cy="50" r="38" fill="none" stroke="#c084fc" stroke-width="4.6"/></svg>`);
 
 function pill(text, color, emoji) {
   return h("div", {
