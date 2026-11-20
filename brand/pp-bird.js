@@ -127,7 +127,7 @@
     const g = pose.grow == null ? 1 : pose.grow;
     return `${grown(g, 56, 13, crest(pose.th))}<circle cx="${CX}" cy="${CY}" r="${R}" fill="${F}"/>` +
       `<g fill="none" stroke="${L}" stroke-width="1.6" clip-path="url(#c${id})"><line x1="18" y1="50" x2="94" y2="50"/>` +
-      `<path d="M 16 30 Q 56 37 96 30"/><path d="M 16 70 Q 56 63 96 70"/>${meridians(pose.th)}</g>` +
+      `<path d="M 16 30 Q 56 37 96 30"/><path d="M 16 70 Q 56 63 96 70"/>${pose.noMer ? "" : meridians(pose.th)}</g>` +
       `<g clip-path="url(#c${id})">${grown(g, 44.5, 34.8, eyes(pose))}</g><circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="${L}" stroke-width="4.6"/>${grown(g, 19, 56, beak(pose))}`;
   }
 
