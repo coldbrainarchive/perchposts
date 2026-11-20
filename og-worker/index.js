@@ -4,13 +4,17 @@
 // Huddles, deleted and archived posts get 404, so a shared link never reveals private content.
 import { ImageResponse, GoogleFont, cache } from "@cf-wasm/og/workerd";
 import FLAGS from "./flags.json";
+import ICONS from "./icons.json";
 
+// Tag pills match the site: our line icons (icons.json, from the site's _ppIco) in each tag's colour
 const BOARDS = {
-  general: ["General", "📰", "#60a5fa"], sports: ["Sports", "🏈", "#facc15"], "science-nature": ["Science", "🔬", "#4ade80"],
-  random: ["Random", "🎲", "#c084fc"], announcements: ["Announcements", "📢", "#f472b6"], cage: ["The Cage", "🪹", "#f43f5e"],
+  general: ["General", "#60a5fa"], sports: ["Sports", "#facc15"], "science-nature": ["Science", "#2dd4bf"], nature: ["Nature", "#4ade80"],
+  entertainment: ["Entertainment", "#fb7185"], random: ["Random", "#c084fc"], announcements: ["Announcements", "#f472b6"], cage: ["The Cage", "#f43f5e"],
+  botnews: ["Perch News", "#c084fc"], activity: ["Flock", "#22d3ee"],
 };
+const boardIcon = (key, color) => ICONS[key] ? "data:image/svg+xml;base64," + btoa(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${ICONS[key]}</svg>`) : null;
 const SHORT = { "United States": "USA", "United Kingdom": "UK", "United Arab Emirates": "UAE" };
-const IMG_VER = "22"; // bump to redraw every cached card
+const IMG_VER = "23"; // bump to redraw every cached card
 const MEDIA_RE = /^https:\/\/daboysforumip\.coldbrainarchive\.workers\.dev\/media\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 function parse(content) {
@@ -93,17 +97,18 @@ const h = (type, style, children) => ({ type, props: { style, children } });
 // Bird-globe logo (brand/bird-globe.svg). The old plain globe is brand/old-globe-favicon.svg.
 const GLOBE = "data:image/svg+xml;base64," + btoa(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="15 9 82 82"><defs><clipPath id="cf"><circle cx="56" cy="50" r="38"/></clipPath></defs><circle cx="56" cy="50" r="38" fill="#14151b"/><g fill="none" stroke="#c084fc" stroke-width="3.2" clip-path="url(#cf)"><line x1="18" y1="50" x2="94" y2="50"/><path d="M 16 30 Q 56 37 96 30"/><path d="M 16 70 Q 56 63 96 70"/><path d="M 56 12 A 9.84 38 0 0 1 56 88"/><path d="M 56 12 A 9.84 38 0 0 0 56 88"/><path d="M 56 12 A 26.87 38 0 0 1 56 88"/><path d="M 56 12 A 26.87 38 0 0 0 56 88"/></g><g clip-path="url(#cf)"></g><circle cx="56" cy="50" r="38" fill="none" stroke="#c084fc" stroke-width="4.6"/></svg>`);
 
-function pill(text, color, emoji) {
+function pill(text, color, emoji, icon) {
   return h("div", {
     display: "flex", alignItems: "center", gap: 10, height: 50, padding: "0 20px", borderRadius: 999,
     border: `3px solid ${color}`, color, fontSize: 24, fontWeight: 800, letterSpacing: 1.5, textTransform: "uppercase",
-  }, [emoji ? h("span", { display: "flex" }, emoji) : null, h("span", { display: "flex" }, text)].filter(Boolean));
+  }, [icon ? { type: "img", props: { src: icon, width: 26, height: 26 } } : emoji ? h("span", { display: "flex" }, emoji) : null, h("span", { display: "flex" }, text)].filter(Boolean));
 }
 
 function card(post, img) {
-  const b = BOARDS[post.board] || Object.values(BOARDS).find(x => x[0].toLowerCase() === String(post.board || "").toLowerCase());
+  const bk = BOARDS[post.board] ? post.board : Object.keys(BOARDS).find(k => BOARDS[k][0].toLowerCase() === String(post.board || "").toLowerCase());
+  const b = bk && BOARDS[bk];
   const pills = [];
-  if (b) pills.push(pill(b[0], b[2], b[1]));
+  if (b) pills.push(pill(b[0], b[1], null, boardIcon(bk, b[1])));
   if (post.country) pills.push(pill(SHORT[post.country] || post.country, "#e2e8f0", FLAGS[post.country] || null));
   const top = h("div", { display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }, [
     h("div", { display: "flex", gap: 14 }, pills.length ? pills : [h("span", { display: "flex" }, "")]),
