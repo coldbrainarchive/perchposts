@@ -1594,13 +1594,19 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const rankSort = url.searchParams.get("sort");
       if (rankSort === "flaps" || rankSort === "chirps") {
         const range = url.searchParams.get("range");
-        const since = range === "all" ? "" : new Date(Date.now() - (range === "day" ? 1 : 7) * 86400000).toISOString();
+        // Optional window from the Time filter: rank_until = end of the picked day / hour (ISO). Then
+        // day = that day, week = the 7 days ending there, all = everything before it. Without it, windows end now.
+        const ru = url.searchParams.get("rank_until");
+        const rankUntil = ru && !isNaN(Date.parse(ru)) ? new Date(ru).toISOString() : null;
+        const endMs = rankUntil ? Date.parse(rankUntil) : Date.now();
+        const since = range === "all" ? "" : new Date(endMs - (range === "day" ? 1 : 7) * 86400000).toISOString();
+        const untilSql = rankUntil ? " AND created_at < ?" : "";
         // Count the flaps / chirps made in the range (on posts of any age): "Most chirps today" = the posts
         // that got the most chirps today. Before, it only looked at posts created in the range.
         const { results: top = [] } = await env.DB.prepare(rankSort === "flaps"
-          ? `SELECT post_id, COUNT(DISTINCT COALESCE(username, 'b:' || browser_id)) AS n FROM post_votes WHERE value > 0 AND created_at >= ? GROUP BY post_id ORDER BY n DESC LIMIT 500`
-          : `SELECT post_id, COUNT(*) AS n FROM comments WHERE deleted = 0 AND (username IS NULL OR username != '__system__') AND created_at >= ? GROUP BY post_id ORDER BY n DESC LIMIT 500`
-        ).bind(since).all();
+          ? `SELECT post_id, COUNT(DISTINCT COALESCE(username, 'b:' || browser_id)) AS n FROM post_votes WHERE value > 0 AND created_at >= ?${untilSql} GROUP BY post_id ORDER BY n DESC LIMIT 500`
+          : `SELECT post_id, COUNT(*) AS n FROM comments WHERE deleted = 0 AND (username IS NULL OR username != '__system__') AND created_at >= ?${untilSql} GROUP BY post_id ORDER BY n DESC LIMIT 500`
+        ).bind(since, ...(rankUntil ? [rankUntil] : [])).all();
         const countOf = new Map(top.map(r => [r.post_id, r.n]));
         const ids = [...countOf.keys()];
         const rows = [];
