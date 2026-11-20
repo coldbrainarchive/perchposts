@@ -1132,6 +1132,8 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     if (!isModerator) return json({ error: "Not allowed" }, 403);
     try {
       if (request.method === "POST") {
+        // Mods flag; deciding (put back or keep hidden) is for admins
+        if (!isAdmin) return json({ error: "Only admins can review flags" }, 403);
         const f = await env.DB.prepare(`SELECT * FROM ai_flags WHERE id = ?`).bind(String(body.id || "")).first();
         if (!f) return json({ error: "Not found" }, 404);
         if (!["ok", "confirm"].includes(body.verdict)) return json({ error: "Bad value" }, 400);
@@ -1148,7 +1150,8 @@ async function handleRequest(request, env, ctx, corsHeaders) {
           .bind(body.verdict === "ok" ? "ok" : "confirmed", username, now, f.id).run();
       }
       const { results = [] } = await env.DB.prepare(`SELECT * FROM ai_flags ORDER BY created_at DESC LIMIT 100`).all();
-      return json({ flags: results.map(f => ({ ...f, why: String(f.categories || "").split(",").map(c => AI_FLAG_CATS[c] || c).join(", ") })), ai_check: await siteSetting("ai_check", "off") });
+      return json({ flags: results.map(f => ({ ...f, why: f.categories === "MOD" ? `flagged by ${f.flagged_by || "a mod"}${f.reason ? `: ${f.reason}` : ""}` : String(f.categories || "").split(",").map(c => AI_FLAG_CATS[c] || c).join(", ") })),
+        ai_check: await siteSetting("ai_check", "off"), can_review: !!isAdmin });
     } catch (err) {
       return serverError(err);
     }
@@ -2590,6 +2593,43 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         if (body.username)   await env.DB.prepare(`DELETE FROM jailed WHERE username = ?`).bind(body.username).run();
         if (body.browser_id) await env.DB.prepare(`DELETE FROM jailed WHERE browser_id = ?`).bind(body.browser_id).run();
         if (body.ip_hash)    await env.DB.prepare(`DELETE FROM jailed WHERE ip_hash = ?`).bind(body.ip_hash).run();
+      }
+      // Mods flag; only admins delete (a mod can still delete their own post or chirp)
+      if (t === "flag_post" || t === "flag_comment") {
+        const isPost = t === "flag_post", tid = String((isPost ? body.post_id : body.comment_id) || "");
+        if (!tid) return json({ error: "Missing fields" }, 400);
+        const row = await env.DB.prepare(isPost
+          ? `SELECT p.id, p.id AS post_id, p.username, p.browser_id, p.title, p.content, p.is_mod, p.is_admin, m.role FROM posts p LEFT JOIN mod_users m ON m.username = p.username WHERE p.id = ?`
+          : `SELECT c.id, c.post_id, c.username, c.browser_id, NULL AS title, c.content, c.is_mod, c.is_admin, m.role FROM comments c LEFT JOIN mod_users m ON m.username = c.username WHERE c.id = ?`).bind(tid).first();
+        if (!row) return json({ error: "Not found" }, 404);
+        if (row.username && row.username === username) return json({ error: "That's yours. Delete it instead." }, 400);
+        if (row.is_mod || row.is_admin || row.role === "mod" || row.role === "admin") return json({ error: "Mods and admins can't be flagged" }, 403);
+        const hid = (await env.DB.prepare(`UPDATE ${isPost ? "posts" : "comments"} SET deleted = 1 WHERE id = ? AND deleted = 0`).bind(tid).run()).meta.changes > 0 ? 1 : 0;
+        // Cage the author (real bird accounts only, not news bots), unless they're already in
+        let caged = 0;
+        const isBird = row.username && row.role === "user" && !String(row.browser_id || "").startsWith("bot-");
+        if (isBird && !await env.DB.prepare(`SELECT 1 FROM jailed WHERE username = ? LIMIT 1`).bind(row.username).first()) {
+          await env.DB.prepare(`DELETE FROM bans WHERE username = ?`).bind(row.username).run();
+          await env.DB.prepare(`INSERT OR IGNORE INTO jailed (id, browser_id, username, ip_hash, created_at) VALUES (?, ?, ?, NULL, ?)`)
+            .bind(crypto.randomUUID(), row.browser_id || null, row.username, now).run();
+          caged = 1;
+        }
+        const reason = String(body.reason || "").replace(/\s+/g, " ").trim().slice(0, 200);
+        const excerpt = [row.title, userText(row.content)].filter(Boolean).join("\n").slice(0, 600);
+        await env.DB.prepare(`INSERT INTO ai_flags (id, kind, target_id, post_id, username, browser_id, categories, excerpt, hid, caged, status, created_at, flagged_by, reason) VALUES (?, ?, ?, ?, ?, ?, 'MOD', ?, ?, ?, 'open', ?, ?, ?)`)
+          .bind(crypto.randomUUID(), isPost ? "post" : "chirp", tid, row.post_id || null, row.username || null, row.browser_id || null, excerpt, hid, caged, now, username, reason || null).run();
+        const { results: admins = [] } = await env.DB.prepare(`SELECT username FROM mod_users WHERE role = 'admin' AND deleted_at IS NULL AND username IS NOT NULL`).all();
+        const msg = JSON.stringify({
+          // Starts with the plain name, so the notification shows that bird's picture
+          text: `${row.username || "Someone"} had a ${isPost ? "post" : "chirp"} flagged by ${username}${reason ? ` ("${reason}")` : ""}. It's hidden${caged || isBird ? " and they're in The Cage" : ""}. Review it in Mod Panel → Flagged.`,
+          postId: row.post_id || undefined, icon: "SHIELD", preview: excerpt.slice(0, 80),
+        });
+        for (const a of admins) if (a.username !== username) await env.DB.prepare(`INSERT INTO system_notifications (id, user_id, message) VALUES (?, ?, ?)`).bind(crypto.randomUUID(), a.username, msg).run();
+        return json({ success: true, caged });
+      }
+      if ((t === "delete_post" || t === "delete_comment") && !isAdmin) {
+        const own = await env.DB.prepare(t === "delete_post" ? `SELECT username FROM posts WHERE id = ?` : `SELECT username FROM comments WHERE id = ?`).bind(t === "delete_post" ? body.post_id : body.comment_id).first();
+        if (!own || !username || own.username !== username) return json({ error: "Mods can flag this. Only admins can delete it." }, 403);
       }
       if (t === "delete_post") {
         const _dp = await env.DB.prepare(`SELECT is_admin FROM posts WHERE id = ?`).bind(body.post_id).first();
