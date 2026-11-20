@@ -711,7 +711,8 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       for (const { username: who } of results) {
         if (!who || extinct.has(who)) continue;
         if (post.is_huddle && !isHuddleMember(post, who)) continue;
-        const msg = JSON.stringify({ text: `${by} tagged you in ${commentId ? "a chirp" : "a post"}`, postId, targetId: commentId || undefined, preview, icon: "AT" });
+        const onYours = commentId && (post.username || "").toLowerCase() === who.toLowerCase();
+        const msg = JSON.stringify({ text: `${by} tagged you in ${commentId ? (onYours ? "a chirp on your post" : "a chirp") : "a post"}`, postId, targetId: commentId || undefined, preview, icon: "AT" });
         await env.DB.prepare(`INSERT INTO system_notifications (id, user_id, message) VALUES (?, ?, ?)`).bind(crypto.randomUUID(), who, msg).run();
       }
     } catch (e) { console.error("notifyMentions", e); }
@@ -3213,6 +3214,12 @@ async function handleRequest(request, env, ctx, corsHeaders) {
           if (results[i].preClear && !results[i].need) results.splice(i, 1);
           else delete results[i].preClear;
         }
+      }
+      // A chirp that tags you AND is the newest chirp on your post (or a reply to your chirp) gives one
+      // notification, the "tagged you" one, not two
+      const taggedIn = new Set(results.filter(n => n.icon === "AT" && n.targetId).map(n => n.targetId));
+      if (taggedIn.size) for (let i = results.length - 1; i >= 0; i--) {
+        if ((results[i].type === "comment" || results[i].type === "reply") && taggedIn.has(results[i].targetId)) results.splice(i, 1);
       }
       results.sort((a, b) => (a.time && b.time) ? new Date(b.time) - new Date(a.time) : a.time ? -1 : 1);
       const names = await extinctNames();
