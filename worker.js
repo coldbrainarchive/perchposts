@@ -3069,7 +3069,9 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       let d = { built_at: null, stories: [] };
       try { d = JSON.parse(row?.v || "{}"); } catch (e) {}
       const s = (d.stories || []).map(st => [...(st.posts || [])].sort((a, b) => String(a.t).localeCompare(String(b.t))).slice(0, 5).map(p => p.id));
-      return new Response(JSON.stringify({ b: d.built_at || null, s }), { headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "public, max-age=300" } });
+      // where each story happened, for the little story dots on the site's globe logo
+      const o = (d.stories || []).map(st => st.origin && isFinite(st.origin.lat) ? [Math.round(st.origin.lat * 10) / 10, Math.round(st.origin.lng * 10) / 10] : null);
+      return new Response(JSON.stringify({ b: d.built_at || null, s, o }), { headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "public, max-age=300" } });
     } catch (err) {
       return serverError(err);
     }
