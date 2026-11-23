@@ -92,6 +92,8 @@ body{background:radial-gradient(ellipse at 50% 40%,#0d1020 0%,#05060a 70%)}
 .pv-btns{display:flex;gap:6px}
 .pv-btns .btn{flex:1;display:inline-flex;align-items:center;justify-content:center;height:34px;border-radius:999px;font-weight:800;font-size:11.5px;letter-spacing:.03em;text-transform:uppercase;text-decoration:none;border:1px solid var(--line);color:var(--ink);background:#1d2029;white-space:nowrap}
 .pv-btns .btn.pri{background:var(--accent);border-color:var(--accent);color:#14081d}
+/* the website as plain tappable text, like the site link in the post scroller */
+.pv-site{align-self:flex-start;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#c084fc;font-size:11.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;text-decoration:none}
 @keyframes pvIn{from{opacity:0;transform:translateX(-50%) translateY(6px)}to{opacity:1;transform:translateX(-50%)}}
 .pin.focus{z-index:2147483000!important}
 body.focusing .ev .lb{display:none!important}

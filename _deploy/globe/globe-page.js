@@ -9,6 +9,7 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
   const ago = t => { const m = Math.max(1, Math.round((Date.now() - new Date(t).getTime()) / 60000)); return m < 60 ? m + 'm ago' : Math.round(m / 60) + 'h ago'; };
   const $ = id => document.getElementById(id);
+  const siteOf = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch (e) { return 'Website'; } };
 
   // Stars behind the globe
   (function stars() {
@@ -49,14 +50,14 @@
     // the preview pinned to the outlet: ‹ › step through the story's outlets (list order); tapping the preview drops
     // down the article preview (summary + Open post / Read at source)
     el.innerHTML = `<i></i><span class="lb">${esc(p.outlet)}</span><div class="pv"><div class="pv-row"><button type="button" class="pv-nav" data-d="-1" aria-label="Previous outlet">‹</button>${p.image ? `<img src="${esc(p.image)}" alt="" referrerpolicy="no-referrer">` : ''}<span class="pt"><b>${esc(p.title)}</b><span>${esc(flag(p.country))} ${esc(p.outlet)} · ${esc(p.city)} · ${ago(p.t)}</span></span><button type="button" class="pv-nav" data-d="1" aria-label="Next outlet">›</button></div>
-      <div class="pv-more">${p.desc ? `<p>${esc(p.desc)}</p>` : ''}<div class="pv-btns"><a class="btn pri" href="/post/${encodeURIComponent(p.id)}">View post</a></div></div></div>`;
+      <div class="pv-more"><a class="pv-site" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${esc(siteOf(p.url))}</a>${p.desc ? `<p>${esc(p.desc)}</p>` : ''}<div class="pv-btns"><a class="btn pri" href="/post/${encodeURIComponent(p.id)}">View post</a></div></div></div>`;
     const im = el.querySelector('.pv img'); im && im.addEventListener('error', () => im.remove());
     el.addEventListener('pointerdown', ev => { ev.stopPropagation(); });
     el.addEventListener('click', ev => {
       ev.stopPropagation(); pinTapAt = Date.now();
       const nav = ev.target.closest('.pv-nav');
       if (nav) { stepOutlet(p, +nav.dataset.d); return; }
-      if (ev.target.closest('.pv-btns a')) return;            // let the links open
+      if (ev.target.closest('.pv-btns a,.pv-site')) return;            // let the links open
       if (foc === p) { el.querySelector('.pv').classList.toggle('exp'); return; }
       focusPin(p, false);
     });
