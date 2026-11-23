@@ -73,7 +73,7 @@
     el.style.display = near ? '' : 'none';
     bs.forEach(b => b.classList.toggle('active', b.dataset.o === ord));
     const a = bs.find(b => b.dataset.o === ord); if (!a || !near) return;
-    el.classList.toggle('no-anim', !anim);
+    if (anim && el.classList.contains('no-anim')) { el.classList.remove('no-anim'); void el.offsetWidth; } else el.classList.toggle('no-anim', !anim);
     const er = el.getBoundingClientRect(), ar = a.getBoundingClientRect(), inner = er.width - el.clientLeft * 2;
     th.style.left = (a === bs[0] ? -1 : ar.left - er.left - el.clientLeft) + 'px';
     th.style.right = (a === bs[bs.length - 1] ? -1 : inner - (ar.right - er.left - el.clientLeft)) + 'px';
@@ -81,7 +81,7 @@
   const kmBetween = (a, b, c, d) => { const R = Math.PI / 180, x = Math.sin((c - a) * R / 2) ** 2 + Math.cos(a * R) * Math.cos(c * R) * Math.sin((d - b) * R / 2) ** 2; return 12742 * Math.asin(Math.sqrt(x)); };
   // The selected story's outlets, nearest to where it happened first (earliest first when it has no place),
   // in a list that opens above the story cards. "First" marks whoever reported it earliest.
-  function outlets() {
+  function outlets(keep) {
     const ol = $('ol');
     if (sel < 0) { ol.classList.remove('on', 'open'); return; }
     const st = stories[sel], o = st.origin, near = o && o.how !== 'first' && isFinite(o.lat);
@@ -90,9 +90,9 @@
     // distance from the real place (pins are fanned out slightly, so use the outlet's own city)
     for (const p of sp) p.km = near ? kmBetween(+o.lat, +o.lng, p.lat0, p.lng0) : null;
     sp.sort(near && ord === 'near' ? (a, b) => a.km - b.km : (a, b) => String(a.t).localeCompare(String(b.t)));
-    requestAnimationFrame(() => toggleUI(near, false));
+    if (!keep) requestAnimationFrame(() => toggleUI(near, false));
     ol.style.setProperty('--c', COLORS[sel % COLORS.length]);
-    ol.classList.add('on'); ol.classList.remove('open');
+    ol.classList.add('on'); if (!keep) ol.classList.remove('open');
     $('olT').innerHTML = `${sp.length} outlet${sp.length === 1 ? '' : 's'} reported this <i>▾</i>`;
     $('olL').innerHTML = '';
     sp.forEach((p, k) => {
@@ -161,9 +161,8 @@
     $('olS').querySelectorAll('.sort-toggle-btn').forEach(b => b.addEventListener('click', () => {
       if (ord === b.dataset.o) return;
       ord = b.dataset.o; try { localStorage.setItem('pp_globe_order', ord); } catch (e) {}
-      const open = $('ol').classList.contains('open'), f = foc;
-      outlets(); toggleUI(true, true);
-      if (open) $('ol').classList.add('open');
+      const f = foc;
+      outlets(true); toggleUI(true, true);
       if (f) document.querySelectorAll('.or').forEach(r => r.classList.toggle('on', r._p === f));
     }));
   })();
