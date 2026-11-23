@@ -153,6 +153,14 @@
     spread(pins);
     events = stories.map((s, i) => s.origin && isFinite(s.origin.lat) ? { kind: 'ev', s: i, lat: +s.origin.lat, lng: +s.origin.lng, name: s.origin.how === 'first' ? `First reported in ${s.origin.city}` : s.origin.name, country: s.origin.country } : null).filter(Boolean);
     spread(events);
+    // story markers that sit close together (Liverpool, Manchester, London…) get nudged apart so each can be tapped
+    for (let k = 0; k < 40; k++) for (let i = 0; i < events.length; i++) for (let j = i + 1; j < events.length; j++) {
+      const A = events[i], B = events[j], cl = Math.cos(((A.lat + B.lat) / 2) * Math.PI / 180);
+      let dx = (B.lng - A.lng) * cl, dy = B.lat - A.lat; const d = Math.hypot(dx, dy) || 0.01, min = 5;
+      if (d >= min) continue; if (d < 0.02) { dx = 1; dy = 0.3; }
+      const push = (min - d) / 2 / (Math.hypot(dx, dy) || 1);
+      A.lat -= dy * push; B.lat += dy * push; A.lng -= dx * push / cl; B.lng += dx * push / cl;
+    }
     marks = [...pins, ...events];
     if (d.built_at) $('sub').textContent = `Last 24 hours · ${stories.length} top stories · updated ${ago(d.built_at)}`;
     $('empty').remove();
