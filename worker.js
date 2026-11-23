@@ -311,6 +311,9 @@ function boolify(row, fields) {
 // goes in as one JSON value: IN (${ID_LIST}) with .bind(JSON.stringify(ids))
 const ID_LIST = `SELECT value FROM json_each(?)`;
 const LIVE_POSTS = `deleted = 0 AND (archived = 0 OR archived IS NULL) AND (is_huddle = 0 OR is_huddle IS NULL)`;
+// Search alerts (saved searches with alert:true), cached per isolate for a minute
+let ALERT_RULES = null, ALERT_RULES_AT = 0;
+const ALERT_BOTS = ["NewsBot", "ScienceBot", "NatureBot", "SportsBot"];
 const BOARD_NAMES = { general: "General", sports: "Sports", "science-nature": "Science", nature: "Nature", entertainment: "Entertainment", random: "Random", announcements: "Announcements", cage: "The Cage" };
 // country/continent have no index: scan at most this many recent rows per page
 const REGION_WINDOW = 4000;
@@ -693,6 +696,90 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     }
     await env.DB.prepare(`INSERT INTO system_notifications (id, user_id, message) VALUES (?, ?, ?)`)
       .bind(crypto.randomUUID(), userId, message).run();
+  }
+
+  // ── Search alerts ── a new post is checked against every saved search with its bell on (same rules as the
+  // search bar). Each alert keeps ONE notification that counts up ("3 new posts"); once read, the next match
+  // starts it again at 1. Not your own posts, huddles or The Cage; birds' posts are checked after the AI check.
+  async function loadAlertRules() {
+    if (ALERT_RULES && Date.now() - ALERT_RULES_AT < 60000) return ALERT_RULES;
+    const { results = [] } = await env.DB.prepare(`SELECT username, saved_searches FROM mod_users WHERE deleted_at IS NULL AND username IS NOT NULL AND saved_searches LIKE '%"alert":true%'`).all();
+    const rules = [];
+    for (const r of results) {
+      let items = [];
+      try { items = JSON.parse(r.saved_searches || "[]"); } catch (e) {}
+      for (const it of Array.isArray(items) ? items : []) if (it && it.alert && it.qs) rules.push({ who: r.username, qs: it.qs, p: new URLSearchParams(it.qs) });
+    }
+    ALERT_RULES = rules; ALERT_RULES_AT = Date.now();
+    return rules;
+  }
+  function alertMatches(post, p) {
+    const bot = ALERT_BOTS.includes(post.username) || String(post.browser_id || "").startsWith("bot-");
+    if (p.get("flock") === "1" && bot) return false;
+    const b = (p.get("board") || "").toLowerCase();
+    if (b === "botnews") { if (!bot) return false; }
+    else if (b === "activity") { if (bot) return false; }
+    else if (b) {
+      const v = boardVariants(b).map(x => x.toLowerCase());
+      if (!v.includes(String(post.board || "").toLowerCase()) && !v.includes(String(post.community_id || "").toLowerCase())) return false;
+    }
+    const bf = p.get("bot");
+    if (bf === "hide" && bot) return false;
+    if (bf && bf !== "hide" && !bot) return false;
+    const ut = (p.get("utag") || "").toLowerCase();
+    if (ut && (post.utag || "") !== ut) return false;
+    const us = (p.get("user") || "").toLowerCase();
+    if (us && String(post.username || "").toLowerCase() !== us) return false;
+    const country = p.get("country") || "", region = p.get("continent") || "", q = (p.get("q") || "").trim();
+    const text = readableText(post);
+    if (country && q && q.toLowerCase() === country.toLowerCase()) {
+      // a country pill searching its own name: the country's posts, or ones that name it
+      if (!inHomeRegion(post, country) && !countryNamePattern(country).test(text)) return false;
+    } else {
+      if (country && !inHomeRegion(post, country)) return false;
+      if (q && !text.toLowerCase().includes(q.toLowerCase())) return false;
+    }
+    if (region && !country && !inRegion(post, region)) return false;
+    return true;
+  }
+  async function alertNotify(who, qs, post) {
+    const row = await env.DB.prepare(`SELECT id, message, created_at FROM system_notifications WHERE user_id = ? AND message LIKE ? ORDER BY created_at DESC LIMIT 1`)
+      .bind(who, `%"alert":${JSON.stringify(qs).replace(/[%_]/g, "_")}%`).first().catch(() => null);
+    let n = 1;
+    if (row) {
+      let old = {};
+      try { old = JSON.parse(row.message); } catch (e) {}
+      if (old.alert === qs) {
+        const [rd, st] = await Promise.all([
+          env.DB.prepare(`SELECT notif_time FROM notif_reads WHERE user_key = ? AND notif_id = ?`).bind(who, `hsys-${row.id}`).first(),
+          env.DB.prepare(`SELECT seen_at FROM notif_state WHERE user_key = ?`).bind(who).first(),
+        ]);
+        const read = (rd && rd.notif_time >= row.created_at) || (st && st.seen_at && st.seen_at >= row.created_at);
+        if (!read) n = (old.n || 1) + 1;
+      }
+    }
+    const title = readableText(post).replace(/\s+/g, " ").trim().slice(0, 90);
+    const msg = JSON.stringify({ text: `${n} new post${n === 1 ? "" : "s"} for your saved search`, icon: "SEARCH", alert: qs, n, link: `/?${qs}`, preview: title || undefined });
+    if (row) await env.DB.prepare(`UPDATE system_notifications SET message = ?, created_at = ? WHERE id = ?`).bind(msg, now, row.id).run();
+    else await env.DB.prepare(`INSERT INTO system_notifications (id, user_id, message, created_at) VALUES (?, ?, ?, ?)`).bind(crypto.randomUUID(), who, msg, now).run();
+  }
+  async function checkAlerts(postOrId) {
+    try {
+      const rules = await loadAlertRules();
+      if (!rules.length) return;
+      let post = postOrId;
+      if (typeof postOrId === "string") post = await env.DB.prepare(`SELECT id, title, content, username, browser_id, board, community_id, continent, country, utag, is_huddle, deleted FROM posts WHERE id = ?`).bind(postOrId).first();
+      if (!post || post.deleted || post.is_huddle) return;
+      if (["cage", "the cage"].includes(String(post.community_id || post.board || "").toLowerCase())) return;
+      const by = String(post.username || "").toLowerCase(), done = new Set();
+      for (const r of rules) {
+        if (String(r.who).toLowerCase() === by) continue;
+        const k = r.who + "\n" + r.qs;
+        if (done.has(k) || !alertMatches(post, r.p)) continue;
+        done.add(k);
+        await alertNotify(r.who, r.qs, post).catch(e => console.error("alertNotify", e.message));
+      }
+    } catch (e) { console.error("checkAlerts", e.message); }
   }
 
   // @tags in a post or chirp: notify each tagged bird (up to 5 per post/chirp) that exists and can see it.
@@ -1500,7 +1587,8 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         const newPost = { id, title: body.title || null, username, huddle_members: "[]" };
         for (const name of invitees) if (!extinct.has(name)) await sendInvite(newPost, username, name);
       }
-      if (checked) ctx.waitUntil(aiCheck({ kind: "post", id, postId: id, text: userText(body.title, body.content), uname: username, bid: body.browser_id }));
+      if (checked) ctx.waitUntil(aiCheck({ kind: "post", id, postId: id, text: userText(body.title, body.content), uname: username, bid: body.browser_id }).catch(() => {}).then(() => checkAlerts(id)));
+      else if (!isHuddle) ctx.waitUntil(checkAlerts(id));
       ctx.waitUntil(notifyMentions({ by: username, text: userText(body.title, body.content, first), postId: id }));
       const post = await env.DB.prepare(`SELECT * FROM posts WHERE id = ?`).bind(id).first();
       return json({ success: true, post: boolify(post, POST_BOOL_FIELDS) });
@@ -1568,6 +1656,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
           throw err;
         });
       }
+      if (stmts.length) ctx.waitUntil((async () => { for (const r of results) if (r.ok && r.id) await checkAlerts(r.id); })());
       return json({ success: true, posted: stmts.length, results });
     } catch (err) {
       return serverError(err);
@@ -2961,10 +3050,11 @@ async function handleRequest(request, env, ctx, corsHeaders) {
           seen.add(qs);
           const def = !!(it.def && !hasDef);
           if (def) hasDef = true;
-          items.push({ qs, def });
+          items.push(it.alert ? { qs, def, alert: true } : { qs, def });
           if (items.length === 5) break;
         }
         await env.DB.prepare(`UPDATE mod_users SET saved_searches = ? WHERE id = ?`).bind(JSON.stringify(items), authUser.sub).run();
+        ALERT_RULES = null;
         return json({ items });
       }
       const row = await env.DB.prepare(`SELECT saved_searches FROM mod_users WHERE id = ?`).bind(authUser.sub).first();
@@ -3441,10 +3531,10 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         const reqIds = [];
         (huddleN || []).forEach(n => {
           let text = n.message, postId = undefined, req = undefined;
-          let preview, icon, targetId;
-          try { const parsed = JSON.parse(n.message); text = parsed.text || text; postId = parsed.postId; req = parsed.req; preview = parsed.preview; icon = parsed.icon; targetId = parsed.targetId; } catch {}
+          let preview, icon, targetId, link, alert, an;
+          try { const parsed = JSON.parse(n.message); text = parsed.text || text; postId = parsed.postId; req = parsed.req; preview = parsed.preview; icon = parsed.icon; targetId = parsed.targetId; if (parsed.alert) { link = parsed.link; alert = parsed.alert; an = parsed.n; } } catch {}
           if (req) reqIds.push(req);
-          results.push({ id: `hsys-${n.id}`, type: "system", icon: icon || (req ? "📨" : "👥"), text, postId, targetId, time: n.created_at, req, preview, preClear: n.preClear || undefined });
+          results.push({ id: `hsys-${n.id}`, type: "system", icon: icon || (req ? "📨" : "👥"), text, postId, targetId, time: n.created_at, req, preview, link, alert, an, preClear: n.preClear || undefined });
         });
         // Invitations and requests carry their state, and whether this bird is the one who answers them
         if (reqIds.length) {
