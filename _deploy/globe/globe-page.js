@@ -18,7 +18,7 @@
     draw(); addEventListener('resize', draw);
   })();
 
-  let stories = [], pins = [], events = [], marks = [], sel = -1, world = null, pinTapAt = 0, foc = null;
+  let stories = [], pins = [], events = [], marks = [], sel = -1, world = null, pinTapAt = 0, foc = null, progScroll = 0;
   const placeShort = o => o ? (o.how === 'first' ? `First: ${o.city || o.country}` : (o.city || o.country)) : '';
 
   // Outlets in the same city fan out in a small ring so every pin can be tapped
@@ -132,7 +132,7 @@
     if (ev) world.pointOfView({ lat: ev.lat, lng: ev.lng, altitude: innerWidth < 600 ? 2.4 : 2 }, 1200);
     else world.pointOfView({ lat: Math.atan2(z, Math.hypot(x, y)) * 180 / Math.PI, lng: Math.atan2(y, x) * 180 / Math.PI, altitude: n > 0.85 ? 1.7 : n > 0.5 ? 2.3 : 2.8 }, 1200);
     const card = document.querySelectorAll('.sc')[sel];
-    card && card.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    if (card) { progScroll = Date.now(); card.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' }); }
   }
 
   function openPin(p) {
@@ -168,6 +168,20 @@
       if (f) document.querySelectorAll('.or').forEach(r => r.classList.toggle('on', r._p === f));
     }));
   })();
+  // While a story is selected, swiping the cards selects the one that lands in the middle (not when nothing's selected)
+  (function swipeSelect() {
+    let t = 0;
+    $('strip').addEventListener('scroll', () => {
+      clearTimeout(t);
+      t = setTimeout(() => {
+        if (sel < 0 || Date.now() - progScroll < 900) return;
+        const st = $('strip'), mid = st.getBoundingClientRect().left + st.clientWidth / 2;
+        let best = -1, bd = 1e9;
+        document.querySelectorAll('.sc').forEach((c, i) => { const r = c.getBoundingClientRect(), d = Math.abs(r.left + r.width / 2 - mid); if (d < bd) { bd = d; best = i; } });
+        if (best >= 0 && best !== sel) { closeSheet(); pick(best, true); }
+      }, 160);
+    }, { passive: true });
+  })();
   function strip() {
     // each card: the story (tap to select) + a slot where the outlet list opens when it's the selected story
     $('strip').innerHTML = stories.map((s, i) => `<div class="sc" style="--c:${COLORS[i % COLORS.length]}">
@@ -189,7 +203,13 @@
       .htmlElementVisibilityModifier(() => {})
       .arcColor('color').arcStroke(0.45).arcDashLength(0.5).arcDashGap(0.25).arcDashAnimateTime(2200).arcAltitudeAutoScale(0.35)
       .ringColor(r => t => `rgba(${hexRgb(r.color)},${1 - t})`).ringMaxRadius(5).ringPropagationSpeed(2.5).ringRepeatPeriod(1100)
-      .onGlobeClick(() => { if (Date.now() - pinTapAt > 400) { closeSheet(); focusPin(null); $('ol').classList.remove('open'); } });
+      // tapping the globe: closes an open article card first; otherwise back to the overview of all 12 stories
+      .onGlobeClick(() => {
+        if (Date.now() - pinTapAt < 400) return;
+        if ($('sheet').classList.contains('in')) { closeSheet(); return; }
+        focusPin(null);
+        if (sel >= 0) { pick(sel, false); world.pointOfView({ altitude: innerWidth < 600 ? 2.9 : 2.2 }, 900); }
+      });
     const c = world.controls(); c.autoRotate = true; c.autoRotateSpeed = 0.45; c.enableDamping = true;
     // Pins only show on the side of the Earth facing you (with a margin, so none float past the edge)
     const R = Math.PI / 180;
