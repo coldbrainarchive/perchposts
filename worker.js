@@ -3061,6 +3061,19 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       return serverError(err);
     }
   }
+  // ── /globe-sig ── tiny summary for the globe logo's "new stories" dot: for each top story, the ids of its
+  // earliest 5 posts (stable while the story grows). The page compares them with what you saw on the globe.
+  if (url.pathname === "/globe-sig") {
+    try {
+      const row = await env.DB.prepare(`SELECT v FROM globe_cache WHERE k = 'trending'`).first();
+      let d = { built_at: null, stories: [] };
+      try { d = JSON.parse(row?.v || "{}"); } catch (e) {}
+      const s = (d.stories || []).map(st => [...(st.posts || [])].sort((a, b) => String(a.t).localeCompare(String(b.t))).slice(0, 5).map(p => p.id));
+      return new Response(JSON.stringify({ b: d.built_at || null, s }), { headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "public, max-age=300" } });
+    } catch (err) {
+      return serverError(err);
+    }
+  }
   if (url.pathname === "/globe-build") {
     if (!isModerator && !isBot) return json({ error: "Unauthorized" }, 401);
     try {

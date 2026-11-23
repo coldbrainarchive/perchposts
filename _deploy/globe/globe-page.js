@@ -360,6 +360,9 @@
 
   fetch(API + '/globe').then(r => r.json()).then(d => {
     stories = (d.stories || []);
+    // you've seen these stories: clears the "new stories" dot on the site's globe logo
+    try { const old = JSON.parse(localStorage.getItem('pp_globe_seen') || '[]'); const ids = stories.flatMap(st => (st.posts || []).map(p => p.id));
+      localStorage.setItem('pp_globe_seen', JSON.stringify([...new Set([...ids, ...old])].slice(0, 1500))); } catch (e) {}
     pins = stories.flatMap((s, i) => s.posts.map(p => ({ ...p, s: i, lat0: p.lat, lng0: p.lng })));
     spread(pins);
     events = stories.map((s, i) => s.origin && isFinite(s.origin.lat) ? { kind: 'ev', s: i, lat: +s.origin.lat, lng: +s.origin.lng, name: s.origin.how === 'first' ? `First reported in ${s.origin.city}` : s.origin.name, country: s.origin.country } : null).filter(Boolean);
