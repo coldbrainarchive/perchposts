@@ -37,7 +37,10 @@
   function evEl(e) {
     const el = document.createElement('div');
     el.className = 'ev'; el.style.setProperty('--c', COLORS[e.s % COLORS.length]);
-    el.innerHTML = `<b data-n="${e.s + 1}"></b><span class="lb">${esc(flag(e.country))} ${esc(e.name)}</span>`;
+    const st = stories[e.s] || {};
+    // overview preview: tiny photo + short headline beside the circle (placed/hidden by overviewLabels)
+    el.innerHTML = `<b data-n="${e.s + 1}"></b><span class="lb">${esc(flag(e.country))} ${esc(e.name)}</span><span class="mini">${st.image ? `<img src="${esc(st.image)}" alt="" referrerpolicy="no-referrer">` : ''}<span>${esc(st.title || '')}</span></span>`;
+    const mi = el.querySelector('.mini img'); mi && mi.addEventListener('error', () => mi.remove());
     el.addEventListener('pointerdown', ev => { ev.stopPropagation(); });
     el.addEventListener('click', ev => { ev.stopPropagation(); pinTapAt = Date.now(); closeSheet(); pick(e.s, true); });
     e.el = el;
@@ -137,7 +140,36 @@
       $('olL').appendChild(b);
     });
   }
+  // Overview previews: show as many as fit (up to 8, best-ranked first) without covering each other or another
+  // story's circle; each tries the right side, then the left, else stays hidden until the globe turns
+  function overviewLabels() {
+    document.body.classList.toggle('overview', sel < 0);
+    if (sel >= 0) return;
+    const vw = innerWidth, top = 70, bottom = (document.querySelector('.strip')?.getBoundingClientRect().top || innerHeight) - 6;
+    const front = events.filter(e => e.el && !e.el.classList.contains('back'));
+    const circles = front.map(e => e.el.querySelector('b').getBoundingClientRect());
+    const taken = [];
+    let shown = 0;
+    for (const e of [...events].sort((a, b) => a.s - b.s)) {
+      const m = e.el && e.el.querySelector('.mini'); if (!m) continue;
+      const ok = r => r.left >= 4 && r.right <= vw - 4 && r.top >= top && r.bottom <= bottom &&
+        !taken.some(q => r.left < q.right + 4 && r.right > q.left - 4 && r.top < q.bottom + 3 && r.bottom > q.top - 3) &&
+        !circles.some((c, i) => front[i] !== e && r.left < c.right + 2 && r.right > c.left - 2 && r.top < c.bottom + 2 && r.bottom > c.top - 2);
+      let place = null;
+      if (shown < 8 && !e.el.classList.contains('back')) {
+        for (const side of ['right', 'left']) {
+          m.classList.toggle('left', side === 'left');
+          const r = m.getBoundingClientRect();
+          if (ok(r)) { place = r; break; }
+        }
+      }
+      m.classList.toggle('show', !!place);
+      if (place) { taken.push(place); shown++; }
+    }
+  }
+  setInterval(overviewLabels, 350);
   function paint() {
+    setTimeout(overviewLabels, 30);
     for (const p of marks) { if (!p.el) continue; p.el.classList.toggle('dim', sel >= 0 && p.s !== sel); p.el.classList.toggle('big', p.s === sel); }
     document.querySelectorAll('.sc').forEach((b, i) => b.classList.toggle('on', i === sel));
     if (!world) return;
