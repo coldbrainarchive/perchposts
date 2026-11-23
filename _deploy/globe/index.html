@@ -74,13 +74,24 @@ body{background:radial-gradient(ellipse at 50% 40%,#0d1020 0%,#05060a 70%)}
 .pin .lb{position:absolute;left:50%;top:-6px;transform:translate(-50%,-100%);white-space:nowrap;font-size:10.5px;font-weight:800;padding:3px 7px;border-radius:999px;background:#0b0c10e6;border:1px solid var(--c);color:var(--ink);display:none}
 .pin.big .lb{display:block}
 .pin.back{opacity:0;pointer-events:none}
-.pin .pv{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);width:230px;display:none;gap:9px;align-items:center;padding:8px;border-radius:14px;background:#15171df5;border:1.5px solid var(--c);box-shadow:0 8px 28px #000c,0 0 14px color-mix(in srgb,var(--c) 35%,transparent);cursor:pointer}
+.pin .pv{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);width:286px;display:none;flex-direction:column;gap:0;align-items:stretch;padding:6px;border-radius:14px;background:#15171df5;border:1.5px solid var(--c);box-shadow:0 8px 28px #000c,0 0 14px color-mix(in srgb,var(--c) 35%,transparent);cursor:pointer}
 .pin .pv::after{content:"";position:absolute;left:50%;bottom:-7px;width:12px;height:12px;margin-left:-6px;transform:rotate(45deg);background:#15171d;border-right:1.5px solid var(--c);border-bottom:1.5px solid var(--c)}
 .pin .pv img{width:52px;height:52px;border-radius:9px;object-fit:cover;flex-shrink:0;background:#22252e}
 .pin .pv .pt{display:flex;flex-direction:column;gap:3px;min-width:0}
 .pin .pv .pt b{font-size:12.5px;line-height:1.25;font-weight:800;color:var(--ink);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .pin .pv .pt span{font-size:10.5px;font-weight:700;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pin.focus .pv{display:flex;animation:pvIn .2s ease-out}
+.pv-row{display:flex;align-items:center;gap:8px}
+.pv-nav{flex-shrink:0;width:26px;align-self:stretch;min-height:52px;border:0;border-radius:9px;background:#1f2230;color:var(--c);font:inherit;font-size:22px;font-weight:700;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0}
+.pv-nav:active{background:color-mix(in srgb,var(--c) 25%,#1f2230)}
+.pin .pv .pt span[data-n]::after{content:" · " attr(data-n)}
+/* the drop-down: summary + buttons, shown when the preview is tapped */
+.pv-more{display:none;flex-direction:column;gap:8px;padding:8px 4px 4px;margin-top:6px;border-top:1px solid #262a35}
+.pv.exp .pv-more{display:flex;animation:pvIn .2s ease-out}
+.pv-more p{margin:0;font-size:12.5px;line-height:1.45;color:#b6c2d1;display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden}
+.pv-btns{display:flex;gap:6px}
+.pv-btns .btn{flex:1;display:inline-flex;align-items:center;justify-content:center;height:34px;border-radius:999px;font-weight:800;font-size:11.5px;letter-spacing:.03em;text-transform:uppercase;text-decoration:none;border:1px solid var(--line);color:var(--ink);background:#1d2029;white-space:nowrap}
+.pv-btns .btn.pri{background:var(--accent);border-color:var(--accent);color:#14081d}
 @keyframes pvIn{from{opacity:0;transform:translateX(-50%) translateY(6px)}to{opacity:1;transform:translateX(-50%)}}
 .pin.focus{z-index:2147483000!important}
 body.focusing .ev .lb{display:none!important}

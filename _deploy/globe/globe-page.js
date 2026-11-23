@@ -46,16 +46,40 @@
     if (p.kind === 'ev') return evEl(p);
     const el = document.createElement('div');
     el.className = 'pin'; el.style.setProperty('--c', COLORS[p.s % COLORS.length]);
-    el.innerHTML = `<i></i><span class="lb">${esc(p.outlet)}</span><div class="pv">${p.image ? `<img src="${esc(p.image)}" alt="" referrerpolicy="no-referrer">` : ''}<span class="pt"><b>${esc(p.title)}</b><span>${esc(flag(p.country))} ${esc(p.outlet)} · ${esc(p.city)} · ${ago(p.t)}</span></span></div>`;
+    // the preview pinned to the outlet: ‹ › step through the story's outlets (list order); tapping the preview drops
+    // down the article preview (summary + Open post / Read at source)
+    el.innerHTML = `<i></i><span class="lb">${esc(p.outlet)}</span><div class="pv"><div class="pv-row"><button type="button" class="pv-nav" data-d="-1" aria-label="Previous outlet">‹</button>${p.image ? `<img src="${esc(p.image)}" alt="" referrerpolicy="no-referrer">` : ''}<span class="pt"><b>${esc(p.title)}</b><span>${esc(flag(p.country))} ${esc(p.outlet)} · ${esc(p.city)} · ${ago(p.t)}</span></span><button type="button" class="pv-nav" data-d="1" aria-label="Next outlet">›</button></div>
+      <div class="pv-more">${p.desc ? `<p>${esc(p.desc)}</p>` : ''}<div class="pv-btns"><a class="btn pri" href="/post/${encodeURIComponent(p.id)}">View post</a></div></div></div>`;
     const im = el.querySelector('.pv img'); im && im.addEventListener('error', () => im.remove());
     el.addEventListener('pointerdown', ev => { ev.stopPropagation(); });
-    // first tap: a small preview pinned to the outlet; tap the preview (or the pin again) for the full card
-    el.addEventListener('click', ev => { ev.stopPropagation(); pinTapAt = Date.now(); if (foc === p || ev.target.closest('.pv')) openPin(p); else focusPin(p, false); });
+    el.addEventListener('click', ev => {
+      ev.stopPropagation(); pinTapAt = Date.now();
+      const nav = ev.target.closest('.pv-nav');
+      if (nav) { stepOutlet(p, +nav.dataset.d); return; }
+      if (ev.target.closest('.pv-btns a')) return;            // let the links open
+      if (foc === p) { el.querySelector('.pv').classList.toggle('exp'); return; }
+      focusPin(p, false);
+    });
     p.el = el;
     return el;
   }
 
+  // ‹ › on the preview: the previous / next outlet in the list order, flying the globe there
+  function stepOutlet(p, d) {
+    if (!curList.includes(p)) outlets(true);
+    const i = curList.indexOf(p), n = curList.length;
+    const q = curList[(i + d + n) % n];
+    if (q && q !== p) focusPin(q, true);
+    updateNav();
+  }
+  function updateNav() {
+    const n = curList.length, i = curList.indexOf(foc);
+    if (!foc || !foc.el) return;
+    foc.el.querySelectorAll('.pv-nav').forEach(b => { b.style.visibility = n > 1 ? '' : 'hidden'; });
+    const t = foc.el.querySelector('.pt span'); if (t && i >= 0) t.dataset.n = `${i + 1}/${n}`;
+  }
   function focusPin(p, fly) {
+    if (foc && foc.el) foc.el.querySelector('.pv')?.classList.remove('exp');
     foc = p;
     for (const q of pins) q.el && q.el.classList.toggle('focus', q === p);
     document.body.classList.toggle('focusing', !!p);
@@ -63,7 +87,10 @@
     if (!p) return;
     closeSheet();
     $('ol').classList.remove('open');
-    if (fly && world) { world.controls().autoRotate = false; world.pointOfView({ lat: p.lat - 4, lng: p.lng, altitude: 1.5 }, 1000); }
+    // the pin sits a little below the middle so its preview (and the drop-down) has room above it
+    if (fly && world) { world.controls().autoRotate = false; world.pointOfView({ lat: p.lat + 7, lng: p.lng, altitude: 1.5 }, 1000); }
+    if (!curList.includes(p) && sel === p.s) outlets(true);
+    updateNav();
   }
   let ord = 'near';
   try { ord = localStorage.getItem('pp_globe_order') === 'first' ? 'first' : 'near'; } catch (e) {}
