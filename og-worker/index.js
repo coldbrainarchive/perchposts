@@ -14,7 +14,7 @@ const BOARDS = {
 };
 const boardIcon = (key, color) => ICONS[key] ? "data:image/svg+xml;base64," + btoa(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${ICONS[key]}</svg>`) : null;
 const SHORT = { "United States": "USA", "United Kingdom": "UK", "United Arab Emirates": "UAE" };
-const IMG_VER = "23"; // bump to redraw every cached card
+const IMG_VER = "24"; // bump to redraw every cached card
 const MEDIA_RE = /^https:\/\/daboysforumip\.coldbrainarchive\.workers\.dev\/media\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 function parse(content) {
@@ -34,7 +34,7 @@ const clip = (s, n) => { s = (s || "").replace(/\s+/g, " ").trim(); return s.len
 async function getPost(env, id) {
   if (!/^[A-Za-z0-9-]{1,64}$/.test(id)) return null;
   const p = await env.DB.prepare(
-    "SELECT id, title, content, board, country, is_huddle, deleted, archived FROM posts WHERE id = ?"
+    "SELECT id, title, content, board, country, utag, is_huddle, deleted, archived FROM posts WHERE id = ?"
   ).bind(id).first();
   if (!p || p.deleted || p.archived || p.is_huddle) return null;
   let { text, link, media } = parse(p.content);
@@ -54,7 +54,7 @@ async function getPost(env, id) {
       if (still && /^https:\/\//.test(still)) { image = still; video = a.type === "video"; break; }
     }
   }
-  return { id: p.id, title, description, site, image, video, ref: link?.url ? new URL(link.url).origin + "/" : "", board: p.board, country: p.country };
+  return { id: p.id, title, description, site, image, video, ref: link?.url ? new URL(link.url).origin + "/" : "", board: p.board, country: p.country, utag: p.utag || null };
 }
 
 // Fetch the post's photo ourselves so a slow or blocked image site can't break the card; only JPEG/PNG are drawn.
@@ -110,6 +110,8 @@ function card(post, img) {
   const pills = [];
   if (b) pills.push(pill(b[0], b[1], null, boardIcon(bk, b[1])));
   if (post.country) pills.push(pill(SHORT[post.country] || post.country, "#e2e8f0", FLAGS[post.country] || null));
+  // the bird's own #tag: grey like the site's pill, with the # line icon
+  if (post.utag) pills.push(pill(post.utag, "#e2e8f0", null, "data:image/svg+xml;base64," + btoa(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#e2e8f0" stroke-width="2.4" stroke-linecap="round"><path d="M5 9h15M4 15h15M10 3.5 8 20.5M16 3.5l-2 17"/></svg>`)));
   const top = h("div", { display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }, [
     h("div", { display: "flex", gap: 14 }, pills.length ? pills : [h("span", { display: "flex" }, "")]),
     h("div", { display: "flex", alignItems: "center", gap: 14 }, [

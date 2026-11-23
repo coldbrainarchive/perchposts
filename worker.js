@@ -827,6 +827,25 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   //    posted. If it's flagged for hate, threats or sexual abuse, the post/chirp is hidden, the bird goes to
   //    The Cage, and mods get a notification. Mod panel → Flagged: "Not bad" undoes both, "Confirm" keeps them.
   const userText = (...parts) => parts.map(p => String(p || "").split(/\s*\[ATTACH/)[0]).join("\n").trim();
+  // ── User tags (#biking) ── one word: 2–20 letters/numbers, no emoji or spaces, no swearing or slurs (tags are
+  // public labels anyone can browse, so unlike posts, swearing is blocked here), not on the admin's blocked list.
+  const TAG_BAD_ANY = /fuck|shit|cunt|bitch|whore|slut|twat|nigg|fagg|retard|porn|dildo|jizz|pussy|bastard|bollock|asshole|dickhead|cocksuck|motherf/;
+  const TAG_BAD_WORD = /^(?:rape\w*|rapist\w*|wank\w*|piss\w*|cock|cocks|dick|dicks|ass|arse|tits|cum|nazis?|penis|vagina|boobs?|fag|fags|hoe|hoes)$/;
+  async function cleanTag(raw) {
+    const t = String(raw || "").trim().replace(/^#+/, "").toLowerCase();
+    if (!t) return { tag: null };
+    if (!/^[a-z0-9]{2,20}$/.test(t)) return { error: "A tag is one word: 2–20 letters or numbers, no spaces, symbols or emoji" };
+    if (TAG_BAD_ANY.test(t) || TAG_BAD_WORD.test(t) || hasSlur(t)) return { error: "That tag isn't allowed" };
+    if (await env.DB.prepare(`SELECT 1 FROM blocked_tags WHERE tag = ?`).bind(t).first()) return { error: "That tag isn't allowed" };
+    return { tag: t };
+  }
+  const setPostTag = async (postId, tag, createdAt) => {
+    await env.DB.batch([
+      env.DB.prepare(`UPDATE posts SET utag = ? WHERE id = ?`).bind(tag, postId),
+      env.DB.prepare(`DELETE FROM post_tags WHERE post_id = ?`).bind(postId),
+      ...(tag ? [env.DB.prepare(`INSERT INTO post_tags (tag, post_id, created_at) VALUES (?, ?, ?)`).bind(tag, postId, createdAt)] : []),
+    ]);
+  };
   const SLUR_WORD = /^(?:n+i+g{2,}(?:e+r+|a+h?|u+h+)[sz]?|kikes?|spics?|wetbacks?|gooks?|ragheads?|towelheads?|jigaboos?|zipperheads?|beaners?|pakis?|dark(?:ie|y)s?|fagg?ots?|boongs?)$/;
   const SLUR_PAIR = /^(?:porchmonkeys?|sandn+i+g{2,}(?:e+r+|a+h?)[sz]?)$/;
   function hasSlur(text) {
@@ -1407,6 +1426,13 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       }
       const checked = !isBot && !isModerator && !isHuddle;
       if (checked && hasSlur(userText(body.title, body.content))) return json({ error: SLUR_MSG }, 400);
+      // One user tag per post (birds' public posts only; not bots, huddles or The Cage)
+      let utag = null;
+      if (body.user_tag && !isBot && !isHuddle && !caged) {
+        const r = await cleanTag(body.user_tag);
+        if (r.error) return json({ error: r.error }, 400);
+        utag = r.tag;
+      }
       // Bots can't post an article twice
       let botClaim = null;
       if (isBot) {
@@ -1420,8 +1446,8 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       await env.DB.prepare(`
         INSERT INTO posts (id, title, content, username, ip_hash, browser_id, last_activity,
           is_mod, is_admin, moderator, mod_user_id, continent, country, board, community_id,
-          is_huddle, huddle_members, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          is_huddle, huddle_members, created_at, utag)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).bind(
         id,
         body.title || null,
@@ -1440,7 +1466,8 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         body.community_id || null,
         isHuddle ? 1 : 0,
         huddleMembers,
-        now
+        now,
+        utag
       ).run().catch(async err => {
         // The post didn't save, so the article can be tried again next run
         for (const key of botClaim?.claimed || []) {
@@ -1448,6 +1475,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         }
         throw err;
       });
+      if (utag) await env.DB.prepare(`INSERT INTO post_tags (tag, post_id, created_at) VALUES (?, ?, ?)`).bind(utag, id, now).run();
       // The huddle's opening message: the owner's first chirp, pinned
       const first = isHuddle && typeof body.first_chirp === "string" && body.first_chirp.trim() ? body.first_chirp.slice(0, 8000) : null;
       if (first) {
@@ -1688,6 +1716,17 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         rows.sort((a, b) => (when.get(b.id) || "").localeCompare(when.get(a.id) || ""));
         const posts = await publicRows(await addCommentCounts(env, rows.map(p => ({ ...boolify(p, POST_BOOL_FIELDS), flapped_at: when.get(p.id), act: acts.get(p.id) }))));
         return json({ posts, next_before: fl.length === pageLimit ? fl[fl.length - 1].created_at : null });
+      }
+
+      // ?utag=<tag>: posts with that user tag, newest first (through post_tags, never a scan of posts)
+      const utagQ = String(url.searchParams.get("utag") || "").trim().replace(/^#+/, "").toLowerCase();
+      if (utagQ) {
+        if (!/^[a-z0-9]{2,20}$/.test(utagQ)) return json({ posts: [], next_before: null });
+        const pageLimit = Math.min(parseInt(url.searchParams.get("limit") || "50") || 50, 100);
+        const { results = [] } = await env.DB.prepare(
+          `SELECT rowid AS _rid, * FROM posts WHERE id IN (SELECT post_id FROM post_tags WHERE tag = ?${before ? " AND created_at < ?" : ""} ORDER BY created_at DESC LIMIT ?) AND ${LIVE_POSTS} ORDER BY created_at DESC`
+        ).bind(utagQ, ...(before ? [before] : []), pageLimit).all();
+        return json({ posts: await publicRows(await addCommentCounts(env, results.map(p => boolify(p, POST_BOOL_FIELDS)))), next_before: results.length === pageLimit ? results[results.length - 1].created_at : null });
       }
 
       const rankSort = url.searchParams.get("sort");
@@ -2868,6 +2907,68 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   }
 
   // ── /search-users ─────────────────────────────────────────────────────────────
+
+  // ── /tags ── user tag suggestions (?q=prefix) and this week's popular tags (?popular=1). Counts live posts.
+  if (url.pathname === "/tags") {
+    try {
+      const q = String(url.searchParams.get("q") || "").trim().replace(/^#+/, "").toLowerCase().slice(0, 20);
+      if (url.searchParams.get("popular") === "1") {
+        const since = new Date(Date.now() - 7 * 86400000).toISOString();
+        const { results = [] } = await env.DB.prepare(
+          `SELECT t.tag, COUNT(*) AS n FROM post_tags t JOIN posts p ON p.id = t.post_id WHERE t.created_at >= ? AND p.deleted = 0 GROUP BY t.tag ORDER BY n DESC, MAX(t.created_at) DESC LIMIT 12`
+        ).bind(since).all();
+        return json({ tags: results });
+      }
+      if (!/^[a-z0-9]{1,20}$/.test(q)) return json({ tags: [] });
+      const { results = [] } = await env.DB.prepare(
+        `SELECT t.tag, COUNT(*) AS n FROM post_tags t JOIN posts p ON p.id = t.post_id WHERE t.tag >= ? AND t.tag < ? AND p.deleted = 0 GROUP BY t.tag ORDER BY n DESC LIMIT 8`
+      ).bind(q, q + "\uffff").all();
+      return json({ tags: results });
+    } catch (err) {
+      return serverError(err);
+    }
+  }
+
+  // ── /post-tag ── POST {post_id, tag}: the author adds/changes/removes their post's tag (tag "" removes);
+  // mods can remove any tag; admins can also set one.
+  if (url.pathname === "/post-tag" && request.method === "POST") {
+    if (!authUser?.username) return signInRequired();
+    try {
+      const post = await env.DB.prepare(`SELECT id, username, browser_id, is_huddle, deleted, created_at, board, community_id FROM posts WHERE id = ?`).bind(String(body.post_id || "")).first();
+      if (!post || post.deleted || post.is_huddle) return json({ error: "Not found" }, 404);
+      if (String(post.browser_id || "").startsWith("bot-") || /Bot$/.test(post.username || "") || ["cage", "the cage"].includes(String(post.community_id || post.board || "").toLowerCase())) return json({ error: "This post can't have a tag" }, 400);
+      const mine = (post.username || "").toLowerCase() === authUser.username.toLowerCase();
+      const r = await cleanTag(body.tag);
+      if (r.error) return json({ error: r.error }, 400);
+      if (r.tag ? !(mine || isAdmin) : !(mine || isModerator)) return json({ error: "Not allowed" }, 403);
+      if (r.tag && mine && !isModerator && await isJailed()) return json({ error: "Caged" }, 403);
+      await setPostTag(post.id, r.tag, post.created_at);
+      return json({ success: true, utag: r.tag });
+    } catch (err) {
+      return serverError(err);
+    }
+  }
+
+  // ── /blocked-tags ── admins: GET the list; POST {tag, block: true|false}. Blocking also strips it from every post.
+  if (url.pathname === "/blocked-tags") {
+    if (!isAdmin) return json({ error: "Not allowed" }, 403);
+    try {
+      if (request.method === "POST") {
+        const t = String(body.tag || "").trim().replace(/^#+/, "").toLowerCase();
+        if (!/^[a-z0-9]{2,20}$/.test(t)) return json({ error: "Bad tag" }, 400);
+        if (body.block === false) await env.DB.prepare(`DELETE FROM blocked_tags WHERE tag = ?`).bind(t).run();
+        else await env.DB.batch([
+          env.DB.prepare(`INSERT OR IGNORE INTO blocked_tags (tag, blocked_by, created_at) VALUES (?, ?, ?)`).bind(t, authUser.username, now),
+          env.DB.prepare(`UPDATE posts SET utag = NULL WHERE id IN (SELECT post_id FROM post_tags WHERE tag = ?)`).bind(t),
+          env.DB.prepare(`DELETE FROM post_tags WHERE tag = ?`).bind(t),
+        ]);
+      }
+      const { results = [] } = await env.DB.prepare(`SELECT tag, blocked_by, created_at FROM blocked_tags ORDER BY created_at DESC`).all();
+      return json({ blocked: results });
+    } catch (err) {
+      return serverError(err);
+    }
+  }
 
   // ── /my-huddles ── the huddles you own or are in (for Share → Send to a huddle), most recently active first.
   // Never other people's huddles, even for admins with "see all huddles" on.
