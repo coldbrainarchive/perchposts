@@ -19,6 +19,7 @@
     draw(); addEventListener('resize', draw);
   })();
 
+  let olQ = 0;
   let stories = [], pins = [], events = [], marks = [], sel = -1, world = null, pinTapAt = 0, foc = null, progScroll = 0, curList = [], rsAt = -1, pvOpen = false;
   const placeShort = o => o ? (o.how === 'first' ? `First: ${o.city || o.country}` : (o.city || o.country)) : '';
 
@@ -143,8 +144,10 @@
   // Overview previews: show as many as fit (up to 8, best-ranked first) without covering each other or another
   // story's circle; each tries the right side, then the left, else stays hidden until the globe turns
   function overviewLabels() {
-    document.body.classList.toggle('overview', sel < 0);
-    if (sel >= 0) return;
+    // only once you've zoomed in closer than the starting view (zoomed out, the globe stays clean)
+    const near = world && world.pointOfView().altitude < ZOOM_PREVIEWS;
+    document.body.classList.toggle('overview', sel < 0 && !!near);
+    if (sel >= 0 || !near) return;
     const vw = innerWidth, top = 70, bottom = (document.querySelector('.strip')?.getBoundingClientRect().top || innerHeight) - 6;
     const front = events.filter(e => e.el && !e.el.classList.contains('back'));
     const circles = front.map(e => e.el.querySelector('b').getBoundingClientRect());
@@ -167,6 +170,7 @@
       if (place) { taken.push(place); shown++; }
     }
   }
+  const HOME_ALT = () => (innerWidth < 600 ? 2.9 : 2.2), ZOOM_PREVIEWS = innerWidth < 600 ? 2.3 : 1.8;
   setInterval(overviewLabels, 350);
   function paint() {
     setTimeout(overviewLabels, 30);
@@ -306,9 +310,31 @@
     // Pins only show on the side of the Earth facing you (with a margin, so none float past the edge)
     const R = Math.PI / 180;
     const vis = () => { const v = world.pointOfView(), a = v.lat * R, b = v.lng * R;
-      for (const p of marks) { if (!p.el) continue; const la = p.lat * R; const d = Math.sin(a) * Math.sin(la) + Math.cos(a) * Math.cos(la) * Math.cos(p.lng * R - b); p.el.classList.toggle('back', d < 0.3); } };
+      const hb = (document.querySelector('.top')?.getBoundingClientRect().bottom || 0) - 8;
+      for (const p of marks) { if (!p.el) continue; const la = p.lat * R; const d = Math.sin(a) * Math.sin(la) + Math.cos(a) * Math.cos(la) * Math.cos(p.lng * R - b);
+        // also hide markers sliding under the title bar
+        const under = d >= 0.3 && p.el.getBoundingClientRect().top < hb && !p.el.classList.contains('focus');
+        p.el.classList.toggle('back', d < 0.3 || under); } };
     c.addEventListener('change', vis); setTimeout(vis, 50); setInterval(vis, 500);
     world.renderer().domElement.addEventListener('pointerdown', () => { c.autoRotate = false; });
+    c.addEventListener('change', () => { if (!olQ) olQ = requestAnimationFrame(() => { olQ = 0; overviewLabels(); }); });
+    // double-tap: zoom in on that spot; when already close, zoom back out to the whole globe
+    (function doubleTap() {
+      const cv = world.renderer().domElement; let down = null, last = null;
+      cv.addEventListener('pointerdown', e => { down = { x: e.clientX, y: e.clientY, t: Date.now() }; });
+      cv.addEventListener('pointerup', e => {
+        if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 10 || Date.now() - down.t > 350) { down = null; return; }
+        const now = Date.now();
+        if (last && now - last.t < 330 && Math.hypot(e.clientX - last.x, e.clientY - last.y) < 40) {
+          last = null; pinTapAt = now;
+          const pov = world.pointOfView(), r = cv.getBoundingClientRect();
+          if (pov.altitude < 0.75) { world.pointOfView({ altitude: HOME_ALT() }, 700); return; }
+          const g = world.toGlobeCoords(e.clientX - r.left, e.clientY - r.top);
+          world.pointOfView({ ...(g ? { lat: g.lat, lng: g.lng } : {}), altitude: Math.max(0.6, pov.altitude * 0.5) }, 700);
+        } else last = { x: e.clientX, y: e.clientY, t: now };
+        down = null;
+      });
+    })();
     const fit = () => { world.width(innerWidth).height(innerHeight); };
     fit(); addEventListener('resize', fit);
     world.pointOfView({ lat: 22, lng: 20, altitude: innerWidth < 600 ? 2.9 : 2.2 });
