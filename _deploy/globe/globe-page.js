@@ -18,7 +18,7 @@
     draw(); addEventListener('resize', draw);
   })();
 
-  let stories = [], pins = [], events = [], marks = [], sel = -1, world = null, pinTapAt = 0;
+  let stories = [], pins = [], events = [], marks = [], sel = -1, world = null, pinTapAt = 0, foc = null;
   const placeShort = o => o ? (o.how === 'first' ? `First: ${o.city || o.country}` : (o.city || o.country)) : '';
 
   // Outlets in the same city fan out in a small ring so every pin can be tapped
@@ -46,13 +46,41 @@
     if (p.kind === 'ev') return evEl(p);
     const el = document.createElement('div');
     el.className = 'pin'; el.style.setProperty('--c', COLORS[p.s % COLORS.length]);
-    el.innerHTML = `<i></i><span class="lb">${esc(p.outlet)}</span>`;
+    el.innerHTML = `<i></i><span class="lb">${esc(p.outlet)}</span><div class="pv">${p.image ? `<img src="${esc(p.image)}" alt="" referrerpolicy="no-referrer">` : ''}<span class="pt"><b>${esc(p.title)}</b><span>${esc(flag(p.country))} ${esc(p.outlet)} · ${esc(p.city)} · ${ago(p.t)}</span></span></div>`;
+    const im = el.querySelector('.pv img'); im && im.addEventListener('error', () => im.remove());
     el.addEventListener('pointerdown', ev => { ev.stopPropagation(); });
-    el.addEventListener('click', ev => { ev.stopPropagation(); pinTapAt = Date.now(); openPin(p); });
+    // first tap: a small preview pinned to the outlet; tap the preview (or the pin again) for the full card
+    el.addEventListener('click', ev => { ev.stopPropagation(); pinTapAt = Date.now(); if (foc === p || ev.target.closest('.pv')) openPin(p); else focusPin(p, false); });
     p.el = el;
     return el;
   }
 
+  function focusPin(p, fly) {
+    foc = p;
+    for (const q of pins) q.el && q.el.classList.toggle('focus', q === p);
+    document.body.classList.toggle('focusing', !!p);
+    document.querySelectorAll('.or').forEach(b => b.classList.toggle('on', b._p === p));
+    if (!p) return;
+    closeSheet();
+    $('ol').classList.remove('open');
+    if (fly && world) { world.controls().autoRotate = false; world.pointOfView({ lat: p.lat - 4, lng: p.lng, altitude: 1.5 }, 1000); }
+  }
+  // The selected story's outlets, earliest first, in a list that opens above the story cards
+  function outlets() {
+    const ol = $('ol');
+    if (sel < 0) { ol.classList.remove('on', 'open'); return; }
+    const st = stories[sel], sp = pins.filter(p => p.s === sel).sort((a, b) => String(a.t).localeCompare(String(b.t)));
+    ol.style.setProperty('--c', COLORS[sel % COLORS.length]);
+    ol.classList.add('on'); ol.classList.remove('open');
+    $('olT').innerHTML = `${sp.length} outlet${sp.length === 1 ? '' : 's'} reported this <i>▾</i>`;
+    $('olL').innerHTML = '';
+    sp.forEach((p, k) => {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'or'; b._p = p;
+      b.innerHTML = `<span class="fl">${flag(p.country)}</span><span class="nm"><b>${esc(p.outlet)}</b><span>${esc(p.city)} · ${ago(p.t)}</span></span>${k === 0 ? '<span class="fs">First</span>' : ''}`;
+      b.addEventListener('click', () => focusPin(p, true));
+      $('olL').appendChild(b);
+    });
+  }
   function paint() {
     for (const p of marks) { if (!p.el) continue; p.el.classList.toggle('dim', sel >= 0 && p.s !== sel); p.el.classList.toggle('big', p.s === sel); }
     document.querySelectorAll('.sc').forEach((b, i) => b.classList.toggle('on', i === sel));
@@ -66,7 +94,9 @@
 
   function pick(i, fly) {
     sel = i === sel ? -1 : i;
+    focusPin(null);
     paint();
+    outlets();
     if (sel < 0 || !world || !fly) return;
     const ev = events.find(e => e.s === sel), sp = pins.filter(p => p.s === sel).concat(ev ? [ev, ev, ev] : []);
     // (fallback) aim at the middle of its outlets; zoom out when they span the world
@@ -103,6 +133,9 @@
     s.addEventListener('touchend', e => { if (y0 == null) return; const d = (e.changedTouches[0].clientY - y0); s.firstElementChild.style.transform = ''; if (d > 70) closeSheet(); y0 = null; });
   })();
 
+  (function olToggle() {
+    $('olT').addEventListener('click', () => { $('ol').classList.toggle('open'); });
+  })();
   function strip() {
     $('strip').innerHTML = stories.map((s, i) => `<button type="button" class="sc" style="--c:${COLORS[i % COLORS.length]}">
       ${s.image ? `<img src="${esc(s.image)}" alt="" referrerpolicy="no-referrer">` : '<span class="ph"></span>'}
@@ -121,7 +154,7 @@
       .htmlElementVisibilityModifier(() => {})
       .arcColor('color').arcStroke(0.45).arcDashLength(0.5).arcDashGap(0.25).arcDashAnimateTime(2200).arcAltitudeAutoScale(0.35)
       .ringColor(r => t => `rgba(${hexRgb(r.color)},${1 - t})`).ringMaxRadius(5).ringPropagationSpeed(2.5).ringRepeatPeriod(1100)
-      .onGlobeClick(() => { if (Date.now() - pinTapAt > 400) closeSheet(); });
+      .onGlobeClick(() => { if (Date.now() - pinTapAt > 400) { closeSheet(); focusPin(null); $('ol').classList.remove('open'); } });
     const c = world.controls(); c.autoRotate = true; c.autoRotateSpeed = 0.45; c.enableDamping = true;
     // Pins only show on the side of the Earth facing you (with a margin, so none float past the edge)
     const R = Math.PI / 180;
