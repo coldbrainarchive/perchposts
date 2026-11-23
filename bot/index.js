@@ -7,6 +7,8 @@ import path from "path";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RUNTIME_FILE = path.join(__dirname, "runtime.json");
 const WORKER_URL   = "https://daboysforumip.coldbrainarchive.workers.dev";
+// Outlets that block GitHub's servers; their feeds go through the worker's /feed-proxy (same list in worker.js)
+const PROXY_HOSTS  = new Set(["www.theguardian.com", "theguardian.com"]);
 const ATTACH_MARKER = "\n\n[ATTACH:";
 
 const BOT_KEY = process.env.BOT_KEY;
@@ -428,7 +430,12 @@ async function run() {
       while (next < order.length) {
         const feed = order[next++];
         try {
-          const res = await fetch(feed.url, { headers: FETCH_HEADERS, signal: AbortSignal.timeout(15000) });
+          let res = await fetch(feed.url, { headers: FETCH_HEADERS, signal: AbortSignal.timeout(15000) });
+          // Some outlets block GitHub's servers (The Guardian: 403 since 2026-11-23). For those, fetch the feed
+          // through the site's own worker (Cloudflare's network); the worker only allows its listed hosts.
+          if ((res.status === 403 || res.status === 429) && PROXY_HOSTS.has(new URL(feed.url).hostname)) {
+            res = await fetch(`${WORKER_URL}/feed-proxy?url=${encodeURIComponent(feed.url)}`, { headers: { "x-bot-key": BOT_KEY }, signal: AbortSignal.timeout(20000) });
+          }
           if (!res.ok) { xmlOf.set(feed, { error: `HTTP ${res.status}` }); continue; }
           xmlOf.set(feed, { xml: await res.text() });
         } catch (err) { xmlOf.set(feed, { error: err.message }); }

@@ -3033,6 +3033,24 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     }
   }
 
+  // ── /feed-proxy?url= ── the news bot runs on GitHub's servers, which some outlets block (The Guardian answers
+  // 403 since 2026-11-23). For those outlets only, the bot fetches the RSS through here (Cloudflare's network).
+  // Bot key (or mods, for testing) and an allow-list of hosts, so it can't be used to fetch anything else.
+  if (url.pathname === "/feed-proxy") {
+    if (!isBot && !isModerator) return json({ error: "Unauthorized" }, 401);
+    const FEED_PROXY_HOSTS = ["www.theguardian.com", "theguardian.com"];
+    let target;
+    try { target = new URL(String(url.searchParams.get("url") || "")); } catch { return json({ error: "Bad url" }, 400); }
+    if (target.protocol !== "https:" || !FEED_PROXY_HOSTS.includes(target.hostname)) return json({ error: "Host not allowed" }, 403);
+    try {
+      const r = await fetch(target.toString(), { headers: { "User-Agent": "Mozilla/5.0 (compatible; PerchPostsNews/1.0; +https://perchposts.com)", "Accept": "application/rss+xml, application/xml;q=0.9, */*;q=0.8" }, cf: { cacheTtl: 300 } });
+      const body = (await r.text()).slice(0, 3_000_000);
+      return new Response(body, { status: r.status, headers: { ...corsHeaders, "Content-Type": r.headers.get("content-type") || "application/xml" } });
+    } catch (err) {
+      return json({ error: "Fetch failed" }, 502);
+    }
+  }
+
   // ── /globe ── the saved trending stories (public). /globe-build: mods (or the bot key) rebuild now; ?dry=1 only shows.
   if (url.pathname === "/globe") {
     try {

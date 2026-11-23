@@ -71,6 +71,7 @@ export const OUTLETS = {
   "thelocal.se": ["The Local", "Stockholm", 59.33, 18.07],
   "taipeitimes.com": ["Taipei Times", "Taipei", 25.03, 121.57],
   "thecitizen.co.tz": ["The Citizen", "Dar es Salaam", -6.79, 39.21],
+  "thechanzo.com": ["The Chanzo", "Dar es Salaam", -6.77, 39.24],
   "bangkokpost.com": ["Bangkok Post", "Bangkok", 13.76, 100.50],
   "dailysabah.com": ["Daily Sabah", "Istanbul", 41.01, 28.98],
   "kyivindependent.com": ["Kyiv Independent", "Kyiv", 50.45, 30.52],
