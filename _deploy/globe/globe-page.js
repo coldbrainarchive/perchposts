@@ -93,7 +93,9 @@
     if (!keep) requestAnimationFrame(() => toggleUI(near, false));
     ol.style.setProperty('--c', COLORS[sel % COLORS.length]);
     ol.classList.add('on'); if (!keep) ol.classList.remove('open');
-    $('olT').innerHTML = `${sp.length} outlet${sp.length === 1 ? '' : 's'} reported this <i>▾</i>`;
+    $('olT').innerHTML = `See all ${sp.length} outlet${sp.length === 1 ? '' : 's'} <i>▴</i>`;
+    // the list lives inside the selected story's card (the card grows up from the bottom)
+    const slot = document.querySelectorAll('.sc')[sel]; slot && slot.querySelector('.sc-slot').appendChild(ol);
     $('olL').innerHTML = '';
     sp.forEach((p, k) => {
       const b = document.createElement('button'); b.type = 'button'; b.className = 'or'; b._p = p;
@@ -167,10 +169,13 @@
     }));
   })();
   function strip() {
-    $('strip').innerHTML = stories.map((s, i) => `<button type="button" class="sc" style="--c:${COLORS[i % COLORS.length]}">
-      ${s.image ? `<img src="${esc(s.image)}" alt="" referrerpolicy="no-referrer">` : '<span class="ph"></span>'}
-      <span class="tx"><span class="hd">${esc(s.title)}</span><span class="mt"><span class="rk">${s.rank}</span><span class="pl">${s.origin ? `${flag(s.origin.country)} ${esc(placeShort(s.origin))} · ` : ''}${s.outlets} outlets · ${s.countries} countries</span></span></span></button>`).join('');
-    document.querySelectorAll('.sc').forEach((b, i) => b.addEventListener('click', () => { closeSheet(); pick(i, true); }));
+    // each card: the story (tap to select) + a slot where the outlet list opens when it's the selected story
+    $('strip').innerHTML = stories.map((s, i) => `<div class="sc" style="--c:${COLORS[i % COLORS.length]}">
+      <div class="sc-top" role="button" tabindex="0">${s.image ? `<img src="${esc(s.image)}" alt="" referrerpolicy="no-referrer">` : '<span class="ph"></span>'}
+      <span class="tx"><span class="hd">${esc(s.title)}</span><span class="mt"><span class="rk">${s.rank}</span><span class="pl">${s.origin ? `${flag(s.origin.country)} ${esc(s.origin.how === 'first' ? placeShort(s.origin) : s.origin.name)}` : ''}<span class="cnt">${s.origin ? ' · ' : ''}${s.outlets} outlets · ${s.countries} countries</span></span></span>
+      <span class="mt2">${s.outlets} outlets · ${s.countries} countries</span></span></div>
+      <div class="sc-slot"></div></div>`).join('');
+    document.querySelectorAll('.sc-top').forEach((b, i) => b.addEventListener('click', () => { closeSheet(); pick(i, true); }));
     document.querySelectorAll('.sc img').forEach(im => im.addEventListener('error', () => { const ph = document.createElement('span'); ph.className = 'ph'; im.replaceWith(ph); }));
   }
 
