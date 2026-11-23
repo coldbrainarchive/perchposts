@@ -11,6 +11,20 @@
   const $ = id => document.getElementById(id);
   const siteOf = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch (e) { return 'Website'; } };
 
+  // Only the ‹ arrow leaves the globe: a side-swipe (Safari's back gesture) or the browser's back lands on the
+  // same page instead, because we keep one extra history step and put it back whenever it's used up.
+  (function stayOnGlobe() {
+    try {
+      history.replaceState({ ppGlobe: 'base' }, '');
+      history.pushState({ ppGlobe: 'guard' }, '');
+      addEventListener('popstate', () => { if (!leaving) history.pushState({ ppGlobe: 'guard' }, ''); });
+    } catch (e) {}
+    let leaving = false;
+    document.querySelectorAll('a.back, a.home').forEach(a => a.addEventListener('click', ev => {
+      ev.preventDefault(); leaving = true; location.replace(a.getAttribute('href') || '/');
+    }));
+  })();
+
   // Stars behind the globe
   (function stars() {
     const c = $('stars'), d = Math.min(2, devicePixelRatio || 1);
