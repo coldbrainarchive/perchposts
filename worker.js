@@ -1161,6 +1161,11 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     try {
       const vid = typeof body.vid === "string" ? body.vid : "";
       if (isBot || !/^[A-Za-z0-9_-]{8,64}$/.test(vid)) return json({ ok: true });
+      // Crawlers and automated browsers render the page and ping with a fresh device id every visit, so one crawl
+      // looked like dozens of guests (2026-11-22). Known bot user agents are not counted; the page itself also
+      // skips the ping when navigator.webdriver is set.
+      const ua = request.headers.get("user-agent") || "";
+      if (!ua || body.wd === true || /bot\b|bot\/|crawl|spider|slurp|googlebot|google-inspectiontool|bingbot|bingpreview|applebot|yandex|baidu|duckduck|petalbot|ahrefs|semrush|mj12|dotbot|bytespider|gptbot|claudebot|anthropic|perplexity|ccbot|amazonbot|facebookexternalhit|meta-externalagent|twitterbot|discordbot|slackbot|telegrambot|whatsapp|linkedinbot|pinterest|headlesschrome|lighthouse|pagespeed|phantomjs|puppeteer|playwright|selenium|python|curl|wget|node-fetch|axios|go-http|java\//i.test(ua)) return json({ ok: true, skipped: true });
       const now = new Date(), iso = now.toISOString();
       let day = typeof body.d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.d) ? body.d : iso.slice(0, 10);
       if (!(Math.abs(Date.parse(day + "T12:00:00Z") - now.getTime()) < 2.5 * 86400000)) day = iso.slice(0, 10);
