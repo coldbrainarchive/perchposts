@@ -1,6 +1,7 @@
 import { stripMedia, stripIsoBmffStream } from "./media-strip.js";
 import { linkPreview } from "./link-preview.js";
 import NEST_WORDS from "./birds/lists.json";
+import { buildTrending } from "./trending.js";
 
 // Sign-up nests: 5 usernames (eggs) per device, a fresh set only every 15 minutes, and only names never offered to
 // that device before. Clearing the browser makes a new device, so each network (keyed IP hash) gets at most
@@ -36,6 +37,8 @@ export default {
   // and retries automatically if D1 is still over its daily limit).
   async scheduled(event, env, ctx) {
     ctx.waitUntil(ensureIndexes(env, event));
+    // Globe page: rebuild the 24h trending stories every hour
+    ctx.waitUntil(buildTrending(env).catch(e => console.error("buildTrending", e.message)));
   }
 };
 
@@ -3025,6 +3028,27 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         `SELECT t.tag, COUNT(*) AS n FROM post_tags t JOIN posts p ON p.id = t.post_id WHERE t.tag >= ? AND t.tag < ? AND p.deleted = 0 GROUP BY t.tag ORDER BY n DESC LIMIT 8`
       ).bind(q, q + "\uffff").all();
       return json({ tags: results });
+    } catch (err) {
+      return serverError(err);
+    }
+  }
+
+  // ── /globe ── the saved trending stories (public). /globe-build: mods (or the bot key) rebuild now; ?dry=1 only shows.
+  if (url.pathname === "/globe") {
+    try {
+      const row = await env.DB.prepare(`SELECT v, at FROM globe_cache WHERE k = 'trending'`).first();
+      if (!row || Date.now() - new Date(row.at).getTime() > 3 * 3600e3) ctx.waitUntil(buildTrending(env).catch(e => console.error("buildTrending", e.message)));
+      return new Response(row ? row.v : JSON.stringify({ built_at: null, stories: [] }), { headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "public, max-age=300" } });
+    } catch (err) {
+      return serverError(err);
+    }
+  }
+  if (url.pathname === "/globe-build") {
+    if (!isModerator && !isBot) return json({ error: "Unauthorized" }, 401);
+    try {
+      const dry = url.searchParams.get("dry") === "1", th = parseFloat(url.searchParams.get("t") || "0.8");
+      const r = await buildTrending(env, { dry, threshold: th >= 0.5 && th <= 0.99 ? th : 0.8 });
+      return json(dry ? { ...r, stories: r.stories.map(s => ({ rank: s.rank, title: s.title, outlets: s.outlets, countries: s.countries, activity: s.activity, posts: s.posts.map(p => `${p.outlet} (${p.city}): ${p.title}`) })) } : { built_at: r.built_at, stories: r.stories.length, items: r.items, clusters: r.clusters, multi: r.multi });
     } catch (err) {
       return serverError(err);
     }
