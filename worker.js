@@ -2937,8 +2937,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     }
   }
 
-  // ── /post-tag ── POST {post_id, tag}: the author adds/changes/removes their post's tag (tag "" removes);
-  // mods can remove any tag; admins can also set one.
+  // ── /post-tag ── POST {post_id, tag}: admins add/change/remove a post's flock tag (tag "" removes).
   if (url.pathname === "/post-tag" && request.method === "POST") {
     if (!authUser?.username) return signInRequired();
     try {
@@ -2948,8 +2947,8 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const mine = (post.username || "").toLowerCase() === authUser.username.toLowerCase();
       const r = await cleanTag(body.tag);
       if (r.error) return json({ error: r.error }, 400);
-      if (r.tag ? !(mine || isAdmin) : !(mine || isModerator)) return json({ error: "Not allowed" }, 403);
-      if (r.tag && mine && !isModerator && await isJailed()) return json({ error: "Caged" }, 403);
+      // After posting, only admins can change or remove a flock tag (user's call, 2026-11-23)
+      if (!isAdmin) return json({ error: "Only admins can change a flock tag" }, 403);
       await setPostTag(post.id, r.tag, post.created_at);
       return json({ success: true, utag: r.tag });
     } catch (err) {
