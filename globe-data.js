@@ -23,8 +23,8 @@ export const OUTLETS = {
   "addisfortune.news": ["Addis Fortune", "Addis Ababa", 9.03, 38.74],
   "yle.fi": ["Yle", "Helsinki", 60.17, 24.94],
   "france24.com": ["France 24", "Paris", 48.83, 2.27],
-  "euronews.com": ["Euronews", "Lyon", 45.76, 4.84],
-  "africanews.com": ["Africanews", "Lyon", 45.75, 4.83],
+  "euronews.com": ["Euronews", "Brussels", 50.84, 4.37],          // HQ moved from Lyon to Brussels (2023)
+  "africanews.com": ["Africanews", "Lyon", 45.75, 4.83],        // Euronews' African service; began in Pointe-Noire (Congo), now Lyon
   "rfi.fr": ["RFI", "Paris", 48.84, 2.28],
   "dw.com": ["DW", "Bonn", 50.72, 7.10],
   "myjoyonline.com": ["Joy Online", "Accra", 5.60, -0.19],
