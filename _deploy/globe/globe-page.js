@@ -117,8 +117,10 @@
   }
 
   function pick(i, fly) {
+    const was = sel;
     sel = i === sel ? -1 : i;
     focusPin(null);
+    if (sel < 0 && was >= 0 && world) world.pointOfView({ altitude: innerWidth < 600 ? 2.9 : 2.2 }, 900);
     paint();
     outlets();
     if (sel < 0 || !world || !fly) return;
@@ -203,12 +205,12 @@
       .htmlElementVisibilityModifier(() => {})
       .arcColor('color').arcStroke(0.45).arcDashLength(0.5).arcDashGap(0.25).arcDashAnimateTime(2200).arcAltitudeAutoScale(0.35)
       .ringColor(r => t => `rgba(${hexRgb(r.color)},${1 - t})`).ringMaxRadius(5).ringPropagationSpeed(2.5).ringRepeatPeriod(1100)
-      // tapping the globe: closes an open article card first; otherwise back to the overview of all 12 stories
+      // tapping the globe only closes an open article card or preview; a story is deselected by tapping it again
+      // (its card or its circle), so a missed tap on the globe never throws you out of the story
       .onGlobeClick(() => {
         if (Date.now() - pinTapAt < 400) return;
         if ($('sheet').classList.contains('in')) { closeSheet(); return; }
         focusPin(null);
-        if (sel >= 0) { pick(sel, false); world.pointOfView({ altitude: innerWidth < 600 ? 2.9 : 2.2 }, 900); }
       });
     const c = world.controls(); c.autoRotate = true; c.autoRotateSpeed = 0.45; c.enableDamping = true;
     // Pins only show on the side of the Earth facing you (with a margin, so none float past the edge)
