@@ -1,9 +1,10 @@
 // Perch Posts trending globe (2026-11-23). Pins = the outlets covering each of the top stories of the last 24h,
-// placed on the outlet's home city. Tap a story below to light it up (arcs between its outlets); tap a pin to open it.
+// placed on the outlet's home city. A numbered glow marks where each story happened (story.origin from the server).
+// Tap a story or its marker to light it up (arcs spread from where it happened to every outlet); tap a pin to open it.
 (function () {
   const API = 'https://daboysforumip.coldbrainarchive.workers.dev';
   const COLORS = ['#c084fc', '#2dd4bf', '#fbbf24', '#f87171', '#60a5fa', '#4ade80', '#fb923c', '#f472b6', '#a3e635', '#38bdf8', '#e879f9', '#facc15'];
-  const ISO = { "Argentina": "AR", "Australia": "AU", "Bangladesh": "BD", "Brazil": "BR", "Canada": "CA", "Chile": "CL", "China": "CN", "Colombia": "CO", "Costa Rica": "CR", "Egypt": "EG", "Ethiopia": "ET", "Finland": "FI", "France": "FR", "Germany": "DE", "Ghana": "GH", "Greece": "GR", "Hong Kong": "HK", "India": "IN", "Indonesia": "ID", "Ireland": "IE", "Israel": "IL", "Italy": "IT", "Jamaica": "JM", "Japan": "JP", "Kazakhstan": "KZ", "Kenya": "KE", "Kuwait": "KW", "Mexico": "MX", "Myanmar": "MM", "Netherlands": "NL", "New Zealand": "NZ", "Nigeria": "NG", "Pakistan": "PK", "Philippines": "PH", "Poland": "PL", "Qatar": "QA", "Russia": "RU", "Saudi Arabia": "SA", "Serbia": "RS", "Singapore": "SG", "South Africa": "ZA", "South Korea": "KR", "Spain": "ES", "Sri Lanka": "LK", "Sweden": "SE", "Taiwan": "TW", "Tanzania": "TZ", "Thailand": "TH", "Turkey": "TR", "Ukraine": "UA", "United Arab Emirates": "AE", "United Kingdom": "GB", "United States": "US", "Uruguay": "UY", "Vietnam": "VN", "Lebanon": "LB", "Iran": "IR", "Iraq": "IQ", "Jordan": "JO", "Morocco": "MA", "Peru": "PE", "Venezuela": "VE", "Zimbabwe": "ZW", "Uganda": "UG", "Rwanda": "RW", "Malaysia": "MY", "Nepal": "NP", "Portugal": "PT", "Switzerland": "CH", "Belgium": "BE", "Austria": "AT", "Norway": "NO", "Denmark": "DK", "Czech Republic": "CZ", "Hungary": "HU", "Romania": "RO", "Bulgaria": "BG", "Croatia": "HR", "Cuba": "CU", "Dominican Republic": "DO", "Trinidad & Tobago": "TT" };
+  const ISO = { "Argentina": "AR", "Australia": "AU", "Bangladesh": "BD", "Brazil": "BR", "Canada": "CA", "Chile": "CL", "China": "CN", "Colombia": "CO", "Costa Rica": "CR", "Egypt": "EG", "Ethiopia": "ET", "Finland": "FI", "France": "FR", "Germany": "DE", "Ghana": "GH", "Greece": "GR", "Hong Kong": "HK", "India": "IN", "Indonesia": "ID", "Ireland": "IE", "Israel": "IL", "Italy": "IT", "Jamaica": "JM", "Japan": "JP", "Kazakhstan": "KZ", "Kenya": "KE", "Kuwait": "KW", "Mexico": "MX", "Myanmar": "MM", "Netherlands": "NL", "New Zealand": "NZ", "Nigeria": "NG", "Pakistan": "PK", "Philippines": "PH", "Poland": "PL", "Qatar": "QA", "Russia": "RU", "Saudi Arabia": "SA", "Serbia": "RS", "Singapore": "SG", "South Africa": "ZA", "South Korea": "KR", "Spain": "ES", "Sri Lanka": "LK", "Sweden": "SE", "Taiwan": "TW", "Tanzania": "TZ", "Thailand": "TH", "Turkey": "TR", "Ukraine": "UA", "United Arab Emirates": "AE", "United Kingdom": "GB", "United States": "US", "Uruguay": "UY", "Vietnam": "VN", "Lebanon": "LB", "Iran": "IR", "Iraq": "IQ", "Jordan": "JO", "Morocco": "MA", "Peru": "PE", "Venezuela": "VE", "Zimbabwe": "ZW", "Uganda": "UG", "Rwanda": "RW", "Malaysia": "MY", "Nepal": "NP", "Portugal": "PT", "Switzerland": "CH", "Belgium": "BE", "Austria": "AT", "Norway": "NO", "Denmark": "DK", "Czech Republic": "CZ", "Hungary": "HU", "Romania": "RO", "Bulgaria": "BG", "Croatia": "HR", "Cuba": "CU", "Dominican Republic": "DO", "Trinidad & Tobago": "TT", "Albania": "AL", "Andorra": "AD", "Belarus": "BY", "Bosnia & Herzegovina": "BA", "Cyprus": "CY", "Estonia": "EE", "Georgia": "GE", "Iceland": "IS", "Kosovo": "XK", "Latvia": "LV", "Liechtenstein": "LI", "Lithuania": "LT", "Luxembourg": "LU", "Malta": "MT", "Moldova": "MD", "Monaco": "MC", "Montenegro": "ME", "North Macedonia": "MK", "Slovakia": "SK", "Slovenia": "SI", "Algeria": "DZ", "Angola": "AO", "Benin": "BJ", "Botswana": "BW", "Burkina Faso": "BF", "Burundi": "BI", "Cameroon": "CM", "Chad": "TD", "Congo": "CG", "DR Congo": "CD", "Eritrea": "ER", "Eswatini": "SZ", "Gabon": "GA", "Gambia": "GM", "Guinea": "GN", "Liberia": "LR", "Libya": "LY", "Madagascar": "MG", "Malawi": "MW", "Mali": "ML", "Mauritania": "MR", "Mauritius": "MU", "Mozambique": "MZ", "Namibia": "NA", "Niger": "NE", "Senegal": "SN", "Sierra Leone": "SL", "Somalia": "SO", "South Sudan": "SS", "Sudan": "SD", "Togo": "TG", "Tunisia": "TN", "Zambia": "ZM", "Afghanistan": "AF", "Armenia": "AM", "Azerbaijan": "AZ", "Bhutan": "BT", "Brunei": "BN", "Cambodia": "KH", "Kyrgyzstan": "KG", "Laos": "LA", "Maldives": "MV", "Mongolia": "MN", "North Korea": "KP", "Tajikistan": "TJ", "Turkmenistan": "TM", "Uzbekistan": "UZ", "Bahamas": "BS", "Belize": "BZ", "El Salvador": "SV", "Guatemala": "GT", "Haiti": "HT", "Honduras": "HN", "Nicaragua": "NI", "Panama": "PA", "Bahrain": "BH", "Oman": "OM", "Palestine": "PS", "Syria": "SY", "Yemen": "YE", "Bolivia": "BO", "Ecuador": "EC", "Paraguay": "PY", "Fiji": "FJ", "Papua New Guinea": "PG", "Chile": "CL" };
   const flag = c => { const k = ISO[c]; return k ? String.fromCodePoint(...[...k].map(ch => 0x1f1e6 + ch.charCodeAt(0) - 65)) : ''; };
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
   const ago = t => { const m = Math.max(1, Math.round((Date.now() - new Date(t).getTime()) / 60000)); return m < 60 ? m + 'm ago' : Math.round(m / 60) + 'h ago'; };
@@ -17,7 +18,8 @@
     draw(); addEventListener('resize', draw);
   })();
 
-  let stories = [], pins = [], sel = -1, world = null, pinTapAt = 0;
+  let stories = [], pins = [], events = [], marks = [], sel = -1, world = null, pinTapAt = 0;
+  const placeShort = o => o ? (o.how === 'first' ? `First: ${o.city || o.country}` : (o.city || o.country)) : '';
 
   // Outlets in the same city fan out in a small ring so every pin can be tapped
   function spread(list) {
@@ -30,7 +32,18 @@
     }
   }
 
+  // Where a story happened: a numbered glow that matches its card below
+  function evEl(e) {
+    const el = document.createElement('div');
+    el.className = 'ev'; el.style.setProperty('--c', COLORS[e.s % COLORS.length]);
+    el.innerHTML = `<b data-n="${e.s + 1}"></b><span class="lb">${esc(flag(e.country))} ${esc(e.name)}</span>`;
+    el.addEventListener('pointerdown', ev => { ev.stopPropagation(); });
+    el.addEventListener('click', ev => { ev.stopPropagation(); pinTapAt = Date.now(); closeSheet(); pick(e.s, true); });
+    e.el = el;
+    return el;
+  }
   function pinEl(p) {
+    if (p.kind === 'ev') return evEl(p);
     const el = document.createElement('div');
     el.className = 'pin'; el.style.setProperty('--c', COLORS[p.s % COLORS.length]);
     el.innerHTML = `<i></i><span class="lb">${esc(p.outlet)}</span>`;
@@ -41,12 +54,13 @@
   }
 
   function paint() {
-    for (const p of pins) { if (!p.el) continue; p.el.classList.toggle('dim', sel >= 0 && p.s !== sel); p.el.classList.toggle('big', p.s === sel); }
+    for (const p of marks) { if (!p.el) continue; p.el.classList.toggle('dim', sel >= 0 && p.s !== sel); p.el.classList.toggle('big', p.s === sel); }
     document.querySelectorAll('.sc').forEach((b, i) => b.classList.toggle('on', i === sel));
     if (!world) return;
     if (sel < 0) { world.arcsData([]); world.ringsData([]); return; }
-    const sp = pins.filter(p => p.s === sel), hub = sp[0], col = COLORS[sel % COLORS.length];
-    world.arcsData(sp.slice(1).map(p => ({ startLat: hub.lat, startLng: hub.lng, endLat: p.lat, endLng: p.lng, color: col })));
+    // arcs spread out from where it happened (or from the first outlet when there's no place)
+    const sp = pins.filter(p => p.s === sel), hub = events.find(e => e.s === sel) || sp[0], col = COLORS[sel % COLORS.length];
+    world.arcsData(sp.filter(p => p !== hub).map(p => ({ startLat: hub.lat, startLng: hub.lng, endLat: p.lat, endLng: p.lng, color: col })));
     world.ringsData([{ lat: hub.lat, lng: hub.lng, color: col }]);
   }
 
@@ -54,8 +68,8 @@
     sel = i === sel ? -1 : i;
     paint();
     if (sel < 0 || !world || !fly) return;
-    const sp = pins.filter(p => p.s === sel);
-    // aim at the middle of its outlets (average of unit vectors), zoom out when they span the world
+    const ev = events.find(e => e.s === sel), sp = pins.filter(p => p.s === sel).concat(ev ? [ev, ev, ev] : []);
+    // aim between where it happened (counted 3x) and its outlets; zoom out when they span the world
     let x = 0, y = 0, z = 0;
     for (const p of sp) { const la = p.lat * Math.PI / 180, lo = p.lng * Math.PI / 180; x += Math.cos(la) * Math.cos(lo); y += Math.cos(la) * Math.sin(lo); z += Math.sin(la); }
     const n = Math.hypot(x, y, z) / sp.length;
@@ -72,7 +86,7 @@
     $('sh').innerHTML = `<div class="grab"><i></i></div>${p.image ? `<img class="hero" src="${esc(p.image)}" alt="" referrerpolicy="no-referrer">` : ''}
       <div class="bd"><div class="src">${flag(p.country)} ${esc(p.outlet)} · ${esc(p.city)} · ${ago(p.t)}</div>
       <h2>${esc(p.title)}</h2>
-      <div class="story">Part of #${st.rank} · covered by ${st.outlets} outlets in ${st.countries} countries</div>
+      <div class="story">Part of #${st.rank}${st.origin && st.origin.how !== 'first' ? ` · happened in ${esc(st.origin.name)}` : ''} · covered by ${st.outlets} outlets in ${st.countries} countries</div>
       <div class="row"><a class="btn pri" href="/post/${encodeURIComponent(p.id)}">Open post</a><a class="btn" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">Read at source</a></div></div>`;
     const hi = $('sh').querySelector('img.hero'); hi && hi.addEventListener('error', () => hi.remove());
     $('sheet').classList.add('in');
@@ -90,7 +104,7 @@
   function strip() {
     $('strip').innerHTML = stories.map((s, i) => `<button type="button" class="sc" style="--c:${COLORS[i % COLORS.length]}">
       ${s.image ? `<img src="${esc(s.image)}" alt="" referrerpolicy="no-referrer">` : '<span class="ph"></span>'}
-      <span class="tx"><span class="hd">${esc(s.title)}</span><span class="mt"><span class="rk">${s.rank}</span>${s.outlets} outlets · ${s.countries} countries</span></span></button>`).join('');
+      <span class="tx"><span class="hd">${esc(s.title)}</span><span class="mt"><span class="rk">${s.rank}</span><span class="pl">${s.origin ? `${flag(s.origin.country)} ${esc(placeShort(s.origin))} · ` : ''}${s.outlets} outlets · ${s.countries} countries</span></span></span></button>`).join('');
     document.querySelectorAll('.sc').forEach((b, i) => b.addEventListener('click', () => { closeSheet(); pick(i, true); }));
     document.querySelectorAll('.sc img').forEach(im => im.addEventListener('error', () => { const ph = document.createElement('span'); ph.className = 'ph'; im.replaceWith(ph); }));
   }
@@ -101,7 +115,7 @@
       .backgroundColor('rgba(0,0,0,0)')
       .globeImageUrl('/globe/earth-blue-marble.jpg')
       .showAtmosphere(true).atmosphereColor('#8ab4ff').atmosphereAltitude(0.18)
-      .htmlElementsData(pins).htmlLat('lat').htmlLng('lng').htmlAltitude(0.01).htmlElement(pinEl).htmlTransitionDuration(0)
+      .htmlElementsData(marks).htmlLat('lat').htmlLng('lng').htmlAltitude(0.01).htmlElement(pinEl).htmlTransitionDuration(0)
       .htmlElementVisibilityModifier(() => {})
       .arcColor('color').arcStroke(0.45).arcDashLength(0.5).arcDashGap(0.25).arcDashAnimateTime(2200).arcAltitudeAutoScale(0.35)
       .ringColor(r => t => `rgba(${hexRgb(r.color)},${1 - t})`).ringMaxRadius(5).ringPropagationSpeed(2.5).ringRepeatPeriod(1100)
@@ -110,7 +124,7 @@
     // Pins only show on the side of the Earth facing you (with a margin, so none float past the edge)
     const R = Math.PI / 180;
     const vis = () => { const v = world.pointOfView(), a = v.lat * R, b = v.lng * R;
-      for (const p of pins) { if (!p.el) continue; const la = p.lat * R; const d = Math.sin(a) * Math.sin(la) + Math.cos(a) * Math.cos(la) * Math.cos(p.lng * R - b); p.el.classList.toggle('back', d < 0.3); } };
+      for (const p of marks) { if (!p.el) continue; const la = p.lat * R; const d = Math.sin(a) * Math.sin(la) + Math.cos(a) * Math.cos(la) * Math.cos(p.lng * R - b); p.el.classList.toggle('back', d < 0.3); } };
     c.addEventListener('change', vis); setTimeout(vis, 50); setInterval(vis, 500);
     world.renderer().domElement.addEventListener('pointerdown', () => { c.autoRotate = false; });
     const fit = () => { world.width(innerWidth).height(innerHeight); };
@@ -120,7 +134,7 @@
   // Outlet labels: hide any that would overlap one already shown (checked a few times a second)
   function declutter() {
     const shown = [];
-    for (const p of pins) {
+    for (const p of [...events, ...pins]) {
       if (!p.el || !p.el.classList.contains('big')) continue;
       const lb = p.el.querySelector('.lb'); if (!lb) continue;
       lb.style.visibility = '';
@@ -137,6 +151,9 @@
     stories = (d.stories || []);
     pins = stories.flatMap((s, i) => s.posts.map(p => ({ ...p, s: i })));
     spread(pins);
+    events = stories.map((s, i) => s.origin && isFinite(s.origin.lat) ? { kind: 'ev', s: i, lat: +s.origin.lat, lng: +s.origin.lng, name: s.origin.how === 'first' ? `First reported in ${s.origin.city}` : s.origin.name, country: s.origin.country } : null).filter(Boolean);
+    spread(events);
+    marks = [...pins, ...events];
     if (d.built_at) $('sub').textContent = `Last 24 hours · ${stories.length} top stories · updated ${ago(d.built_at)}`;
     $('empty').remove();
     if (!stories.length) { $('sub').textContent = 'No trending stories yet — check back soon'; }

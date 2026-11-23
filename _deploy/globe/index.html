@@ -37,6 +37,17 @@ body{background:radial-gradient(ellipse at 50% 40%,#0d1020 0%,#05060a 70%)}
 .pin .lb{position:absolute;left:50%;top:-6px;transform:translate(-50%,-100%);white-space:nowrap;font-size:10.5px;font-weight:800;padding:3px 7px;border-radius:999px;background:#0b0c10e6;border:1px solid var(--c);color:var(--ink);display:none}
 .pin.big .lb{display:block}
 .pin.back{opacity:0;pointer-events:none}
+.sc .mt .pl{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ev{position:relative;transform:translate(-50%,-50%);cursor:pointer;pointer-events:auto;transition:opacity .25s}
+.ev b{position:relative;z-index:1;display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:7px;transform:rotate(45deg);background:var(--c);border:2px solid #0a0a0a;box-shadow:0 0 0 1.5px var(--c),0 0 16px var(--c);font-size:0}
+.ev b::after{content:attr(data-n);position:absolute;inset:0;display:flex;align-items:center;justify-content:center;transform:rotate(-45deg);font-size:11px;font-weight:900;color:#0a0a0a}
+.ev::before{content:"";position:absolute;left:50%;top:50%;width:22px;height:22px;margin:-11px 0 0 -11px;border-radius:999px;border:2px solid var(--c);animation:evPulse 2.2s ease-out infinite}
+@keyframes evPulse{0%{transform:scale(.8);opacity:.9}100%{transform:scale(2.6);opacity:0}}
+.ev .lb{position:absolute;left:50%;top:-10px;transform:translate(-50%,-100%);white-space:nowrap;font-size:11px;font-weight:800;padding:4px 9px;border-radius:999px;background:#0b0c10f0;border:1.5px solid var(--c);color:var(--ink);display:none}
+.ev.big .lb{display:block}
+.ev.big b{width:26px;height:26px}
+.ev.dim{opacity:.25;pointer-events:none}
+.ev.back{opacity:0;pointer-events:none}
 .sheet{position:fixed;left:0;right:0;bottom:0;z-index:20;transform:translateY(105%);transition:transform .28s cubic-bezier(.2,.8,.3,1);padding:0 12px calc(env(safe-area-inset-bottom) + 12px)}
 .sheet.in{transform:none}
 .sh{max-width:480px;margin:0 auto;border-radius:20px;border:1px solid var(--line);background:var(--card);overflow:hidden;box-shadow:0 -10px 40px #000a}
