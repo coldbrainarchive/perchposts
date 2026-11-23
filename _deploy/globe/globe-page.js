@@ -69,12 +69,14 @@
     paint();
     if (sel < 0 || !world || !fly) return;
     const ev = events.find(e => e.s === sel), sp = pins.filter(p => p.s === sel).concat(ev ? [ev, ev, ev] : []);
-    // aim between where it happened (counted 3x) and its outlets; zoom out when they span the world
+    // (fallback) aim at the middle of its outlets; zoom out when they span the world
     let x = 0, y = 0, z = 0;
     for (const p of sp) { const la = p.lat * Math.PI / 180, lo = p.lng * Math.PI / 180; x += Math.cos(la) * Math.cos(lo); y += Math.cos(la) * Math.sin(lo); z += Math.sin(la); }
     const n = Math.hypot(x, y, z) / sp.length;
     world.controls().autoRotate = false;
-    world.pointOfView({ lat: Math.atan2(z, Math.hypot(x, y)) * 180 / Math.PI, lng: Math.atan2(y, x) * 180 / Math.PI, altitude: n > 0.85 ? 1.7 : n > 0.5 ? 2.3 : 2.8 }, 1200);
+    // centre on where the story happened (its numbered marker); only stories without a place frame their outlets
+    if (ev) world.pointOfView({ lat: ev.lat, lng: ev.lng, altitude: innerWidth < 600 ? 2.4 : 2 }, 1200);
+    else world.pointOfView({ lat: Math.atan2(z, Math.hypot(x, y)) * 180 / Math.PI, lng: Math.atan2(y, x) * 180 / Math.PI, altitude: n > 0.85 ? 1.7 : n > 0.5 ? 2.3 : 2.8 }, 1200);
     const card = document.querySelectorAll('.sc')[sel];
     card && card.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
   }
