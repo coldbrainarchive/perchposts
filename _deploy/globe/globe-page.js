@@ -19,7 +19,7 @@
     draw(); addEventListener('resize', draw);
   })();
 
-  let stories = [], pins = [], events = [], marks = [], sel = -1, world = null, pinTapAt = 0, foc = null, progScroll = 0, curList = [], rsAt = -1;
+  let stories = [], pins = [], events = [], marks = [], sel = -1, world = null, pinTapAt = 0, foc = null, progScroll = 0, curList = [], rsAt = -1, pvOpen = false;
   const placeShort = o => o ? (o.how === 'first' ? `First: ${o.city || o.country}` : (o.city || o.country)) : '';
 
   // Outlets in the same city fan out in a small ring so every pin can be tapped
@@ -58,7 +58,7 @@
       const nav = ev.target.closest('.pv-nav');
       if (nav) { stepOutlet(p, +nav.dataset.d); return; }
       if (ev.target.closest('.pv-btns a,.pv-site')) return;            // let the links open
-      if (foc === p) { el.querySelector('.pv').classList.toggle('exp'); return; }
+      if (foc === p) { pvOpen = el.querySelector('.pv').classList.toggle('exp'); return; }
       focusPin(p, false);
     });
     p.el = el;
@@ -80,8 +80,11 @@
     const t = foc.el.querySelector('.pt span'); if (t && i >= 0) t.dataset.n = `${i + 1}/${n}`;
   }
   function focusPin(p, fly) {
+    // an open drop-down stays open on the next outlet (‹ ›, list or pin) until you close it
     if (foc && foc.el) foc.el.querySelector('.pv')?.classList.remove('exp');
+    if (!p) pvOpen = false;
     foc = p;
+    if (p && p.el && pvOpen) p.el.querySelector('.pv').classList.add('exp');
     for (const q of pins) q.el && q.el.classList.toggle('focus', q === p);
     document.body.classList.toggle('focusing', !!p);
     document.querySelectorAll('.or').forEach(b => b.classList.toggle('on', b._p === p));
