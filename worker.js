@@ -447,7 +447,7 @@ async function getPostsPage(env, { activity, board, continent, country, username
     const params = [];
     if (before) { cond.push("last_activity < ?"); params.push(before); }
     const where = cond.join(" AND ");
-    const [commented, human] = await Promise.all([
+    const [commented, human, shared] = await Promise.all([
       env.DB.prepare(
         `SELECT rowid AS _rid, * FROM posts WHERE id IN (SELECT post_id FROM comments WHERE deleted = 0) AND ${where} ORDER BY last_activity DESC LIMIT ?`
       ).bind(...params, limit).all(),
@@ -457,14 +457,18 @@ async function getPostsPage(env, { activity, board, continent, country, username
       ).bind(...params, limit).all().catch(err => {
         console.error("get-posts activity: human posts unavailable:", err.message);
         return { results: [] };
-      })
+      }),
+      // Shared posts (a share counts as activity, so a shared news story shows up in Flock)
+      env.DB.prepare(
+        `SELECT rowid AS _rid, * FROM posts WHERE id IN (SELECT post_id FROM post_shares) AND ${where} ORDER BY last_activity DESC LIMIT ?`
+      ).bind(...params, limit).all().catch(() => ({ results: [] }))
     ]);
-    const c = commented.results || [], h = human.results || [];
-    const byId = new Map([...h, ...c].map(p => [p.id, p]));
+    const c = commented.results || [], h = human.results || [], s = shared.results || [];
+    const byId = new Map([...h, ...c, ...s].map(p => [p.id, p]));
     const scanned = [...byId.values()]
       .sort((a, b) => String(b.last_activity || "").localeCompare(String(a.last_activity || "")))
       .slice(0, limit);
-    const more = c.length === limit || h.length === limit;
+    const more = c.length === limit || h.length === limit || s.length === limit;
     return { posts: page(scanned.filter(matches)), next_before: more && scanned.length ? scanned[scanned.length - 1].last_activity : null };
   }
 
@@ -1798,7 +1802,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const params = [];
       if (activityFilter) {
         const placeholders = BOTS.map(() => '?').join(',');
-        q += ` AND (username NOT IN (${placeholders}) OR id IN (SELECT DISTINCT post_id FROM comments WHERE deleted = 0))`;
+        q += ` AND (username NOT IN (${placeholders}) OR id IN (SELECT DISTINCT post_id FROM comments WHERE deleted = 0) OR id IN (SELECT post_id FROM post_shares))`;
         params.push(...BOTS);
       }
       if (isHuddleBoard) {
@@ -2932,6 +2936,25 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         `SELECT t.tag, COUNT(*) AS n FROM post_tags t JOIN posts p ON p.id = t.post_id WHERE t.tag >= ? AND t.tag < ? AND p.deleted = 0 GROUP BY t.tag ORDER BY n DESC LIMIT 8`
       ).bind(q, q + "\uffff").all();
       return json({ tags: results });
+    } catch (err) {
+      return serverError(err);
+    }
+  }
+
+  // ── /share ── POST {post_id, via: huddle|copy|more}: a signed-in bird shared a public post. Counts once per bird per
+  // post (posts.share_count, shown beside Share) and the first share bumps last_activity so the post shows in Flock.
+  if (url.pathname === "/share" && request.method === "POST") {
+    if (!authUser?.username) return signInRequired();
+    try {
+      const id = String(body.post_id || "").slice(0, 80);
+      const via = ["huddle", "copy", "more"].includes(body.via) ? body.via : "more";
+      const post = await env.DB.prepare(`SELECT id, share_count FROM posts WHERE id = ? AND ${LIVE_POSTS}`).bind(id).first();
+      if (!post) return json({ error: "Not found" }, 404);
+      const r = await env.DB.prepare(`INSERT OR IGNORE INTO post_shares (post_id, username, via, created_at) VALUES (?, ?, ?, ?)`)
+        .bind(id, authUser.username.toLowerCase(), via, now).run();
+      if (!r.meta?.changes) return json({ counted: false, share_count: post.share_count || 0 });
+      await env.DB.prepare(`UPDATE posts SET share_count = share_count + 1, last_activity = ? WHERE id = ?`).bind(now, id).run();
+      return json({ counted: true, share_count: (post.share_count || 0) + 1 });
     } catch (err) {
       return serverError(err);
     }
