@@ -91,7 +91,9 @@ body.focusing .pin.big .lb{display:none}
 .ev b{position:absolute;inset:0;z-index:1;display:flex;align-items:center;justify-content:center;border-radius:999px;background:var(--c);border:2px solid #0a0a0a;box-shadow:0 0 0 1.5px var(--c),0 0 16px var(--c);font-size:0}
 .ev b::after{content:attr(data-n);font-size:11.5px;font-weight:900;color:#0a0a0a;line-height:1}
 /* radar blip: a ring the same size as the circle, centred on it, growing outward */
-.ev::before{content:"";position:absolute;inset:0;border-radius:999px;border:2px solid var(--c);animation:evPulse 2.2s ease-out infinite}
+.ev::before{content:"";position:absolute;inset:0;border-radius:999px;border:2px solid var(--c);opacity:0}
+/* the radar blip only runs on the selected story (none in the overview) */
+.ev.big::before{animation:evPulse 2.2s ease-out infinite}
 @keyframes evPulse{0%{transform:scale(1);opacity:.9}100%{transform:scale(2.6);opacity:0}}
 .ev .lb{position:absolute;left:50%;top:-10px;transform:translate(-50%,-100%);white-space:nowrap;font-size:11px;font-weight:800;padding:4px 9px;border-radius:999px;background:#0b0c10f0;border:1.5px solid var(--c);color:var(--ink);display:none}
 .ev.big .lb{display:block}
