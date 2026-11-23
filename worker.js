@@ -3030,6 +3030,44 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     }
   }
 
+  // ── /huddle-search?q= ── keywords in your huddles: the huddle's title/opening message, or any chirp in it.
+  // Each result carries hit_comment = the FIRST chirp that says it (oldest), so opening the huddle can jump there.
+  // Only huddles you're in (admins with "see all huddles" on: all), like the Huddles list.
+  if (url.pathname === "/huddle-search") {
+    if (!authUser?.username) return signInRequired();
+    try {
+      const q = String(url.searchParams.get("q") || "").trim().slice(0, 100);
+      if (q.length < 2) return json({ posts: [] });
+      const me = authUser.username;
+      let hq = `SELECT rowid AS _rid, * FROM posts INDEXED BY idx_posts_huddles WHERE is_huddle = 1 AND deleted = 0 AND (archived = 0 OR archived IS NULL)`;
+      const hp = [];
+      if (!seeAllHuddles) {
+        hq += ` AND (LOWER(username) = LOWER(?) OR (huddle_members IS NOT NULL AND (LOWER(huddle_members) LIKE LOWER(?) OR LOWER(huddle_members) LIKE LOWER(?))))`;
+        hp.push(me, `%"${me}"%`, `%"${me}:%`);
+      }
+      const { results: huddles = [] } = await env.DB.prepare(hq + ` LIMIT 500`).bind(...hp).all();
+      if (!huddles.length) return json({ posts: [] });
+      const like = `%${q.replace(/[%_\\]/g, m => "\\" + m)}%`;
+      const ids = huddles.map(h => h.id), firstHit = new Map();
+      for (let i = 0; i < ids.length; i += 90) {
+        const chunk = ids.slice(i, i + 90);
+        // MIN(created_at) makes SQLite return the id of that oldest matching chirp per huddle
+        const { results = [] } = await env.DB.prepare(
+          `SELECT post_id, id, MIN(created_at) AS at FROM comments WHERE post_id IN (${chunk.map(() => "?").join(",")}) AND deleted = 0 AND content LIKE ? ESCAPE '\\' GROUP BY post_id`
+        ).bind(...chunk, like).all();
+        for (const r of results) firstHit.set(r.post_id, r.id);
+      }
+      const ql = q.toLowerCase();
+      const rows = huddles.filter(h => firstHit.has(h.id) || `${h.title || ""} ${h.content || ""}`.toLowerCase().includes(ql))
+        .map(h => ({ ...h, hit_comment: firstHit.get(h.id) || null }))
+        .sort((a, b) => String(b.last_activity || "").localeCompare(String(a.last_activity || "")));
+      await addHuddleInbox(env, rows, me);
+      return json({ posts: await publicRows(await addCommentCounts(env, rows.map(p => boolify(p, POST_BOOL_FIELDS)))) });
+    } catch (err) {
+      return serverError(err);
+    }
+  }
+
   // ── /saved-searches ── the signed-in bird's saved searches (up to 5). GET → {items}; POST {items:[{qs, def}]} replaces
   // them. qs keeps only the search bar's filter keys; at most one is the default (def).
   if (url.pathname === "/saved-searches") {
