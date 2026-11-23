@@ -3049,19 +3049,29 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       if (!huddles.length) return json({ posts: [] });
       const like = `%${q.replace(/[%_\\]/g, m => "\\" + m)}%`;
       const ids = huddles.map(h => h.id), firstHit = new Map();
+      const ql = q.toLowerCase();
+      // Only what people wrote counts: no system lines (joined/left...), no link or share data inside a chirp
+      const said = c => String(c || "").split("[ATTACH")[0];
       for (let i = 0; i < ids.length; i += 90) {
         const chunk = ids.slice(i, i + 90);
-        // MIN(created_at) makes SQLite return the id of that oldest matching chirp per huddle
         const { results = [] } = await env.DB.prepare(
-          `SELECT post_id, id, MIN(created_at) AS at FROM comments WHERE post_id IN (${chunk.map(() => "?").join(",")}) AND deleted = 0 AND content LIKE ? ESCAPE '\\' GROUP BY post_id`
+          `SELECT post_id, id, username, content, created_at AS at FROM comments WHERE post_id IN (${chunk.map(() => "?").join(",")}) AND deleted = 0 AND content LIKE ? ESCAPE '\\' AND (username IS NULL OR username != '__system__') ORDER BY created_at ASC LIMIT 3000`
         ).bind(...chunk, like).all();
-        for (const r of results) firstHit.set(r.post_id, r.id);
+        for (const r of results) if (!firstHit.has(r.post_id) && said(r.content).toLowerCase().includes(ql)) firstHit.set(r.post_id, r);
       }
-      const ql = q.toLowerCase();
       const rows = huddles.filter(h => firstHit.has(h.id) || `${h.title || ""} ${h.content || ""}`.toLowerCase().includes(ql))
-        .map(h => ({ ...h, hit_comment: firstHit.get(h.id) || null }))
+        .map(h => ({ ...h, hit_comment: firstHit.get(h.id)?.id || null }))
         .sort((a, b) => String(b.last_activity || "").localeCompare(String(a.last_activity || "")));
       await addHuddleInbox(env, rows, me);
+      // The card's preview shows the chirp that matched (not the latest one), cut so the keyword is in view
+      for (const h of rows) {
+        const r = firstHit.get(h.id);
+        if (!r || !h.hx) continue;
+        let c = String(r.content || "").split("[ATTACH")[0].replace(/\s+/g, " ").trim();
+        const at = c.toLowerCase().indexOf(ql);
+        if (at > 40) c = "…" + c.slice(at - 30);
+        h.hx.last = { u: r.username, c: c.slice(0, 400), t: r.at };
+      }
       return json({ posts: await publicRows(await addCommentCounts(env, rows.map(p => boolify(p, POST_BOOL_FIELDS)))) });
     } catch (err) {
       return serverError(err);
