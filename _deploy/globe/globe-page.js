@@ -319,6 +319,8 @@
     world.renderer().domElement.addEventListener('pointerdown', () => { c.autoRotate = false; });
     c.addEventListener('change', () => { if (!olQ) olQ = requestAnimationFrame(() => { olQ = 0; overviewLabels(); }); });
     // double-tap: zoom in on that spot; when already close, zoom back out to the whole globe
+    // no text-selection highlight from double-taps (Safari selects the whole page otherwise)
+    document.addEventListener('dblclick', ev => { ev.preventDefault(); try { getSelection().removeAllRanges(); } catch (er) {} });
     (function doubleTap() {
       const cv = world.renderer().domElement; let down = null, last = null;
       cv.addEventListener('pointerdown', e => { down = { x: e.clientX, y: e.clientY, t: Date.now() }; });
@@ -327,6 +329,7 @@
         const now = Date.now();
         if (last && now - last.t < 330 && Math.hypot(e.clientX - last.x, e.clientY - last.y) < 40) {
           last = null; pinTapAt = now;
+          try { getSelection().removeAllRanges(); } catch (er) {}
           const pov = world.pointOfView(), r = cv.getBoundingClientRect();
           if (pov.altitude < 0.75) { world.pointOfView({ altitude: HOME_ALT() }, 700); return; }
           const g = world.toGlobeCoords(e.clientX - r.left, e.clientY - r.top);

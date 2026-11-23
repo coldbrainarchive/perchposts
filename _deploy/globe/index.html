@@ -13,7 +13,8 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family
 body{background:radial-gradient(ellipse at 50% 40%,#0d1020 0%,#05060a 70%)}
 #stars{position:fixed;inset:0;pointer-events:none}
 #globe{position:fixed;inset:0;z-index:0;touch-action:none}
-html,body{touch-action:manipulation}
+html,body{touch-action:manipulation;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+::selection{background:transparent}
 .top{position:fixed;top:0;left:0;right:0;z-index:5;display:flex;align-items:center;gap:10px;padding:calc(env(safe-area-inset-top) + 10px) 16px 10px;background:linear-gradient(#05060ae6,#05060a00)}
 .back{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:999px;border:1px solid var(--line);background:#15171dcc;color:var(--ink);text-decoration:none;flex-shrink:0}
 .back svg{width:18px;height:18px}
