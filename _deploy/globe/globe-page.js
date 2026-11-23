@@ -18,7 +18,7 @@
     draw(); addEventListener('resize', draw);
   })();
 
-  let stories = [], pins = [], events = [], marks = [], sel = -1, world = null, pinTapAt = 0, foc = null, progScroll = 0;
+  let stories = [], pins = [], events = [], marks = [], sel = -1, world = null, pinTapAt = 0, foc = null, progScroll = 0, curList = [], rsAt = -1;
   const placeShort = o => o ? (o.how === 'first' ? `First: ${o.city || o.country}` : (o.city || o.country)) : '';
 
   // Outlets in the same city fan out in a small ring so every pin can be tapped
@@ -90,6 +90,7 @@
     // distance from the real place (pins are fanned out slightly, so use the outlet's own city)
     for (const p of sp) p.km = near ? kmBetween(+o.lat, +o.lng, p.lat0, p.lng0) : null;
     sp.sort(near && ord === 'near' ? (a, b) => a.km - b.km : (a, b) => String(a.t).localeCompare(String(b.t)));
+    curList = sp;
     if (!keep) requestAnimationFrame(() => toggleUI(near, false));
     ol.style.setProperty('--c', COLORS[sel % COLORS.length]);
     ol.classList.add('on'); if (!keep) ol.classList.remove('open');
@@ -137,24 +138,50 @@
     if (card) { progScroll = Date.now(); card.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' }); }
   }
 
-  function openPin(p) {
-    const st = stories[p.s];
-    if (sel !== p.s) pick(p.s, false);
-    world && world.controls && (world.controls().autoRotate = false);
-    $('sh').innerHTML = `<div class="grab"><i></i></div>${p.image ? `<img class="hero" src="${esc(p.image)}" alt="" referrerpolicy="no-referrer">` : ''}
-      <div class="bd"><div class="src">${flag(p.country)} ${esc(p.outlet)} · ${esc(p.city)} · ${ago(p.t)}</div>
-      <h2>${esc(p.title)}</h2>
-      <div class="story">Part of #${st.rank}${st.origin && st.origin.how !== 'first' ? ` · happened in ${esc(st.origin.name)}` : ''} · covered by ${st.outlets} outlets in ${st.countries} countries</div>
-      <div class="row"><a class="btn pri" href="/post/${encodeURIComponent(p.id)}">Open post</a><a class="btn" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">Read at source</a></div></div>`;
-    const hi = $('sh').querySelector('img.hero'); hi && hi.addEventListener('error', () => hi.remove());
-    $('sheet').classList.add('in');
+  // The story scroller: every outlet's version of the selected story, one per slide, swiped up/down like the post
+  // scroller. The globe above flies to each outlet as you go. Order = the outlet list's order (Nearest / First).
+  function slideHtml(p, k, n) {
+    return `<section class="rsl" data-k="${k}">${p.image ? `<img class="hero" src="${esc(p.image)}" alt="" referrerpolicy="no-referrer">` : ''}
+      <div class="bd"><div class="src">${flag(p.country)} ${esc(p.outlet)} · ${esc(p.city)}${p.km != null ? ` · ${p.km < 60 ? 'right there' : Math.round(p.km / (p.km >= 1000 ? 100 : 10)) * (p.km >= 1000 ? 100 : 10) + ' km'}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''} · ${ago(p.t)}</div>
+      <h2>${esc(p.title)}</h2>${p.desc ? `<p class="ds">${esc(p.desc)}</p>` : ''}
+      <div class="row"><a class="btn pri" href="/post/${encodeURIComponent(p.id)}">Open post</a><a class="btn" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">Read at source</a></div>
+      ${k < n - 1 ? '<div class="rs-hint">Swipe up for the next outlet</div>' : '<div class="rs-hint">That’s every outlet on this story</div>'}</div></section>`;
   }
-  function closeSheet() { $('sheet').classList.remove('in'); }
+  function rsShow(k, fly) {
+    const list = curList; if (!list[k]) return;
+    rsAt = k;
+    const p = list[k], st = stories[p.s];
+    $('rsN').textContent = `${k + 1} / ${list.length}`;
+    foc = p;
+    for (const q of pins) q.el && q.el.classList.toggle('focus', q === p);
+    document.querySelectorAll('.or').forEach(b => b.classList.toggle('on', b._p === p));
+    // keep the outlet's pin in the strip of globe still visible above the scroller
+    if (fly && world) { world.controls().autoRotate = false; world.pointOfView({ lat: p.lat - 24, lng: p.lng, altitude: 2.1 }, 800); }
+  }
+  function openPin(p) {
+    if (sel !== p.s) pick(p.s, false);
+    if (!curList.includes(p)) outlets(true);
+    world && world.controls && (world.controls().autoRotate = false);
+    const list = curList, k = Math.max(0, list.indexOf(p)), st = stories[p.s];
+    $('sh').style.setProperty('--c', COLORS[p.s % COLORS.length]);
+    $('sh').innerHTML = `<div class="grab"><i></i></div>
+      <div class="rs-hd"><span class="rk">${st.rank}</span><span class="rs-tt">${esc(st.title)}</span><b id="rsN"></b></div>
+      <div class="rs" id="rs">${list.map((q, i) => slideHtml(q, i, list.length)).join('')}</div>`;
+    $('sh').querySelectorAll('img.hero').forEach(im => im.addEventListener('error', () => im.remove()));
+    document.body.classList.add('reeling');
+    $('sheet').classList.add('in');
+    const rs = $('rs');
+    requestAnimationFrame(() => { rs.scrollTop = k * rs.clientHeight; rsShow(k, true); });
+    let t = 0;
+    rs.addEventListener('scroll', () => { clearTimeout(t); t = setTimeout(() => { const i = Math.round(rs.scrollTop / rs.clientHeight); if (i !== rsAt) rsShow(i, true); }, 90); }, { passive: true });
+  }
+  function closeSheet() { $('sheet').classList.remove('in'); document.body.classList.remove('reeling'); }
   // tap the handle, drag it down, or tap the globe to close
   (function sheetGestures() {
     const s = $('sheet'); let y0 = null;
     s.addEventListener('click', e => { if (e.target.closest('.grab')) closeSheet(); });
-    s.addEventListener('touchstart', e => { y0 = e.touches[0].clientY; }, { passive: true });
+    // drag down from the top bar (not the slides, which scroll) to close
+    s.addEventListener('touchstart', e => { y0 = e.target.closest('.grab,.rs-hd') ? e.touches[0].clientY : null; }, { passive: true });
     s.addEventListener('touchmove', e => { if (y0 == null) return; const d = e.touches[0].clientY - y0; if (d > 0) s.firstElementChild.style.transform = `translateY(${d}px)`; }, { passive: true });
     s.addEventListener('touchend', e => { if (y0 == null) return; const d = (e.changedTouches[0].clientY - y0); s.firstElementChild.style.transform = ''; if (d > 70) closeSheet(); y0 = null; });
   })();

@@ -190,7 +190,7 @@ export async function buildTrending(env, { dry = false, threshold = 0.8 } = {}) 
     for (const x of [rep, ...g.items]) {
       if (seen.has(x.outlet)) continue;
       seen.add(x.outlet);
-      posts.push({ id: x.id, title: x.title, url: x.url, image: x.image, outlet: x.outlet, country: x.country, city: x.city, lat: x.lat, lng: x.lng, t: x.t });
+      posts.push({ id: x.id, title: x.title, desc: x.desc || null, url: x.url, image: x.image, outlet: x.outlet, country: x.country, city: x.city, lat: x.lat, lng: x.lng, t: x.t });
       if (posts.length >= 30) break;
     }
     return { rank: i + 1, title: rep.title, image: rep.image || (g.items.find(x => x.image) || {}).image || null,
