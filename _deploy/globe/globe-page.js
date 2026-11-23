@@ -156,7 +156,8 @@
   })();
 
   (function olToggle() {
-    $('olT').addEventListener('click', () => { $('ol').classList.toggle('open'); });
+    // the Nearest / First toggle only shows while the list is open
+    $('olT').addEventListener('click', () => { const o = $('ol').classList.toggle('open'); if (o) { const st = stories[sel], near = st && st.origin && st.origin.how !== 'first'; requestAnimationFrame(() => toggleUI(near, false)); } });
     $('olS').querySelectorAll('.sort-toggle-btn').forEach(b => b.addEventListener('click', () => {
       if (ord === b.dataset.o) return;
       ord = b.dataset.o; try { localStorage.setItem('pp_globe_order', ord); } catch (e) {}

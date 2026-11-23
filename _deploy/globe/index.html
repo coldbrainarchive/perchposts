@@ -32,6 +32,7 @@ body{background:radial-gradient(ellipse at 50% 40%,#0d1020 0%,#05060a 70%)}
 .sort-toggle-btn.active{color:#fff}
 .tg-thumb{position:absolute;top:-1px;bottom:-1px;left:0;right:100%;border-radius:999px;background:#c084fc;z-index:0;pointer-events:none;transition:left .25s cubic-bezier(.3,.7,.3,1),right .25s cubic-bezier(.3,.7,.3,1)}
 .sort-toggle.no-anim .tg-thumb{transition:none}
+.ol:not(.open) #olS{display:none!important}
 .ol-t{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:999px;border:1px solid var(--c);background:#15171de6;color:var(--ink);font:inherit;font-size:12px;font-weight:800;letter-spacing:.02em;cursor:pointer}
 .ol-t i{font-style:normal;color:var(--c);transition:transform .2s;display:inline-block}
 .ol.open .ol-t i{transform:rotate(180deg)}
@@ -68,7 +69,8 @@ body{background:radial-gradient(ellipse at 50% 40%,#0d1020 0%,#05060a 70%)}
 .pin .pv .pt span{font-size:10.5px;font-weight:700;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pin.focus .pv{display:flex;animation:pvIn .2s ease-out}
 @keyframes pvIn{from{opacity:0;transform:translateX(-50%) translateY(6px)}to{opacity:1;transform:translateX(-50%)}}
-.pin.focus{z-index:50!important}
+.pin.focus{z-index:2147483000!important}
+body.focusing .ev .lb{display:none!important}
 .pin.focus i{width:18px;height:18px}
 body.focusing .pin.big .lb{display:none}
 .sc .mt .pl{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
