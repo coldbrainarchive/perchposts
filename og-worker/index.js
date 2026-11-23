@@ -14,7 +14,7 @@ const BOARDS = {
 };
 const boardIcon = (key, color) => ICONS[key] ? "data:image/svg+xml;base64," + btoa(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${ICONS[key]}</svg>`) : null;
 const SHORT = { "United States": "USA", "United Kingdom": "UK", "United Arab Emirates": "UAE" };
-const IMG_VER = "24"; // bump to redraw every cached card
+const IMG_VER = "25"; // bump to redraw every cached card
 const MEDIA_RE = /^https:\/\/daboysforumip\.coldbrainarchive\.workers\.dev\/media\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 function parse(content) {
@@ -34,7 +34,7 @@ const clip = (s, n) => { s = (s || "").replace(/\s+/g, " ").trim(); return s.len
 async function getPost(env, id) {
   if (!/^[A-Za-z0-9-]{1,64}$/.test(id)) return null;
   const p = await env.DB.prepare(
-    "SELECT id, title, content, board, country, utag, is_huddle, deleted, archived FROM posts WHERE id = ?"
+    "SELECT id, title, content, board, country, utag, board_auto, is_huddle, deleted, archived FROM posts WHERE id = ?"
   ).bind(id).first();
   if (!p || p.deleted || p.archived || p.is_huddle) return null;
   let { text, link, media } = parse(p.content);
@@ -54,7 +54,7 @@ async function getPost(env, id) {
       if (still && /^https:\/\//.test(still)) { image = still; video = a.type === "video"; break; }
     }
   }
-  return { id: p.id, title, description, site, image, video, ref: link?.url ? new URL(link.url).origin + "/" : "", board: p.board, country: p.country, utag: p.utag || null };
+  return { id: p.id, title, description, site, image, video, ref: link?.url ? new URL(link.url).origin + "/" : "", board: p.board_auto ? null : p.board, country: p.country, utag: p.utag || null };
 }
 
 // Fetch the post's photo ourselves so a slow or blocked image site can't break the card; only JPEG/PNG are drawn.

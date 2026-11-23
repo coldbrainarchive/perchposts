@@ -1433,6 +1433,13 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         if (r.error) return json({ error: r.error }, 400);
         utag = r.tag;
       }
+      // Every bird post needs a tag: a perch tag, or a flock tag. With only a flock tag (board_auto) the post is filed
+      // under Random behind the scenes, and pages hide that Random pill (the author didn't pick it).
+      const boardAuto = !isBot && !isHuddle && !caged && body.board_auto === true;
+      if (boardAuto) {
+        if (!utag) return json({ error: "Add a tag" }, 400);
+        body.board = "Random"; body.category = "Random"; body.community_id = "random";
+      }
       // Bots can't post an article twice
       let botClaim = null;
       if (isBot) {
@@ -1446,8 +1453,8 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       await env.DB.prepare(`
         INSERT INTO posts (id, title, content, username, ip_hash, browser_id, last_activity,
           is_mod, is_admin, moderator, mod_user_id, continent, country, board, community_id,
-          is_huddle, huddle_members, created_at, utag)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          is_huddle, huddle_members, created_at, utag, board_auto)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).bind(
         id,
         body.title || null,
@@ -1467,7 +1474,8 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         isHuddle ? 1 : 0,
         huddleMembers,
         now,
-        utag
+        utag,
+        boardAuto ? 1 : 0
       ).run().catch(async err => {
         // The post didn't save, so the article can be tried again next run
         for (const key of botClaim?.claimed || []) {
