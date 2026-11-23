@@ -65,6 +65,19 @@
     $('ol').classList.remove('open');
     if (fly && world) { world.controls().autoRotate = false; world.pointOfView({ lat: p.lat - 4, lng: p.lng, altitude: 1.5 }, 1000); }
   }
+  let ord = 'near';
+  try { ord = localStorage.getItem('pp_globe_order') === 'first' ? 'first' : 'near'; } catch (e) {}
+  // slide the toggle's thumb under the active button (like the toggles on the rest of the site)
+  function toggleUI(near, anim) {
+    const el = $('olS'), th = el.querySelector('.tg-thumb'), bs = [...el.querySelectorAll('.sort-toggle-btn')];
+    el.style.display = near ? '' : 'none';
+    bs.forEach(b => b.classList.toggle('active', b.dataset.o === ord));
+    const a = bs.find(b => b.dataset.o === ord); if (!a || !near) return;
+    el.classList.toggle('no-anim', !anim);
+    const er = el.getBoundingClientRect(), ar = a.getBoundingClientRect(), inner = er.width - el.clientLeft * 2;
+    th.style.left = (a === bs[0] ? -1 : ar.left - er.left - el.clientLeft) + 'px';
+    th.style.right = (a === bs[bs.length - 1] ? -1 : inner - (ar.right - er.left - el.clientLeft)) + 'px';
+  }
   const kmBetween = (a, b, c, d) => { const R = Math.PI / 180, x = Math.sin((c - a) * R / 2) ** 2 + Math.cos(a * R) * Math.cos(c * R) * Math.sin((d - b) * R / 2) ** 2; return 12742 * Math.asin(Math.sqrt(x)); };
   // The selected story's outlets, nearest to where it happened first (earliest first when it has no place),
   // in a list that opens above the story cards. "First" marks whoever reported it earliest.
@@ -76,7 +89,8 @@
     const firstP = sp.reduce((a, p) => (String(p.t) < String(a.t) ? p : a), sp[0]);
     // distance from the real place (pins are fanned out slightly, so use the outlet's own city)
     for (const p of sp) p.km = near ? kmBetween(+o.lat, +o.lng, p.lat0, p.lng0) : null;
-    sp.sort(near ? (a, b) => a.km - b.km : (a, b) => String(a.t).localeCompare(String(b.t)));
+    sp.sort(near && ord === 'near' ? (a, b) => a.km - b.km : (a, b) => String(a.t).localeCompare(String(b.t)));
+    requestAnimationFrame(() => toggleUI(near, false));
     ol.style.setProperty('--c', COLORS[sel % COLORS.length]);
     ol.classList.add('on'); ol.classList.remove('open');
     $('olT').innerHTML = `${sp.length} outlet${sp.length === 1 ? '' : 's'} reported this <i>▾</i>`;
@@ -143,6 +157,14 @@
 
   (function olToggle() {
     $('olT').addEventListener('click', () => { $('ol').classList.toggle('open'); });
+    $('olS').querySelectorAll('.sort-toggle-btn').forEach(b => b.addEventListener('click', () => {
+      if (ord === b.dataset.o) return;
+      ord = b.dataset.o; try { localStorage.setItem('pp_globe_order', ord); } catch (e) {}
+      const open = $('ol').classList.contains('open'), f = foc;
+      outlets(); toggleUI(true, true);
+      if (open) $('ol').classList.add('open');
+      if (f) document.querySelectorAll('.or').forEach(r => r.classList.toggle('on', r._p === f));
+    }));
   })();
   function strip() {
     $('strip').innerHTML = stories.map((s, i) => `<button type="button" class="sc" style="--c:${COLORS[i % COLORS.length]}">

@@ -25,6 +25,13 @@ body{background:radial-gradient(ellipse at 50% 40%,#0d1020 0%,#05060a 70%)}
 .strip-in::-webkit-scrollbar{display:none}
 .ol{display:none;margin:0 16px 8px;flex-direction:column;align-items:flex-start;gap:6px}
 .ol.on{display:flex}
+.ol-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+/* same toggle as the rest of Perch Posts (sort-toggle + sliding tg-thumb) */
+.sort-toggle{position:relative;isolation:isolate;display:flex;border-radius:999px;border:1px solid #c084fc;flex-shrink:0;background:#15171d}
+.sort-toggle-btn{position:relative;z-index:1;padding:0 12px;height:28px;border:none;background:transparent;color:#c084fc;font:inherit;font-size:12px;font-weight:700;cursor:pointer;transition:color .15s}
+.sort-toggle-btn.active{color:#fff}
+.tg-thumb{position:absolute;top:-1px;bottom:-1px;left:0;right:100%;border-radius:999px;background:#c084fc;z-index:0;pointer-events:none;transition:left .25s cubic-bezier(.3,.7,.3,1),right .25s cubic-bezier(.3,.7,.3,1)}
+.sort-toggle.no-anim .tg-thumb{transition:none}
 .ol-t{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:999px;border:1px solid var(--c);background:#15171de6;color:var(--ink);font:inherit;font-size:12px;font-weight:800;letter-spacing:.02em;cursor:pointer}
 .ol-t i{font-style:normal;color:var(--c);transition:transform .2s;display:inline-block}
 .ol.open .ol-t i{transform:rotate(180deg)}
@@ -100,7 +107,7 @@ body.focusing .pin.big .lb{display:none}
   <a class="home" href="/">perchposts</a>
 </div>
 <div class="empty" id="empty">Loading the world’s top stories…</div>
-<div class="strip"><div class="ol" id="ol"><button type="button" class="ol-t" id="olT"></button><div class="ol-l" id="olL"></div></div><div class="strip-in" id="strip"></div></div>
+<div class="strip"><div class="ol" id="ol"><div class="ol-h"><button type="button" class="ol-t" id="olT"></button><div class="sort-toggle" id="olS" role="group" aria-label="Order"><span class="tg-thumb"></span><button type="button" class="sort-toggle-btn" data-o="near">Nearest</button><button type="button" class="sort-toggle-btn" data-o="first">First</button></div></div><div class="ol-l" id="olL"></div></div><div class="strip-in" id="strip"></div></div>
 <div class="sheet" id="sheet"><div class="sh" id="sh"></div></div>
 <script src="/globe/globe.gl-2.46.2.min.js"></script>
 <script src="/globe/globe-page.js"></script>
