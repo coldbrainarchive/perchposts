@@ -65,18 +65,26 @@
     $('ol').classList.remove('open');
     if (fly && world) { world.controls().autoRotate = false; world.pointOfView({ lat: p.lat - 4, lng: p.lng, altitude: 1.5 }, 1000); }
   }
-  // The selected story's outlets, earliest first, in a list that opens above the story cards
+  const kmBetween = (a, b, c, d) => { const R = Math.PI / 180, x = Math.sin((c - a) * R / 2) ** 2 + Math.cos(a * R) * Math.cos(c * R) * Math.sin((d - b) * R / 2) ** 2; return 12742 * Math.asin(Math.sqrt(x)); };
+  // The selected story's outlets, nearest to where it happened first (earliest first when it has no place),
+  // in a list that opens above the story cards. "First" marks whoever reported it earliest.
   function outlets() {
     const ol = $('ol');
     if (sel < 0) { ol.classList.remove('on', 'open'); return; }
-    const st = stories[sel], sp = pins.filter(p => p.s === sel).sort((a, b) => String(a.t).localeCompare(String(b.t)));
+    const st = stories[sel], o = st.origin, near = o && o.how !== 'first' && isFinite(o.lat);
+    const sp = pins.filter(p => p.s === sel);
+    const firstP = sp.reduce((a, p) => (String(p.t) < String(a.t) ? p : a), sp[0]);
+    // distance from the real place (pins are fanned out slightly, so use the outlet's own city)
+    for (const p of sp) p.km = near ? kmBetween(+o.lat, +o.lng, p.lat0, p.lng0) : null;
+    sp.sort(near ? (a, b) => a.km - b.km : (a, b) => String(a.t).localeCompare(String(b.t)));
     ol.style.setProperty('--c', COLORS[sel % COLORS.length]);
     ol.classList.add('on'); ol.classList.remove('open');
     $('olT').innerHTML = `${sp.length} outlet${sp.length === 1 ? '' : 's'} reported this <i>▾</i>`;
     $('olL').innerHTML = '';
     sp.forEach((p, k) => {
       const b = document.createElement('button'); b.type = 'button'; b.className = 'or'; b._p = p;
-      b.innerHTML = `<span class="fl">${flag(p.country)}</span><span class="nm"><b>${esc(p.outlet)}</b><span>${esc(p.city)} · ${ago(p.t)}</span></span>${k === 0 ? '<span class="fs">First</span>' : ''}`;
+      const dist = p.km == null ? '' : p.km < 60 ? ' · right there' : ` · ${Math.round(p.km / 10) * 10 >= 1000 ? Math.round(p.km / 100) * 100 : Math.round(p.km / 10) * 10}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (p.km < 60 ? '' : ' km');
+      b.innerHTML = `<span class="fl">${flag(p.country)}</span><span class="nm"><b>${esc(p.outlet)}</b><span>${esc(p.city)}${dist} · ${ago(p.t)}</span></span>${p === firstP ? '<span class="fs">First</span>' : ''}`;
       b.addEventListener('click', () => focusPin(p, true));
       $('olL').appendChild(b);
     });
@@ -184,7 +192,7 @@
 
   fetch(API + '/globe').then(r => r.json()).then(d => {
     stories = (d.stories || []);
-    pins = stories.flatMap((s, i) => s.posts.map(p => ({ ...p, s: i })));
+    pins = stories.flatMap((s, i) => s.posts.map(p => ({ ...p, s: i, lat0: p.lat, lng0: p.lng })));
     spread(pins);
     events = stories.map((s, i) => s.origin && isFinite(s.origin.lat) ? { kind: 'ev', s: i, lat: +s.origin.lat, lng: +s.origin.lng, name: s.origin.how === 'first' ? `First reported in ${s.origin.city}` : s.origin.name, country: s.origin.country } : null).filter(Boolean);
     spread(events);
