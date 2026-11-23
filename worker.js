@@ -2941,6 +2941,41 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     }
   }
 
+  // ── /saved-searches ── the signed-in bird's saved searches (up to 5). GET → {items}; POST {items:[{qs, def}]} replaces
+  // them. qs keeps only the search bar's filter keys; at most one is the default (def).
+  if (url.pathname === "/saved-searches") {
+    if (!authUser?.sub) return signInRequired();
+    try {
+      const KEYS = ["flock", "board", "continent", "country", "utag", "user", "bot", "q"];
+      const tidy = raw => {
+        const src = new URLSearchParams(String(raw || "").slice(0, 600)), out = new URLSearchParams();
+        for (const k of KEYS) { const v = String(src.get(k) || "").trim().slice(0, k === "q" ? 120 : 80); if (v) out.set(k, v); }
+        return out.toString();
+      };
+      if (request.method === "POST") {
+        const seen = new Set(), items = [];
+        let hasDef = false;
+        for (const it of Array.isArray(body.items) ? body.items : []) {
+          const qs = tidy(it && it.qs);
+          if (!qs || seen.has(qs)) continue;
+          seen.add(qs);
+          const def = !!(it.def && !hasDef);
+          if (def) hasDef = true;
+          items.push({ qs, def });
+          if (items.length === 5) break;
+        }
+        await env.DB.prepare(`UPDATE mod_users SET saved_searches = ? WHERE id = ?`).bind(JSON.stringify(items), authUser.sub).run();
+        return json({ items });
+      }
+      const row = await env.DB.prepare(`SELECT saved_searches FROM mod_users WHERE id = ?`).bind(authUser.sub).first();
+      let items = [];
+      try { items = JSON.parse(row?.saved_searches || "[]"); } catch (e) {}
+      return json({ items: Array.isArray(items) ? items : [] });
+    } catch (err) {
+      return serverError(err);
+    }
+  }
+
   // ── /share ── POST {post_id, via: huddle|copy|more}: a signed-in bird shared a public post. Counts once per bird per
   // post (posts.share_count, shown beside Share) and the first share bumps last_activity so the post shows in Flock.
   if (url.pathname === "/share" && request.method === "POST") {
