@@ -2937,6 +2937,41 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     }
   }
 
+  // ── /post-tags ── POST {post_id, board:{slug,name}|null, continent, country, tag}: admins change all of a post's tags
+  // at once from the post page (user's request, 2026-11-23). Birds' posts and news bot posts; not huddles or The Cage.
+  // Every post keeps at least one tag; news posts always keep a perch tag and never get a flock tag.
+  if (url.pathname === "/post-tags" && request.method === "POST") {
+    if (!isAdmin) return json({ error: "Only admins can change a post's tags" }, 403);
+    try {
+      const post = await env.DB.prepare(`SELECT id, username, browser_id, is_huddle, deleted, created_at, board, community_id, utag FROM posts WHERE id = ?`).bind(String(body.post_id || "")).first();
+      if (!post || post.deleted || post.is_huddle) return json({ error: "Not found" }, 404);
+      const isCage = v => ["cage", "the cage"].includes(String(v || "").trim().toLowerCase());
+      if (isCage(post.community_id) || isCage(post.board)) return json({ error: "Cage posts keep their Cage tag" }, 400);
+      const bot = String(post.browser_id || "").startsWith("bot-") || /Bot$/.test(post.username || "");
+      const b = body.board && typeof body.board === "object" ? body.board : null;
+      const slug = b ? String(b.slug || "").trim().toLowerCase() : "", name = b ? String(b.name || "").trim() : "";
+      if (b && (!/^[a-z0-9-]{1,40}$/.test(slug) || !name || name.length > 40)) return json({ error: "Unknown perch tag" }, 400);
+      if (b && (isCage(slug) || isCage(name) || ["feedback", "huddles"].includes(slug))) return json({ error: "That perch tag can't be picked here" }, 400);
+      const clean = v => { const s = String(v || "").trim(); return s && s.length <= 60 ? s : null; };
+      const country = clean(body.country), continent = clean(body.continent);
+      const r = await cleanTag(body.tag);
+      if (r.error) return json({ error: r.error }, 400);
+      const tag = r.tag;
+      if (bot && tag) return json({ error: "News posts can't have a flock tag" }, 400);
+      if (bot && !b) return json({ error: "News posts need a perch tag" }, 400);
+      if (!b && !tag) return json({ error: "A post needs at least one tag" }, 400);
+      // Bot posts store the slug in board (as the bots send it); birds' posts store the name + slug.
+      // With only a flock tag the post is filed under Random behind the scenes (board_auto), like New Post.
+      const nb = b ? (bot ? slug : name) : "Random", nc = b ? (bot ? post.community_id : slug) : "random", auto = b ? 0 : 1;
+      await env.DB.prepare(`UPDATE posts SET board = ?, community_id = ?, board_auto = ?, continent = ?, country = ? WHERE id = ?`)
+        .bind(nb, nc, auto, continent, country, post.id).run();
+      if ((post.utag || null) !== tag) await setPostTag(post.id, tag, post.created_at);
+      return json({ success: true, board: nb, community_id: nc, board_auto: auto, continent, country, utag: tag });
+    } catch (err) {
+      return serverError(err);
+    }
+  }
+
   // ── /post-tag ── POST {post_id, tag}: admins add/change/remove a post's flock tag (tag "" removes).
   if (url.pathname === "/post-tag" && request.method === "POST") {
     if (!authUser?.username) return signInRequired();
