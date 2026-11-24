@@ -213,7 +213,7 @@ export async function buildTrending(env, { dry = false, threshold = 0.8, merge =
       if (seen.has(x.outlet)) continue;
       seen.add(x.outlet);
       posts.push({ id: x.id, title: x.title, desc: x.desc || null, url: x.url, image: x.image, outlet: x.outlet, country: x.country, city: x.city, lat: x.lat, lng: x.lng, t: x.t });
-      if (posts.length >= 30) break;
+      if (posts.length >= 80) break; // every outlet (was 30, so a 37-outlet story listed only 30)
     }
     return { rank: i + 1, title: rep.title, image: rep.image || (g.items.find(x => x.image) || {}).image || null,
       outlets: g.outlets.size, countries: g.countries.size, activity: g.eng, origin: places[i], posts };

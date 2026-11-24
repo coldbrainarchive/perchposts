@@ -54,7 +54,7 @@
     // the preview pinned to the outlet: ‹ › step through the story's outlets (list order); tapping the preview drops
     // down the article preview (summary + Open post / Read at source)
     el.innerHTML = `<i></i><span class="lb">${esc(p.outlet)}</span><div class="pv"><div class="pv-row"><button type="button" class="pv-nav" data-d="-1" aria-label="Previous outlet">‹</button>${p.image ? `<img src="${esc(p.image)}" alt="" referrerpolicy="no-referrer">` : ''}<span class="pt"><b>${esc(p.title)}</b><span>${esc(flag(p.country))} ${esc(p.outlet)} · ${esc(p.city)} · ${ago(p.t)}</span></span><button type="button" class="pv-nav" data-d="1" aria-label="Next outlet">›</button></div>
-      <div class="pv-more"><a class="pv-site" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${esc(siteOf(p.url))}</a>${p.desc ? `<p>${esc(p.desc)}</p>` : ''}<div class="pv-acts"><button type="button" class="pa fl" aria-label="Flap">${IC.flap}<b></b></button><a class="pa ch" href="/post/${encodeURIComponent(p.id)}?chat=1&via=card" aria-label="Chirps">${IC.chat}<b></b></a><button type="button" class="pa sh" aria-label="Share">${IC.share}<b>Share</b></button></div></div></div>`;
+      <div class="pv-more"><a class="pv-site" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${esc(siteOf(p.url))}${IC.share}</a>${p.desc ? `<p>${esc(p.desc)}</p>` : ''}<div class="pv-acts"><button type="button" class="pa fl" aria-label="Flap">${IC.flap}<b></b></button><a class="pa ch" href="/post/${encodeURIComponent(p.id)}?chat=1&via=card" aria-label="Chirps">${IC.chat}<b></b></a><button type="button" class="pa shr" aria-label="Share">${IC.share}<b>Share</b></button></div></div></div>`;
     fillActs(p, el);
     const im = el.querySelector('.pv img'); im && im.addEventListener('error', () => im.remove());
     el.addEventListener('pointerdown', ev => { ev.stopPropagation(); });
@@ -64,7 +64,7 @@
       if (nav) { stepOutlet(p, +nav.dataset.d); return; }
       if (ev.target.closest('.pv-btns a,.pv-site,.pa.ch')) return;     // let the links open
       if (ev.target.closest('.pa.fl')) { flap(p); return; }
-      if (ev.target.closest('.pa.sh')) { share(p); return; }
+      if (ev.target.closest('.pa.shr')) { share(p); return; }
       if (foc === p) { pvOpen = el.querySelector('.pv').classList.toggle('exp'); return; }
       focusPin(p, false);
     });
@@ -84,7 +84,7 @@
   const hdr = () => tok() ? { Authorization: 'Bearer ' + tok() } : {};
   function fillActs(p, el) {
     el = el || p.el; const c = cnt.get(p.id); if (!el || !c) return;
-    const f = el.querySelector('.pa.fl'), ch = el.querySelector('.pa.ch'), sh = el.querySelector('.pa.sh');
+    const f = el.querySelector('.pa.fl'), ch = el.querySelector('.pa.ch'), sh = el.querySelector('.pa.shr');
     if (f) { f.querySelector('b').textContent = c.f; f.classList.toggle('on', !!c.m); }
     if (ch) ch.querySelector('b').textContent = c.c;
     if (sh) sh.querySelector('b').textContent = c.s ? 'Share ' + c.s : 'Share';
@@ -115,7 +115,7 @@
     const count = () => { if (!tok()) return; fetch(API + '/share', { method: 'POST', headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ post_id: p.id, via: 'more' }) })
       .then(r => r.json()).then(j => { if (j && j.counted) { const c = cnt.get(p.id); if (c) { c.s = j.share_count; fillActs(p); } } }).catch(() => {}); };
     if (navigator.share) navigator.share({ url: u, title: p.title }).then(count).catch(() => {});
-    else if (navigator.clipboard) navigator.clipboard.writeText(u).then(() => { count(); const b = p.el && p.el.querySelector('.pa.sh b'); if (b) { b.textContent = 'Copied'; setTimeout(() => fillActs(p), 1400); } }).catch(() => {});
+    else if (navigator.clipboard) navigator.clipboard.writeText(u).then(() => { count(); const b = p.el && p.el.querySelector('.pa.shr b'); if (b) { b.textContent = 'Copied'; setTimeout(() => fillActs(p), 1400); } }).catch(() => {});
   }
 
   // ‹ › on the preview: the previous / next outlet in the list order, flying the globe there
@@ -179,7 +179,7 @@
     if (!keep) requestAnimationFrame(() => toggleUI(near, false));
     ol.style.setProperty('--c', COLORS[sel % COLORS.length]);
     ol.classList.add('on'); if (!keep) ol.classList.remove('open');
-    $('olT').innerHTML = `See all ${sp.length} outlet${sp.length === 1 ? '' : 's'} <i>▴</i>`;
+    $('olT').innerHTML = `See all ${sp.length} outlet${sp.length === 1 ? '' : 's'}`;
     // the list lives inside the selected story's card (the card grows up from the bottom)
     const slot = document.querySelectorAll('.sc')[sel]; slot && slot.querySelector('.sc-slot').appendChild(ol);
     $('olL').innerHTML = '';
@@ -332,8 +332,8 @@
     // each card: the story (tap to select) + a slot where the outlet list opens when it's the selected story
     $('strip').innerHTML = stories.map((s, i) => `<div class="sc" style="--c:${COLORS[i % COLORS.length]}">
       <div class="sc-top" role="button" tabindex="0">${s.image ? `<img src="${esc(s.image)}" alt="" referrerpolicy="no-referrer">` : '<span class="ph"></span>'}
-      <span class="tx"><span class="hd">${esc(s.title)}</span><span class="mt"><span class="rk">${s.rank}</span><span class="pl">${s.origin ? `${flag(s.origin.country)} ${esc(s.origin.how === 'first' ? placeShort(s.origin) : s.origin.name)}` : ''}<span class="cnt">${s.origin ? ' · ' : ''}${s.outlets} outlets · ${s.countries} countries</span></span></span>
-      <span class="mt2">${s.outlets} outlets · ${s.countries} countries</span></span></div>
+      <span class="tx"><span class="hd">${esc(s.title)}</span><span class="mt"><span class="rk">${s.rank}</span><span class="pl">${s.origin ? `${flag(s.origin.country)} ${esc(s.origin.how === 'first' ? placeShort(s.origin) : s.origin.name)}` : ''}<span class="cnt">${s.origin ? ' · ' : ''}${(s.posts || []).length || s.outlets} outlet${((s.posts || []).length || s.outlets) === 1 ? '' : 's'} · ${s.countries} countries</span></span></span>
+      <span class="mt2">${(s.posts || []).length || s.outlets} outlet${((s.posts || []).length || s.outlets) === 1 ? '' : 's'} · ${s.countries} countries</span></span></div>
       <div class="sc-slot"></div></div>`).join('');
     document.querySelectorAll('.sc-top').forEach((b, i) => b.addEventListener('click', () => { closeSheet(); pick(i, true); }));
     document.querySelectorAll('.sc img').forEach(im => im.addEventListener('error', () => { const ph = document.createElement('span'); ph.className = 'ph'; im.replaceWith(ph); }));
