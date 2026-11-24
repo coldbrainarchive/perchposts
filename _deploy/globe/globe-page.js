@@ -54,7 +54,7 @@
     // the preview pinned to the outlet: ‹ › step through the story's outlets (list order); tapping the preview drops
     // down the article preview (summary + Open post / Read at source)
     el.innerHTML = `<i></i><span class="lb">${esc(p.outlet)}</span><div class="pv"><div class="pv-row"><button type="button" class="pv-nav" data-d="-1" aria-label="Previous outlet">‹</button>${p.image ? `<img src="${esc(p.image)}" alt="" referrerpolicy="no-referrer">` : ''}<span class="pt"><b>${esc(p.title)}</b><span>${esc(flag(p.country))} ${esc(p.outlet)} · ${esc(p.city)} · ${ago(p.t)}</span></span><button type="button" class="pv-nav" data-d="1" aria-label="Next outlet">›</button></div>
-      <div class="pv-more"><a class="pv-site" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${esc(siteOf(p.url))}${IC.share}</a>${p.desc ? `<p>${esc(p.desc)}</p>` : ''}<div class="pv-acts"><button type="button" class="pa fl" aria-label="Flap">${IC.flap}<b></b></button><a class="pa ch" href="/post/${encodeURIComponent(p.id)}?chat=1&via=card" aria-label="Chirps">${IC.chat}<b></b></a><button type="button" class="pa shr" aria-label="Share">${IC.share}<b>Share</b></button></div></div></div>`;
+      <div class="pv-more"><a class="pv-site" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${esc(siteOf(p.url))}</a>${p.desc ? `<p>${esc(p.desc)}</p>` : ''}<div class="pv-acts"><button type="button" class="pa fl" aria-label="Flap">${IC.flap}<b></b></button><a class="pa ch" href="/post/${encodeURIComponent(p.id)}?chat=1&via=card" aria-label="Chirps">${IC.chat}<b></b></a><button type="button" class="pa shr" aria-label="Share">${IC.share}<b>Share</b></button></div></div></div>`;
     fillActs(p, el);
     const im = el.querySelector('.pv img'); im && im.addEventListener('error', () => im.remove());
     el.addEventListener('pointerdown', ev => { ev.stopPropagation(); });
@@ -179,7 +179,7 @@
     if (!keep) requestAnimationFrame(() => toggleUI(near, false));
     ol.style.setProperty('--c', COLORS[sel % COLORS.length]);
     ol.classList.add('on'); if (!keep) ol.classList.remove('open');
-    $('olT').innerHTML = `See all ${sp.length} outlet${sp.length === 1 ? '' : 's'}`;
+    $('olT').innerHTML = `See all ${sp.length} outlet${sp.length === 1 ? '' : 's'} <i>▴</i>`;
     // the list lives inside the selected story's card (the card grows up from the bottom)
     const slot = document.querySelectorAll('.sc')[sel]; slot && slot.querySelector('.sc-slot').appendChild(ol);
     $('olL').innerHTML = '';

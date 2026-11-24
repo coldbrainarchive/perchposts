@@ -101,7 +101,6 @@ html,body{touch-action:manipulation;-webkit-user-select:none;user-select:none;-w
 .pv-btns .btn{flex:1;display:inline-flex;align-items:center;justify-content:center;height:34px;border-radius:999px;font-weight:800;font-size:11.5px;letter-spacing:.03em;text-transform:uppercase;text-decoration:none;border:1px solid var(--line);color:var(--ink);background:#1d2029;white-space:nowrap}
 .pv-btns .btn.pri{background:var(--accent);border-color:var(--accent);color:#14081d}
 /* the website as plain tappable text, like the site link in the post scroller */
-.pv-site svg{width:11px;height:11px;margin-left:4px;vertical-align:-1px}
 .pv-site{align-self:flex-start;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#c084fc;font-size:11.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;text-decoration:none}
 @keyframes pvIn{from{opacity:0;transform:translateX(-50%) translateY(6px)}to{opacity:1;transform:translateX(-50%)}}
 .pin.focus{z-index:2147483000!important}
@@ -165,6 +164,7 @@ body.reeling .pin.focus i{width:20px;height:20px;box-shadow:0 0 0 2px var(--c),0
 <canvas id="stars"></canvas>
 <div id="globe"></div>
 <div class="top">
+  <a class="back" href="/" aria-label="Back to Perch Posts"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a>
   <div class="ttl"><b>Trending around the world</b><span id="sub">Last 24 hours</span></div>
   <a class="home" href="/">perchposts</a>
 </div>
