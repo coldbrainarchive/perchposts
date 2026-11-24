@@ -92,9 +92,9 @@ async function storyPlace(env, items) {
   const strong = top.length && top[0][1] >= 2 && top[0][1] >= items.length * 0.35 && (!top[1] || top[0][1] >= top[1][1] * 1.3) ? top[0][0] : null;
   // 1) AI
   try {
-    const lines = items.slice(0, 8).map(x => `- ${x.title}${x.desc ? " — " + x.desc.slice(0, 140) : ""}`).join("\n");
+    const lines = items.slice(0, 14).map(x => `- ${x.title}${x.desc ? " — " + x.desc.slice(0, 160) : ""}`).join("\n");
     const out = await env.AI.run("@cf/meta/llama-3.3-70b-instruct-fp8-fast", { max_tokens: 90, temperature: 0, messages: [
-      { role: "system", content: "You find where a news event physically took place. Reply with JSON only, no other text: {\"city\": string or null, \"country\": string or null, \"lat\": number or null, \"lng\": number or null}. Use where the event happened, not where reporters or companies are based. If there is no single physical place (business news, online, worldwide policy, a person's statement), reply {\"city\": null, \"country\": null, \"lat\": null, \"lng\": null}." },
+      { role: "system", content: "You find where a news event physically took place. Reply with JSON only, no other text: {\"city\": string or null, \"country\": string or null, \"lat\": number or null, \"lng\": number or null}. Use where the event happened, not where the reporters are. For news about one company (its boss, its results, its decisions), use the city of that company's headquarters. If there is no single physical place (online, worldwide policy, a person's statement), reply {\"city\": null, \"country\": null, \"lat\": null, \"lng\": null}." },
       { role: "user", content: `Headlines from different outlets about one story:\n${lines}` } ] });
     // some models hand back the JSON already parsed, others as text
     const res = out?.response;
@@ -115,12 +115,14 @@ async function storyPlace(env, items) {
   } catch (e) { console.error("storyPlace AI", e.message); }
   // 2) the country the headlines clearly point to
   if (strong) { const ref = countryPoint(strong); return { name: strong, city: null, country: strong, lat: ref[0], lng: ref[1], how: "names" }; }
+  // 2b) no clear winner: the most-named country anyway, if the headlines name one at least twice
+  if (top.length && top[0][1] >= 2) { const c = top[0][0], ref = countryPoint(c); return { name: c, city: null, country: c, lat: ref[0], lng: ref[1], how: "names" }; }
   // 3) where it was first reported
   const first = items.reduce((a, x) => (x.t < a.t ? x : a), items[0]);
   return { name: `${first.city}, ${first.country}`, city: first.city, country: first.country, lat: first.lat, lng: first.lng, how: "first", outlet: first.outlet };
 }
 
-export async function buildTrending(env, { dry = false, threshold = 0.8 } = {}) {
+export async function buildTrending(env, { dry = false, threshold = 0.8, merge = 0.85 } = {}) {
   const since = new Date(Date.now() - 24 * 3600e3).toISOString();
   const { results: rows = [] } = await env.DB.prepare(
     `SELECT id, content, country, created_at, share_count FROM posts INDEXED BY idx_posts_created_at
@@ -161,8 +163,28 @@ export async function buildTrending(env, { dry = false, threshold = 0.8 } = {}) 
     cl.c = norm(cl.sum);
     for (const w of keys) { if (!index.has(w)) index.set(w, new Set()); index.get(w).add(best); }
   }
+  // Second pass: groups that are the same event from different angles (e.g. "Huang returns as CEO" and "Wall Street
+  // jumps as Huang returns") merge when their averaged headlines are close AND they share a rarer word.
+  const merged = [];
+  {
+    const big = clusters.filter(cl => cl.items.length >= 2).sort((a, b) => b.items.length - a.items.length);
+    const wordsOf = cl => new Set(cl.items.flatMap(x => x.w.filter(w => df.get(w) <= maxDf)));
+    for (const cl of big) cl.ws = wordsOf(cl);
+    for (let i = 0; i < big.length; i++) {
+      const a = big[i]; if (a.gone) continue;
+      for (let j = i + 1; j < big.length; j++) {
+        const b = big[j]; if (b.gone) continue;
+        if (dot(a.c, b.c) < merge) continue;
+        let shared = 0; for (const w of b.ws) if (a.ws.has(w)) { shared++; if (shared >= 2) break; }
+        if (shared < 2) continue;
+        merged.push(`${a.items[0].title.slice(0, 50)}  <=  ${b.items[0].title.slice(0, 50)} (${dot(a.c, b.c).toFixed(2)})`);
+        a.items.push(...b.items); for (let k = 0; k < a.sum.length; k++) a.sum[k] += b.sum[k]; a.c = norm(a.sum);
+        for (const w of b.ws) a.ws.add(w); b.gone = true;
+      }
+    }
+  }
   // Groups covered by 2+ outlets, then activity on the site
-  let groups = clusters.map(cl => ({ ...cl, outlets: new Set(cl.items.map(x => x.outlet)), countries: new Set(cl.items.map(x => x.country)) }))
+  let groups = clusters.filter(cl => !cl.gone).map(cl => ({ ...cl, outlets: new Set(cl.items.map(x => x.outlet)), countries: new Set(cl.items.map(x => x.country)) }))
     .filter(g => g.outlets.size >= 2);
   const ids = groups.flatMap(g => g.items.map(x => x.id));
   const eng = new Map();
@@ -199,5 +221,5 @@ export async function buildTrending(env, { dry = false, threshold = 0.8 } = {}) 
   const doc = { built_at: new Date().toISOString(), window_hours: 24, stories };
   if (!dry) await env.DB.prepare(`INSERT INTO globe_cache (k, v, at) VALUES ('trending', ?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v, at = excluded.at`)
     .bind(JSON.stringify(doc), doc.built_at).run();
-  return { ...doc, items: items.length, clusters: clusters.length, multi: groups.length };
+  return { ...doc, items: items.length, clusters: clusters.length, multi: groups.length, merged };
 }

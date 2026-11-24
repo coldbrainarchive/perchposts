@@ -3079,9 +3079,9 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   if (url.pathname === "/globe-build") {
     if (!isModerator && !isBot) return json({ error: "Unauthorized" }, 401);
     try {
-      const dry = url.searchParams.get("dry") === "1", th = parseFloat(url.searchParams.get("t") || "0.8");
-      const r = await buildTrending(env, { dry, threshold: th >= 0.5 && th <= 0.99 ? th : 0.8 });
-      return json(dry ? { ...r, stories: r.stories.map(s => ({ rank: s.rank, title: s.title, outlets: s.outlets, countries: s.countries, activity: s.activity, origin: s.origin, posts: s.posts.map(p => `${p.outlet} (${p.city}): ${p.title}`) })) } : { built_at: r.built_at, stories: r.stories.length, items: r.items, clusters: r.clusters, multi: r.multi });
+      const dry = url.searchParams.get("dry") === "1", th = parseFloat(url.searchParams.get("t") || "0.8"), mg = parseFloat(url.searchParams.get("m") || "0.85");
+      const r = await buildTrending(env, { dry, threshold: th >= 0.5 && th <= 0.99 ? th : 0.8, merge: mg >= 0.5 && mg <= 0.99 ? mg : 0.85 });
+      return json(dry ? { ...r, stories: r.stories.map(s => ({ rank: s.rank, title: s.title, outlets: s.outlets, countries: s.countries, activity: s.activity, origin: s.origin, posts: s.posts.map(p => `${p.outlet} (${p.city}): ${p.title}`) })), merged: r.merged } : { built_at: r.built_at, stories: r.stories.length, items: r.items, clusters: r.clusters, multi: r.multi });
     } catch (err) {
       return serverError(err);
     }
