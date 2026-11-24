@@ -1728,12 +1728,12 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       // Top chirps of the whole conversation (1+ reactions while the site is small; most reacted first, newest wins ties) for the post page
       // preview; they may be older than the loaded page, so their reactions ride along below
       const { results: topRows } = await env.DB.prepare(
-        `SELECT c.*, COUNT(r.id) AS rx_count FROM comments c JOIN comment_reactions r ON r.comment_id = c.id WHERE c.post_id = ? AND c.deleted = 0 GROUP BY c.id HAVING COUNT(r.id) >= 1 ORDER BY rx_count DESC, c.created_at DESC LIMIT 6`
+        `SELECT c.*, COUNT(r.id) AS rx_count FROM comments c JOIN comment_reactions r ON r.comment_id = c.id WHERE c.post_id = ? AND c.deleted = 0 GROUP BY c.id HAVING COUNT(r.id) >= 1 ORDER BY rx_count DESC, c.created_at DESC LIMIT 20`
       ).bind(id).all();
       const top = topRows || [];
       // Most replied chirps (1+ replies while the site is small), for the preview's "Most replied" section
       const { results: repRows } = await env.DB.prepare(
-        `SELECT c.*, COUNT(r.id) AS reply_count FROM comments c JOIN comments r ON r.parent_comment_id = c.id AND r.deleted = 0 WHERE c.post_id = ? AND c.deleted = 0 GROUP BY c.id HAVING COUNT(r.id) >= 1 ORDER BY reply_count DESC, c.created_at DESC LIMIT 9`
+        `SELECT c.*, COUNT(r.id) AS reply_count FROM comments c JOIN comments r ON r.parent_comment_id = c.id AND r.deleted = 0 WHERE c.post_id = ? AND c.deleted = 0 GROUP BY c.id HAVING COUNT(r.id) >= 1 ORDER BY reply_count DESC, c.created_at DESC LIMIT 20`
       ).bind(id).all();
       const replied = repRows || [];
       const rxIds = [...new Set([...comments.map(c => c.id), ...top.map(c => c.id), ...replied.map(c => c.id)])];
