@@ -54,19 +54,68 @@
     // the preview pinned to the outlet: ‹ › step through the story's outlets (list order); tapping the preview drops
     // down the article preview (summary + Open post / Read at source)
     el.innerHTML = `<i></i><span class="lb">${esc(p.outlet)}</span><div class="pv"><div class="pv-row"><button type="button" class="pv-nav" data-d="-1" aria-label="Previous outlet">‹</button>${p.image ? `<img src="${esc(p.image)}" alt="" referrerpolicy="no-referrer">` : ''}<span class="pt"><b>${esc(p.title)}</b><span>${esc(flag(p.country))} ${esc(p.outlet)} · ${esc(p.city)} · ${ago(p.t)}</span></span><button type="button" class="pv-nav" data-d="1" aria-label="Next outlet">›</button></div>
-      <div class="pv-more"><a class="pv-site" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${esc(siteOf(p.url))}</a>${p.desc ? `<p>${esc(p.desc)}</p>` : ''}<div class="pv-btns"><a class="btn pri" href="/post/${encodeURIComponent(p.id)}">View post</a></div></div></div>`;
+      <div class="pv-more"><a class="pv-site" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${esc(siteOf(p.url))}</a>${p.desc ? `<p>${esc(p.desc)}</p>` : ''}<div class="pv-acts"><button type="button" class="pa fl" aria-label="Flap">${IC.flap}<b></b></button><a class="pa ch" href="/post/${encodeURIComponent(p.id)}?chat=1&via=card" aria-label="Chirps">${IC.chat}<b></b></a><button type="button" class="pa sh" aria-label="Share">${IC.share}<b>Share</b></button></div></div></div>`;
+    fillActs(p, el);
     const im = el.querySelector('.pv img'); im && im.addEventListener('error', () => im.remove());
     el.addEventListener('pointerdown', ev => { ev.stopPropagation(); });
     el.addEventListener('click', ev => {
       ev.stopPropagation(); pinTapAt = Date.now();
       const nav = ev.target.closest('.pv-nav');
       if (nav) { stepOutlet(p, +nav.dataset.d); return; }
-      if (ev.target.closest('.pv-btns a,.pv-site')) return;            // let the links open
+      if (ev.target.closest('.pv-btns a,.pv-site,.pa.ch')) return;     // let the links open
+      if (ev.target.closest('.pa.fl')) { flap(p); return; }
+      if (ev.target.closest('.pa.sh')) { share(p); return; }
       if (foc === p) { pvOpen = el.querySelector('.pv').classList.toggle('exp'); return; }
       focusPin(p, false);
     });
     p.el = el;
     return el;
+  }
+
+  // Flaps · chirps · share on each article preview (in place of a View post button). Counts are live, loaded for a
+  // story's articles when one of its pins is focused; chirps opens the post's chat; flap / share work right here.
+  const IC = {
+    flap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 13.5C4 9.5 8.5 8.5 12 15C15.5 8.5 20 9.5 22 13.5"/></svg>',
+    chat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 11.5c0 4.4-3.8 8-8.5 8-1.2 0-2.4-.2-3.4-.7L4 20l1.3-3.6c-1.1-1.4-1.8-3.1-1.8-4.9 0-4.4 3.8-8 8.5-8s8.5 3.6 8.5 8z"/></svg>',
+    share: '<svg viewBox="5 5 14 14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M11 7h6v6"/></svg>'
+  };
+  const cnt = new Map(), asked = new Set();
+  const tok = () => { try { return localStorage.getItem('auth_token') || ''; } catch (e) { return ''; } };
+  const hdr = () => tok() ? { Authorization: 'Bearer ' + tok() } : {};
+  function fillActs(p, el) {
+    el = el || p.el; const c = cnt.get(p.id); if (!el || !c) return;
+    const f = el.querySelector('.pa.fl'), ch = el.querySelector('.pa.ch'), sh = el.querySelector('.pa.sh');
+    if (f) { f.querySelector('b').textContent = c.f; f.classList.toggle('on', !!c.m); }
+    if (ch) ch.querySelector('b').textContent = c.c;
+    if (sh) sh.querySelector('b').textContent = c.s ? 'Share ' + c.s : 'Share';
+  }
+  function loadCounts(s) {
+    const ids = pins.filter(q => q.s === s && q.id && !asked.has(q.id)).map(q => q.id).slice(0, 40);
+    if (!ids.length) return;
+    ids.forEach(id => asked.add(id));
+    fetch(API + '/globe-counts?ids=' + ids.map(encodeURIComponent).join(','), { headers: hdr() }).then(r => r.json()).then(d => {
+      for (const [id, c] of Object.entries(d.posts || {})) cnt.set(id, c);
+      pins.forEach(q => ids.includes(q.id) && fillActs(q));
+    }).catch(() => ids.forEach(id => asked.delete(id)));
+  }
+  function flap(p) {
+    if (!tok()) { location.href = '/post/' + encodeURIComponent(p.id) + '?chat=1&via=card'; return; }
+    const c = cnt.get(p.id) || { f: 0, m: 0, c: 0, s: 0 }, v = c.m ? 0 : 1;
+    let bid = ''; try { bid = localStorage.getItem('browser_id') || ''; if (!bid) { bid = crypto.randomUUID(); localStorage.setItem('browser_id', bid); } } catch (e) { bid = 'globe'; }
+    cnt.set(p.id, { ...c, m: v, f: Math.max(0, c.f + (v ? 1 : -1)) }); fillActs(p);
+    fetch(API + '/vote-post', { method: 'POST', headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ post_id: p.id, browser_id: bid, value: v }) })
+      .then(r => r.json().then(j => ({ ok: r.ok, j }))).then(({ ok, j }) => {
+        if (ok && j.success) cnt.set(p.id, { ...cnt.get(p.id), f: j.score, m: j.myVote === 1 ? 1 : 0 });
+        else { cnt.set(p.id, c); if (j && j.error) alert(j.error); }
+        fillActs(p);
+      }).catch(() => { cnt.set(p.id, c); fillActs(p); });
+  }
+  function share(p) {
+    const u = location.origin + '/post/' + p.id;
+    const count = () => { if (!tok()) return; fetch(API + '/share', { method: 'POST', headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ post_id: p.id, via: 'more' }) })
+      .then(r => r.json()).then(j => { if (j && j.counted) { const c = cnt.get(p.id); if (c) { c.s = j.share_count; fillActs(p); } } }).catch(() => {}); };
+    if (navigator.share) navigator.share({ url: u, title: p.title }).then(count).catch(() => {});
+    else if (navigator.clipboard) navigator.clipboard.writeText(u).then(() => { count(); const b = p.el && p.el.querySelector('.pa.sh b'); if (b) { b.textContent = 'Copied'; setTimeout(() => fillActs(p), 1400); } }).catch(() => {});
   }
 
   // ‹ › on the preview: the previous / next outlet in the list order, flying the globe there
@@ -93,6 +142,7 @@
     document.body.classList.toggle('focusing', !!p);
     document.querySelectorAll('.or').forEach(b => b.classList.toggle('on', b._p === p));
     if (!p) return;
+    loadCounts(p.s);
     closeSheet();
     $('ol').classList.remove('open');
     // the pin sits a little below the middle so its preview (and the drop-down) has room above it

@@ -2426,6 +2426,25 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   }
 
   // ── /post-responses?post_ids=a,b ── the bird number for each post (people who responded) and what you did
+  // ── /globe-counts?ids= ── the globe page's article previews show flaps / chirps / shares (user's request,
+  // 2026-11-24): { posts: { id: { f: flaps, m: 1 if you flapped, c: chirps, s: shares } } }
+  if (url.pathname === "/globe-counts") {
+    try {
+      const ids = (url.searchParams.get("ids") || "").split(",").filter(Boolean).slice(0, 40);
+      if (!ids.length) return json({ posts: {} });
+      const [pr, { results: cc = [] }, { results: sc = [] }] = await Promise.all([
+        postResp(ids, username),
+        env.DB.prepare(`SELECT post_id, COUNT(*) AS n FROM comments WHERE post_id IN (${ID_LIST}) AND deleted = 0 AND (username IS NULL OR username != '__system__') GROUP BY post_id`).bind(JSON.stringify(ids)).all(),
+        env.DB.prepare(`SELECT id, share_count FROM posts WHERE id IN (${ID_LIST})`).bind(JSON.stringify(ids)).all()]);
+      const c = Object.fromEntries(cc.map(r => [r.post_id, r.n])), s = Object.fromEntries(sc.map(r => [r.id, r.share_count || 0]));
+      const posts = {};
+      for (const id of ids) posts[id] = { f: pr[id]?.n || 0, m: pr[id]?.m === 1 ? 1 : 0, c: c[id] || 0, s: s[id] || 0 };
+      return json({ posts });
+    } catch (err) {
+      return serverError(err);
+    }
+  }
+
   if (url.pathname === "/post-responses") {
     try {
       const ids = (url.searchParams.get("post_ids") || "").split(",").filter(Boolean).slice(0, 120);
