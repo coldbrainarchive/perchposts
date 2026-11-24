@@ -392,8 +392,9 @@ async function run() {
   const runType = isFirstRun ? "first_run" : "subsequent";
   const logId = await createLog(runType);
 
+  // Mac Safari: The Chanzo serves a stale cached feed to Windows Chrome (found 2026-11-24); all other feeds answer the same
   const FETCH_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
   };
 
