@@ -631,19 +631,24 @@
     addEventListener('keydown', ev => { if (ev.key === 'Escape') open(false); });
     // split-flap digits like the site's header clock: the old top half folds down, the new bottom half swings in
     const tEl = $('utcT'); let qs = [];
-    if (tEl) { tEl.textContent = ''; qs = [...'00:00'].map(ch => { const q = document.createElement('span'); q.className = 'q'; q.innerHTML = '<i></i><span class="h top nt"><s></s></span><span class="h bot ob"><s></s></span><span class="h top ot"><s></s></span><span class="h bot nb"><s></s></span>'; q._ch = ''; tEl.appendChild(q); return q; }); }
+    if (tEl) { tEl.textContent = ''; qs = [...'00:00:00'].map((ch, i) => { const q = document.createElement('span'); q.className = 'q' + (i >= 5 ? ' s' : ''); q.innerHTML = '<i></i><span class="h top nt"><s></s></span><span class="h bot ob"><s></s></span><span class="h top ot"><s></s></span><span class="h bot nb"><s></s></span>'; q._ch = ''; tEl.appendChild(q); return q; }); }
     const still = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
     const flip = (q, ch, d) => new Promise(res => { if (q._ch === ch) return res(); const old = q._ch; q._ch = ch;
       if (!old || still()) { q.querySelector('i').textContent = ch; return res(); }
       const S = k => q.querySelector('.' + k + '>s'); S('ot').textContent = old; S('ob').textContent = old; S('nt').textContent = ch; S('nb').textContent = ch;
       q.style.setProperty('--fd', d + 'ms'); q.classList.remove('go'); void q.offsetWidth; q.classList.add('go');
       setTimeout(() => { q.querySelector('i').textContent = ch; q.classList.remove('go'); res(); }, d * 2 + 20); });
-    const tick = () => { const d = new Date(), s = subsolar(d); const str = String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0');
-      [...str].forEach((ch, i) => qs[i] && setTimeout(() => flip(qs[i], ch, 130), i * 45));
-      btn.classList.toggle('night', !isDay(51.48, 0, s)); if (panel.classList.contains('in')) draw(); };
+    // the digits (with seconds) flip every second; the sun / moon and the open panel only update on the minute
+    const digits = () => { const d = new Date(), p2 = n => String(n).padStart(2, '0'), str = p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds());  // the viewer's own local time
+      [...str].forEach((ch, i) => { const q = qs[i]; if (!q || q._ch === ch) return; setTimeout(() => flip(q, ch, 110), i >= 6 ? (i - 6) * 40 : i * 45); }); };
+    const tick = () => { const d = new Date(), s = subsolar(d);
+      { const h = d.getHours(); btn.classList.toggle('night', h < 6 || h >= 18); }
+      try { const z = new Intl.DateTimeFormat('en-US', { timeZoneName: 'short' }).formatToParts(d).find(x => x.type === 'timeZoneName'); const zEl = $('utcZ'); if (zEl) zEl.textContent = z && z.value.length <= 7 ? z.value.replace(/^GMT\+0$/, 'GMT') : 'LOCAL'; } catch (e) {} if (panel.classList.contains('in')) draw(); };
     // checks every second so the minute flips on time; the panel redraws only when the minute changes
-    let lastM = -1; const sec = () => { const m = new Date().getUTCMinutes(); if (m !== lastM) { lastM = m; tick(); } };
-    tick(); lastM = new Date().getUTCMinutes(); setInterval(sec, 1000);
+    let lastM = -1; const sec = () => { digits(); const m = new Date().getUTCMinutes(); if (m !== lastM) { lastM = m; tick(); } };
+    digits(); tick(); lastM = new Date().getUTCMinutes();
+    // line the updates up with the start of each second so the flip lands right on the second
+    setTimeout(() => { sec(); setInterval(sec, 1000); }, 1000 - (Date.now() % 1000) + 15);
   })();
   function hiRes() {
     if (!(matchMedia('(pointer: fine)').matches && innerWidth >= 900)) return;
