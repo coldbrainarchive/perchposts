@@ -132,57 +132,99 @@
     fetch(API + '/share', { method: 'POST', headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ post_id: p.id, via }) })
       .then(r => r.ok ? r.json() : null).then(j => { if (j && j.share_count != null) { const c = cnt.get(p.id); if (c) { c.s = j.share_count; fillActs(p); } } }).catch(() => {});
   }
-  // the site's Share sheet: pick huddles (+ optional message) to send the post to, or Copy link / More…
+  // the site's Share sheet (_ShareSheet in the main bundle, v1377), copied one-for-one: tap or drag the top bar down to
+  // close, tap outside / Escape closes, keyboard lift, "Sent ✓" / error inside the message bubble, "Copied ✓" button.
+  const CHK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
   function shareSheet(p, u) {
     if (document.querySelector('.ps-ov')) return;
+    const id = p.id, url = u;
+    let me = ''; try { me = (localStorage.getItem('_myUsername') || '').toLowerCase(); } catch (e) {}
+    let hs = null, sel = [], msg = '', busy = false, note = '', copied = false, sent = '', err = '', gone = false;
     const ov = document.createElement('div'); ov.className = 'ps-ov';
-    ov.innerHTML = `<div class="ps-sheet" role="dialog" aria-label="Share"><div class="ps-grab"></div><div class="ps-lbl">Send to a huddle</div><div class="ps-list"><div class="ps-empty">Loading…</div></div>
-      <div class="ps-msg" hidden><div class="ps-bub"><input type="search" name="search_ps_msg" autocomplete="off" enterkeyhint="send" placeholder="Add a message…" maxlength="1000"></div><button type="button" class="ps-send" aria-label="Send">${IC.up}</button></div>
-      <div class="ps-sep"></div><div class="ps-lns"><button type="button" class="ps-ln" data-k="copy">${IC.link}Copy link</button><button type="button" class="ps-ln" data-k="more">${IC.share}More…</button></div><div class="ps-note" role="status"></div></div>`;
+    try { const m0 = localStorage.getItem('_myUsername'); if (m0 && window._ppKit) ov.style.setProperty('--me', window._ppKit.tagCol(m0)); } catch (e) {}
+    ov.innerHTML = `<div class="ps-sheet" role="dialog" aria-label="Share"><div class="ps-grabz" role="button" aria-label="Close"><div class="ps-grab"></div></div><div class="ps-lbl">Send to a huddle</div><div class="ps-list"></div><div class="ps-msgw"></div><div class="ps-sep"></div><div class="ps-lns"></div><div class="ps-notew"></div></div>`;
     document.body.appendChild(ov);
-    const $q = s => ov.querySelector(s), note = $q('.ps-note'), msgRow = $q('.ps-msg'), inp = $q('input'), send = $q('.ps-send');
-    let hs = [], sel = [], busy = false;
-    const bye = () => { ov.classList.remove('in'); document.documentElement.classList.remove('ps-open'); removeEventListener('keydown', esc2); setTimeout(() => ov.remove(), 240); };
-    const done = t => { note.textContent = t; setTimeout(bye, 850); };
-    const esc2 = ev => { if (ev.key === 'Escape') bye(); };
-    addEventListener('keydown', esc2);
-    requestAnimationFrame(() => requestAnimationFrame(() => ov.classList.add('in')));
+    const $q = s => ov.querySelector(s), sheet = $q('.ps-sheet');
+    const unkb = () => document.documentElement.classList.remove('ps-kb');
+    const close = () => { unkb(); setTimeout(() => ov.remove(), 0); };
+    const bye = () => { if (gone) return; gone = true; ov.classList.remove('in'); removeEventListener('keydown', k); vv && (vv.removeEventListener('resize', fit), vv.removeEventListener('scroll', fit)); setTimeout(close, 240); };
+    const k = ev => { ev.key === 'Escape' && bye(); };
+    addEventListener('keydown', k);
+    requestAnimationFrame(() => ov.classList.add('in'));
+    // keyboard: lift the sheet above it
+    const vv = window.visualViewport;
+    const fit = () => { const kb = Math.max(0, Math.round(innerHeight - vv.height - vv.offsetTop)); sheet.style.paddingBottom = kb > 40 ? `calc(16px + ${kb}px)` : ''; };
+    if (vv) { fit(); vv.addEventListener('resize', fit); vv.addEventListener('scroll', fit); }
     ov.addEventListener('pointerdown', ev => ev.stopPropagation());
-    ov.addEventListener('click', ev => { ev.stopPropagation(); if (ev.target === ov) bye(); });
-    ov._redraw = () => { if (!hs.length) return; const sx = $q('.ps-hds') && $q('.ps-hds').scrollLeft; draw(); if (sx) $q('.ps-hds').scrollLeft = sx; };
-    const draw = () => {
-      const box = $q('.ps-list');
-      if (!hs.length) { box.innerHTML = `<div class="ps-empty">You're not in any huddles yet.</div>`; return; }
-      box.innerHTML = `<div class="ps-hds">${hs.map(h => `<button type="button" class="ps-hd${sel.includes(h.id) ? ' on' : ''}" data-id="${esc(h.id)}" aria-pressed="${sel.includes(h.id)}"><span class="ps-av">${avHtml(h)}</span><span class="ps-nm">${esc(h.title || 'Huddle')}</span></button>`).join('')}</div>`;
-      msgRow.hidden = !sel.length;
-      send.setAttribute('aria-label', sel.length > 1 ? `Send to ${sel.length} huddles` : 'Send');
+    ov.addEventListener('click', ev => { ev.stopPropagation(); bye(); });
+    sheet.addEventListener('click', ev => ev.stopPropagation());
+    // the top bar: tap closes; drag down closes (70px, or a quick flick)
+    const gz = $q('.ps-grabz'); let dg = null;
+    gz.addEventListener('click', bye);
+    gz.addEventListener('touchstart', ev => { try { document.activeElement && document.activeElement.blur(); } catch (e) {} dg = { y: ev.touches[0].clientY, t: Date.now(), dy: 0 }; sheet.style.transition = 'none'; });
+    gz.addEventListener('touchmove', ev => { if (!dg) return; dg.dy = Math.max(0, ev.touches[0].clientY - dg.y); sheet.style.transform = `translateY(${dg.dy}px)`; });
+    const dE = () => { const d = dg; dg = null; if (!d) return; sheet.style.transition = ''; const v = d.dy / Math.max(1, Date.now() - d.t); if (d.dy > 70 || (d.dy > 18 && v > .5)) { sheet.style.transform = 'translateY(100%)'; bye(); } else sheet.style.transform = ''; };
+    gz.addEventListener('touchend', dE); gz.addEventListener('touchcancel', dE);
+    const done = t => { note = t; drawNote(); setTimeout(bye, 850); };
+
+    const drawList = () => {
+      const box = $q('.ps-list'), sx = box.querySelector('.ps-hds') ? box.querySelector('.ps-hds').scrollLeft : 0;
+      box.innerHTML = hs === null ? `<div class="ps-empty">Loading…</div>` : !hs.length ? `<div class="ps-empty">You're not in any huddles yet.</div>` :
+        `<div class="ps-hds">${hs.map(h => `<button type="button" class="ps-hd${sel.includes(h.id) ? ' on' : ''}" data-id="${esc(h.id)}" aria-pressed="${sel.includes(h.id)}"><span class="ps-av">${avHtml(h)}</span><span class="ps-nm">${esc(h.title)}</span></button>`).join('')}</div>`;
+      if (sx && box.querySelector('.ps-hds')) box.querySelector('.ps-hds').scrollLeft = sx;
     };
-    document.documentElement.classList.add('ps-open');
-    loadKit(() => ov._redraw());
-    fetch(API + '/my-huddles', { headers: hdr() }).then(r => r.ok ? r.json() : { huddles: [] }).then(x => { hs = x.huddles || []; draw(); }).catch(() => { hs = []; draw(); });
-    $q('.ps-list').addEventListener('click', ev => {
-      const b = ev.target.closest('.ps-hd'); if (!b) return;
-      const id = b.dataset.id; sel = sel.includes(id) ? sel.filter(x => x !== id) : [...sel, id];
-      const sx = $q('.ps-hds') && $q('.ps-hds').scrollLeft; draw(); if (sx) $q('.ps-hds').scrollLeft = sx;
-    });
-    const go = async () => {
-      if (!sel.length || busy) return; busy = true; send.disabled = true; note.textContent = '';
-      let ok = 0, err = ''; const att = '\n\n[ATTACH:' + JSON.stringify({ type: 'post', id: p.id }) + ']';
+    ov._redraw = drawList;
+    const drawMsg = () => {
+      const w = $q('.ps-msgw');
+      if (!sel.length) { w.innerHTML = ''; return; }
+      if (!w.firstChild) {
+        w.innerHTML = `<div class="ps-msg"><div class="ps-bub"></div><button type="button" class="ps-send">${IC.up}</button></div>`;
+        w.querySelector('.ps-send').addEventListener('click', send);
+      }
+      const bub = w.querySelector('.ps-bub'), sb = w.querySelector('.ps-send');
+      bub.className = 'ps-bub' + (sent ? ' ok' : err ? ' bad' : '');
+      sb.disabled = busy; sb.setAttribute('aria-label', sel.length > 1 ? `Send to ${sel.length} huddles` : 'Send');
+      const mode = sent ? 's' : err ? 'e' : 'i';
+      if (bub.dataset.m === mode && mode === 'i') return;
+      bub.dataset.m = mode;
+      if (sent) bub.innerHTML = `<span class="ps-sent" role="status"><span class="ps-chk">${CHK}</span>${esc(sent)}</span>`;
+      else if (err) { bub.innerHTML = `<span class="ps-err" role="alert">${esc(err)}</span>`; bub.firstChild.addEventListener('click', () => { err = ''; drawMsg(); }); }
+      else {
+        bub.innerHTML = `<input type="search" name="search_ps_msg" autocomplete="off" enterkeyhint="send" placeholder="Add a message…" maxlength="1000">`;
+        const inp = bub.firstChild; inp.value = msg;
+        inp.addEventListener('input', () => { msg = inp.value; });
+        inp.addEventListener('focus', () => document.documentElement.classList.add('ps-kb'));
+        inp.addEventListener('blur', () => setTimeout(() => { const a = document.activeElement; if (!(a && a.closest && a.closest('.ps-sheet') && a.tagName === 'INPUT')) unkb(); }, 50));
+        inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); send(); } });
+      }
+    };
+    const drawLns = () => {
+      $q('.ps-lns').innerHTML = (copied ? `<button type="button" class="ps-ln ok"><span class="ps-chk">${CHK}</span>Copied</button>` : `<button type="button" class="ps-ln" data-k="copy"><span style="display:inline-flex">${IC.link}</span>Copy link</button>`) +
+        `<button type="button" class="ps-ln" data-k="more"><span style="display:inline-flex">${IC.share}</span>More…</button>`;
+    };
+    const drawNote = () => { $q('.ps-notew').innerHTML = note ? `<div class="ps-note" role="status">${esc(note)}</div>` : ''; };
+
+    $q('.ps-list').addEventListener('click', ev => { const b = ev.target.closest('.ps-hd'); if (!b) return; const h = b.dataset.id; sel = sel.includes(h) ? sel.filter(x => x !== h) : [...sel, h]; drawList(); drawMsg(); });
+    $q('.ps-lns').addEventListener('click', ev => { const b = ev.target.closest('[data-k]'); if (!b) return; b.dataset.k === 'copy' ? copy() : more(); });
+    const copy = async () => { try { await navigator.clipboard.writeText(url); copied = true; drawLns(); shared(p, 'copy'); setTimeout(bye, 900); } catch (e) { err = "Couldn't copy the link"; drawMsg(); } };
+    const more = async () => { try { if (navigator.share) { await navigator.share({ url }); shared(p, 'more'); bye(); } else { await navigator.clipboard.writeText(url); copied = true; drawLns(); shared(p, 'copy'); setTimeout(bye, 900); } } catch (e) {} };
+    async function send() {
+      if (!sel.length || busy) return; busy = true; err = ''; drawMsg();
+      let ok = 0, er2 = ''; const att = '\n\n[ATTACH:' + JSON.stringify({ type: 'post', id }) + ']';
       let bid = ''; try { bid = localStorage.getItem('browser_id') || ''; if (!bid) { bid = crypto.randomUUID(); localStorage.setItem('browser_id', bid); } } catch (e) {}
       for (const h of sel) {
         try {
-          const r = await fetch(API + '/add-comment', { method: 'POST', headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ content: inp.value.trim() + att, post_id: h, parent_comment_id: null, browser_id: bid }) });
-          if (r.ok) ok++; else { const j = await r.json().catch(() => ({})); err = j.error || "Couldn't send"; }
-        } catch (e) { err = "Couldn't send"; }
+          const r = await fetch(API + '/add-comment', { method: 'POST', headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ content: msg.trim() + att, post_id: h, parent_comment_id: null, browser_id: bid }) });
+          if (r.ok) ok++; else { const j = await r.json().catch(() => ({})); er2 = j.error || "Couldn't send"; }
+        } catch (e) { er2 = "Couldn't send"; }
       }
-      busy = false; send.disabled = false;
-      if (ok) { shared(p, 'huddle'); const one = sel.length === 1 && hs.find(x => x.id === sel[0]); done(`Sent to ${one ? one.title : ok + ' huddles'}`); }
-      else note.textContent = err === 'Caged' ? "You're Caged: you can only chirp in The Cage" : err;
-    };
-    send.addEventListener('click', go);
-    inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); go(); } });
-    $q('[data-k=copy]').addEventListener('click', async () => { try { await navigator.clipboard.writeText(u); shared(p, 'copy'); done('Link copied'); } catch (e) { note.textContent = "Couldn't copy the link"; } });
-    $q('[data-k=more]').addEventListener('click', async () => { try { if (navigator.share) { await navigator.share({ url: u }); shared(p, 'more'); bye(); } else { await navigator.clipboard.writeText(u); shared(p, 'copy'); done('Link copied'); } } catch (e) {} });
+      busy = false;
+      if (ok) { shared(p, 'huddle'); const one = sel.length === 1 && (hs || []).find(x => x.id === sel[0]); try { document.activeElement && document.activeElement.blur(); } catch (e) {} sent = `Sent to ${one ? one.title : ok + ' huddles'}`; drawMsg(); setTimeout(bye, 1100); }
+      else { err = er2 === 'Caged' ? "You're Caged: you can only chirp in The Cage" : er2; drawMsg(); }
+    }
+    drawList(); drawMsg(); drawLns(); drawNote();
+    loadKit(() => { drawList(); try { const m0 = localStorage.getItem('_myUsername'); if (m0) ov.style.setProperty('--me', window._ppKit.tagCol(m0)); } catch (e) {} });
+    fetch(API + '/my-huddles', { headers: hdr() }).then(r => r.ok ? r.json() : { huddles: [] }).then(x => { hs = x.huddles || []; drawList(); }).catch(() => { hs = []; drawList(); });
   }
   // huddle circles show the members' birds, like the site: two birds (or one), drawn by the site's bird kit
   let kitCbs = null;
@@ -210,7 +252,7 @@
     const o = (h.members || []).filter(n => n && n.toLowerCase() !== me).slice(0, 2);
     if (o.length === 2) return `<span class="ps-b ps-b1">${face(o[0], 26)}</span><span class="ps-b ps-b2">${face(o[1], 26)}</span>`;
     if (o.length === 1) return `<span class="ps-solo">${face(o[0], 34)}</span>`;
-    return IC.huddle;
+    return `<span class="ps-hi">${IC.huddle}</span>`;
   }
 
   // the site's "sign in" nudge (signed-out flap): a small toast with a Sign in button
