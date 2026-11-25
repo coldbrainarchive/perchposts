@@ -1725,10 +1725,14 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       }
       // Here rather than a separate request: listing every chirp id in a URL fails on long chats,
       // and this keeps huddle reactions behind the member check above
-      // Top chirps of the whole conversation (1+ reactions while the site is small; most reacted first, newest wins ties) for the post page
-      // preview; they may be older than the loaded page, so their reactions ride along below
+      // Top chirps of the whole conversation (posts and huddles): score = emoji reactions + 1.5 per worm (user's call,
+      // 2026-11-25: straight 1.5 per worm, not per giver); 1+ reaction or worm while the site is small; newest wins ties.
+      // They may be older than the loaded page, so their reactions ride along below
       const { results: topRows } = await env.DB.prepare(
-        `SELECT c.*, COUNT(r.id) AS rx_count FROM comments c JOIN comment_reactions r ON r.comment_id = c.id WHERE c.post_id = ? AND c.deleted = 0 GROUP BY c.id HAVING COUNT(r.id) >= 1 ORDER BY rx_count DESC, c.created_at DESC LIMIT 20`
+        `SELECT * FROM (SELECT c.*, (SELECT COUNT(*) FROM comment_reactions r WHERE r.comment_id = c.id) AS rx_count,
+                (SELECT COUNT(*) FROM worms w WHERE w.comment_id = c.id) AS worm_count
+           FROM comments c WHERE c.post_id = ? AND c.deleted = 0)
+         WHERE rx_count + worm_count > 0 ORDER BY rx_count + 1.5 * worm_count DESC, created_at DESC LIMIT 20`
       ).bind(id).all();
       const top = topRows || [];
       // Most replied chirps (1+ replies while the site is small), for the preview's "Most replied" section
