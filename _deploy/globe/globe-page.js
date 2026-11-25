@@ -550,7 +550,7 @@
     // the closest levels (13+, Take flight height) use the sharp Esri imagery when the server has it switched on
     tileSrc = (x, y, l) => hdOn && l >= HD_FROM ? `${API}/globe-hd/${l}/${y}/${x}.jpg` : `${API}/globe-tile/${l}/${y}/${x}.jpg`;
     const TILE = (x, y, l) => { pend++; busy(); return tileSrc(x, y, l); };
-    fetch(API + '/globe-hd/status').then(r => r.json()).then(j => { if (!j || !j.on) return; hdOn = true; world.globeTileEngineMaxLevel(j.maxLevel || 15);
+    fetch(API + '/globe-hd/status').then(r => r.json()).then(j => { if (!j || !j.on) return; hdOn = true; world.globeTileEngineMaxLevel(Math.min(HD_MAX, j.maxLevel || HD_MAX));
       if (te) tuneHd(te); }).catch(() => {});
     try { new PerformanceObserver(list => { for (const e of list.getEntries()) if (e.name.includes('/globe-tile/')) pend = Math.max(0, pend - 1); busy(); }).observe({ type: 'resource', buffered: false }); } catch (e) {}
     // the library hides the whole-Earth image as soon as tiles switch on, which flashed black until they arrived:
@@ -585,10 +585,11 @@
   }
   const isDay = (lat, lng, s = subsolar()) => { const R = Math.PI / 180; return Math.sin(lat * R) * Math.sin(s.lat * R) + Math.cos(lat * R) * Math.cos(s.lat * R) * Math.cos((lng - s.lng) * R) > -0.0145; };
   // Sharp close-up imagery (Esri) for the closest levels: at Take flight height (~10 km up) it loads level 15 (~3 m a
-  // pixel), so houses and roads show. The levels above it are unchanged.
-  const HD_FROM = 13; let hdOn = false, tileEng = null, tileSrc = null;
-  function tuneHd(o) { const t = o.thresholds.slice(); while (t.length < 17) t.push(8 / Math.pow(2, t.length - 1));
-    t[13] = 0.0034; t[14] = 0.0026; t[15] = 0.0019; t[16] = 0.0011; o.thresholds = t; }
+  // pixel, about one map pixel per screen pixel on a phone), so houses and roads show. The engine uses the first level
+  // whose threshold is at or below the altitude, so: level 13 from the Take flight pill down, 15 in the game, never 16.
+  const HD_FROM = 13, HD_MAX = 15; let hdOn = false, tileEng = null, tileSrc = null;
+  function tuneHd(o) { const t = o.thresholds.slice(); while (t.length < 16) t.push(8 / Math.pow(2, t.length - 1));
+    t[14] = 0.0018; t[15] = 0.0015; o.thresholds = t.slice(0, 16); }
   // Night side: a see-through shell just above the map (so it also darkens the zoomed-in tiles) with a soft dusk band
   // and NASA Black Marble city lights (public domain). Built from the globe's own three.js classes; sun updates each minute.
   function dayNight() {

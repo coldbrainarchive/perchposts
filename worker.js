@@ -3231,11 +3231,11 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   // Esri World Imagery through the ArcGIS Location Platform (key in the ESRI_KEY secret; "Esri, Maxar, Earthstar
   // Geographics" is credited on the globe). Fetched here so phones never contact Esri and the key stays secret.
   // Without a key it falls back to the Sentinel-2 tiles above. /globe-hd/status tells the page whether it's on.
-  if (url.pathname === "/globe-hd/status") return json({ on: !!env.ESRI_KEY, maxLevel: env.ESRI_KEY ? 16 : 14 });
+  if (url.pathname === "/globe-hd/status") return json({ on: !!env.ESRI_KEY, maxLevel: env.ESRI_KEY ? 15 : 14 });
   const hd = url.pathname.match(/^\/globe-hd\/(\d{1,2})\/(\d{1,6})\/(\d{1,6})\.jpg$/);
   if (hd && request.method === "GET") {
     const z = +hd[1], y = +hd[2], x = +hd[3], n = 2 ** z;
-    if (z > 16 || y >= n || x >= n) return new Response("Not found", { status: 404, headers: corsHeaders });
+    if (z > 15 || y >= n || x >= n) return new Response("Not found", { status: 404, headers: corsHeaders });
     if (!env.ESRI_KEY) return z > 14 ? new Response("Not found", { status: 404, headers: corsHeaders }) : Response.redirect(`${url.origin}/globe-tile/${z}/${y}/${x}.jpg`, 302);
     const key = new Request(`https://perchposts-tiles.cache/esri-wi/${z}/${y}/${x}.jpg`);
     const hit = await caches.default.match(key);
