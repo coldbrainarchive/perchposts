@@ -90,7 +90,7 @@
     const f = el.querySelector('.pa.fl'), ch = el.querySelector('.pa.ch'), sh = el.querySelector('.pa.shr');
     if (f) { f.querySelector('b').textContent = c.f; f.classList.toggle('on', !!c.m); }
     if (ch) ch.querySelector('b').textContent = c.c;
-    if (sh) sh.querySelector('b').textContent = c.s > 0 ? c.s : '';
+    if (sh && !sh.classList.contains('said')) sh.querySelector('b').textContent = c.s > 0 ? c.s : '';
   }
   function loadCounts(s) {
     const ids = pins.filter(q => q.s === s && q.id && !asked.has(q.id)).map(q => q.id).slice(0, 40);
@@ -107,20 +107,25 @@
     if (v && p.el) p.el.querySelectorAll('.pa.fl animate').forEach(a => { try { a.endElement && a.endElement(); a.beginElement(); } catch (e) {} });
     let bid = ''; try { bid = localStorage.getItem('browser_id') || ''; if (!bid) { bid = crypto.randomUUID(); localStorage.setItem('browser_id', bid); } } catch (e) { bid = 'globe'; }
     cnt.set(p.id, { ...c, m: v, f: Math.max(0, c.f + (v ? 1 : -1)) }); fillActs(p);
-    fetch(API + '/vote-post', { method: 'POST', headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ post_id: p.id, browser_id: bid, value: v }) })
+    fetch(API + '/vote-post', { method: 'POST', headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ post_id: p.id, browser_id: bid, value: v, username: (() => { try { return localStorage.getItem('mod_name') || undefined; } catch (e) { return undefined; } })() }) })
       .then(r => r.json().then(j => ({ ok: r.ok, j }))).then(({ ok, j }) => {
         if (ok && j.success) cnt.set(p.id, { ...cnt.get(p.id), f: j.score, m: j.myVote === 1 ? 1 : 0 });
-        else { cnt.set(p.id, c); if (j && j.error) alert(j.error); }
+        else cnt.set(p.id, c);
         fillActs(p);
       }).catch(() => { cnt.set(p.id, c); fillActs(p); });
   }
   function share(p) {
     const u = location.origin + '/post/' + p.id;
     if (tok()) { shareSheet(p, u); return; }
-    const count = () => { if (!tok()) return; fetch(API + '/share', { method: 'POST', headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ post_id: p.id, via: 'more' }) })
-      .then(r => r.json()).then(j => { if (j && j.counted) { const c = cnt.get(p.id); if (c) { c.s = j.share_count; fillActs(p); } } }).catch(() => {}); };
-    if (navigator.share) navigator.share({ url: u, title: p.title }).then(count).catch(() => {});
-    else if (navigator.clipboard) navigator.clipboard.writeText(u).then(() => { count(); const b = p.el && p.el.querySelector('.pa.shr b'); if (b) { b.textContent = 'Copied'; setTimeout(() => fillActs(p), 1400); } }).catch(() => {});
+    const say = t => { const b = p.el && p.el.querySelector('.pa.shr'); if (!b) return; b.classList.add('said'); b.querySelector('b').textContent = t;
+      clearTimeout(b._sayT); b._sayT = setTimeout(() => { b.classList.remove('said'); fillActs(p); if (!cnt.get(p.id)) b.querySelector('b').textContent = ''; }, 1800); };
+    (async () => {
+      try {
+        if (navigator.share) { await navigator.share({ url: u }); say('Shared'); }
+        else if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(u); say('Copied'); }
+        else say('Link ready');
+      } catch (e) { if (!e || e.name !== 'AbortError') say('Share failed'); }
+    })();
   }
 
   function shared(p, via) {
