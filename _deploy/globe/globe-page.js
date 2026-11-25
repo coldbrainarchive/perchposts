@@ -196,10 +196,11 @@
   const kitWait = new Set();
   function face(name, z) {
     const l = String(name || '').toLowerCase();
-    if (admins.has(l)) return `<img src="/admin-bird.png" alt="" style="width:${z}px;height:${z}px;object-fit:contain;display:block">`;
     const K = window._ppKit; if (!K) return `<span style="display:inline-block;width:${z}px;height:${z}px"></span>`;
+    const adm = admins.has(l); if (adm) name = 'admin';
     let h = 0; for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
-    const em = ['🐤', '🐦', '🐧'][Math.abs(h) % 3], r = K.get(name, em, 't');
+    const em = adm ? 'A' : ['🐤', '🐦', '🐧'][Math.abs(h) % 3], r = K.get(name, em, 't');
+    if (adm && r && r.fail) return `<img src="/admin-bird.png" alt="" style="width:${z}px;height:${z}px;object-fit:contain;display:block">`;
     if (r && !r.fail && r.t) { const w = z * (1 + 2 * (r.g || 0)); return `<img src="${r.t}" alt="" draggable="false" style="width:${w}px;height:${w}px;margin:${-(w - z) / 2}px;display:block;max-width:none;pointer-events:none;flex-shrink:0">`; }
     if (!r && !kitWait.has(name)) { kitWait.add(name); K.sub(name, em, () => { const ov = document.querySelector('.ps-ov'); ov && ov._redraw && ov._redraw(); }, 't'); }
     return `<span style="display:inline-block;width:${z}px;height:${z}px"></span>`;
@@ -207,8 +208,8 @@
   function avHtml(h) {
     let me = ''; try { me = (localStorage.getItem('_myUsername') || '').toLowerCase(); } catch (e) {}
     const o = (h.members || []).filter(n => n && n.toLowerCase() !== me).slice(0, 2);
-    if (o.length === 2) return `<span class="ps-b ps-b1">${face(o[0], 23)}</span><span class="ps-b ps-b2">${face(o[1], 23)}</span>`;
-    if (o.length === 1) return `<span class="ps-solo">${face(o[0], 32)}</span>`;
+    if (o.length === 2) return `<span class="ps-b ps-b1">${face(o[0], 26)}</span><span class="ps-b ps-b2">${face(o[1], 26)}</span>`;
+    if (o.length === 1) return `<span class="ps-solo">${face(o[0], 34)}</span>`;
     return IC.huddle;
   }
 
