@@ -137,20 +137,23 @@
     document.body.appendChild(ov);
     const $q = s => ov.querySelector(s), note = $q('.ps-note'), msgRow = $q('.ps-msg'), inp = $q('input'), send = $q('.ps-send');
     let hs = [], sel = [], busy = false;
-    const bye = () => { ov.classList.remove('in'); removeEventListener('keydown', esc2); setTimeout(() => ov.remove(), 240); };
+    const bye = () => { ov.classList.remove('in'); document.documentElement.classList.remove('ps-open'); removeEventListener('keydown', esc2); setTimeout(() => ov.remove(), 240); };
     const done = t => { note.textContent = t; setTimeout(bye, 850); };
     const esc2 = ev => { if (ev.key === 'Escape') bye(); };
     addEventListener('keydown', esc2);
     requestAnimationFrame(() => requestAnimationFrame(() => ov.classList.add('in')));
     ov.addEventListener('pointerdown', ev => ev.stopPropagation());
     ov.addEventListener('click', ev => { ev.stopPropagation(); if (ev.target === ov) bye(); });
+    ov._redraw = () => { if (!hs.length) return; const sx = $q('.ps-hds') && $q('.ps-hds').scrollLeft; draw(); if (sx) $q('.ps-hds').scrollLeft = sx; };
     const draw = () => {
       const box = $q('.ps-list');
       if (!hs.length) { box.innerHTML = `<div class="ps-empty">You're not in any huddles yet.</div>`; return; }
-      box.innerHTML = `<div class="ps-hds">${hs.map(h => `<button type="button" class="ps-hd${sel.includes(h.id) ? ' on' : ''}" data-id="${esc(h.id)}" aria-pressed="${sel.includes(h.id)}"><span class="ps-av">${IC.huddle}</span><span class="ps-nm">${esc(h.title || 'Huddle')}</span></button>`).join('')}</div>`;
+      box.innerHTML = `<div class="ps-hds">${hs.map(h => `<button type="button" class="ps-hd${sel.includes(h.id) ? ' on' : ''}" data-id="${esc(h.id)}" aria-pressed="${sel.includes(h.id)}"><span class="ps-av">${avHtml(h)}</span><span class="ps-nm">${esc(h.title || 'Huddle')}</span></button>`).join('')}</div>`;
       msgRow.hidden = !sel.length;
       send.setAttribute('aria-label', sel.length > 1 ? `Send to ${sel.length} huddles` : 'Send');
     };
+    document.documentElement.classList.add('ps-open');
+    loadKit(() => ov._redraw());
     fetch(API + '/my-huddles', { headers: hdr() }).then(r => r.ok ? r.json() : { huddles: [] }).then(x => { hs = x.huddles || []; draw(); }).catch(() => { hs = []; draw(); });
     $q('.ps-list').addEventListener('click', ev => {
       const b = ev.target.closest('.ps-hd'); if (!b) return;
@@ -176,6 +179,34 @@
     $q('[data-k=copy]').addEventListener('click', async () => { try { await navigator.clipboard.writeText(u); shared(p, 'copy'); done('Link copied'); } catch (e) { note.textContent = "Couldn't copy the link"; } });
     $q('[data-k=more]').addEventListener('click', async () => { try { if (navigator.share) { await navigator.share({ url: u }); shared(p, 'more'); bye(); } else { await navigator.clipboard.writeText(u); shared(p, 'copy'); done('Link copied'); } } catch (e) {} });
   }
+  // huddle circles show the members' birds, like the site: two birds (or one), drawn by the site's bird kit
+  let kitCbs = null;
+  function loadKit(cb) {
+    if (window._ppKit) return;
+    if (kitCbs) { kitCbs.push(cb); return; }
+    kitCbs = [cb]; const s = document.createElement('script'); s.src = '/globe/birdkit.js?v=1377';
+    s.onload = () => { const l = kitCbs; kitCbs = []; l.forEach(f => f()); }; document.head.appendChild(s);
+  }
+  const admins = (() => { try { return new Set(JSON.parse(localStorage.getItem('_au') || '[]')); } catch (e) { return new Set(); } })();
+  const kitWait = new Set();
+  function face(name, z) {
+    const l = String(name || '').toLowerCase();
+    if (admins.has(l)) return `<img src="/admin-bird.png" alt="" style="width:${z}px;height:${z}px;object-fit:contain;display:block">`;
+    const K = window._ppKit; if (!K) return `<span style="display:inline-block;width:${z}px;height:${z}px"></span>`;
+    let h = 0; for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
+    const em = ['🐤', '🐦', '🐧'][Math.abs(h) % 3], r = K.get(name, em, 't');
+    if (r && !r.fail && r.t) { const w = z * (1 + 2 * (r.g || 0)); return `<img src="${r.t}" alt="" draggable="false" style="width:${w}px;height:${w}px;margin:${-(w - z) / 2}px;display:block;max-width:none;pointer-events:none;flex-shrink:0">`; }
+    if (!r && !kitWait.has(name)) { kitWait.add(name); K.sub(name, em, () => { const ov = document.querySelector('.ps-ov'); ov && ov._redraw && ov._redraw(); }, 't'); }
+    return `<span style="display:inline-block;width:${z}px;height:${z}px"></span>`;
+  }
+  function avHtml(h) {
+    let me = ''; try { me = (localStorage.getItem('_myUsername') || '').toLowerCase(); } catch (e) {}
+    const o = (h.members || []).filter(n => n && n.toLowerCase() !== me).slice(0, 2);
+    if (o.length === 2) return `<span class="ps-b ps-b1">${face(o[0], 23)}</span><span class="ps-b ps-b2">${face(o[1], 23)}</span>`;
+    if (o.length === 1) return `<span class="ps-solo">${face(o[0], 32)}</span>`;
+    return IC.huddle;
+  }
+
   // the site's "sign in" nudge (signed-out flap): a small toast with a Sign in button
   let toastT = 0;
   function toast(t, signIn) {
