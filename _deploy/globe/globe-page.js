@@ -488,11 +488,12 @@
 
   function start() {
     if (typeof Globe !== 'function') { $('empty').textContent = 'The globe couldn’t load on this device.'; return; }
-    world = window._gw = new Globe($('globe'), { animateIn: true })
+    world = new Globe($('globe'), { animateIn: true })
       .backgroundColor('rgba(0,0,0,0)')
       .globeImageUrl('/globe/earth-blue-marble.jpg')
-      // sharper imagery as you zoom: Sentinel-2 cloudless map tiles (EOX, CC BY-NC-SA), only the tiles in view load
-      .globeTileEngineUrl((x, y, l) => `https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2023_3857/default/g/${l}/${y}/${x}.jpg`).globeTileEngineMaxLevel(14)
+      // sharper imagery as you zoom: Sentinel-2 cloudless map tiles (EOX, CC BY-NC-SA), only the tiles in view load;
+      // they come through our worker (cached there) so visitors' phones never contact EOX
+      .globeTileEngineUrl((x, y, l) => `${API}/globe-tile/${l}/${y}/${x}.jpg`).globeTileEngineMaxLevel(14)
       .showAtmosphere(true).atmosphereColor('#8ab4ff').atmosphereAltitude(0.18)
       .htmlElementsData(marks).htmlLat('lat').htmlLng('lng').htmlAltitude(0.01).htmlElement(pinEl).htmlTransitionDuration(0)
       .htmlElementVisibilityModifier(() => {})
@@ -564,6 +565,7 @@
     const draw = () => {
       q = 0; const pov = world.pointOfView(), a = pov.altitude, b = bandOf(a);
       layer.classList.toggle('on', !!data && b > 0); credit.classList.toggle('on', a < 1.25);
+      { const st = document.getElementById('strip'), r = st && st.getBoundingClientRect(); credit.style.bottom = (r && r.height ? Math.max(4, innerHeight - r.top + 4) : 4) + 'px'; }
       if (!data) { if (b > 0 && !loading) { loading = true; fetch('/globe/map-data.json').then(r => r.json()).then(d => { data = d; band = -1; paths(); draw(); }).catch(() => { loading = false; }); } return; }
       paths(); if (b === 0) return;
       const la0 = pov.lat * R, lo0 = pov.lng * R, cap = Math.cos(Math.min(1.2, Math.acos(1 / (1 + a)) * 0.92));

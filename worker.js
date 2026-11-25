@@ -3074,6 +3074,27 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     }
   }
 
+  // ── /globe-tile/z/y/x.jpg ── sharper globe imagery when zoomed in: Sentinel-2 cloudless 2023 by EOX
+  // (CC BY-NC-SA 4.0, credited on the globe; site is non-commercial). Fetched here so visitors' phones never contact
+  // EOX, and kept in the edge cache for 30 days. Web-Mercator tiles, zoom 0–14 only.
+  const gt = url.pathname.match(/^\/globe-tile\/(\d{1,2})\/(\d{1,5})\/(\d{1,5})\.jpg$/);
+  if (gt && request.method === "GET") {
+    const z = +gt[1], y = +gt[2], x = +gt[3], n = 2 ** z;
+    if (z > 14 || y >= n || x >= n) return new Response("Not found", { status: 404, headers: corsHeaders });
+    const key = new Request(`https://perchposts-tiles.cache/s2c-2023/${z}/${y}/${x}.jpg`);
+    const hit = await caches.default.match(key);
+    if (hit) return hit;
+    try {
+      const up = await fetch(`https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2023_3857/default/g/${z}/${y}/${x}.jpg`, { cf: { cacheTtl: 2592000, cacheEverything: true } });
+      if (!up.ok) return new Response("Tile unavailable", { status: up.status === 404 ? 404 : 502, headers: corsHeaders });
+      const res = new Response(up.body, { headers: { ...corsHeaders, "Access-Control-Allow-Origin": "*", "Content-Type": "image/jpeg", "Cache-Control": "public, max-age=2592000, immutable" } });
+      ctx.waitUntil(caches.default.put(key, res.clone()));
+      return res;
+    } catch (err) {
+      return new Response("Tile unavailable", { status: 502, headers: corsHeaders });
+    }
+  }
+
   // ── /globe ── the saved trending stories (public). /globe-build: mods (or the bot key) rebuild now; ?dry=1 only shows.
   if (url.pathname === "/globe") {
     try {
