@@ -3227,6 +3227,31 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     }
   }
 
+  // ── /globe-hd/z/y/x.jpg ── the sharp close-up imagery for the very closest globe levels (the Take flight game):
+  // Esri World Imagery through the ArcGIS Location Platform (key in the ESRI_KEY secret; "Esri, Maxar, Earthstar
+  // Geographics" is credited on the globe). Fetched here so phones never contact Esri and the key stays secret.
+  // Without a key it falls back to the Sentinel-2 tiles above. /globe-hd/status tells the page whether it's on.
+  if (url.pathname === "/globe-hd/status") return json({ on: !!env.ESRI_KEY, maxLevel: env.ESRI_KEY ? 16 : 14 });
+  const hd = url.pathname.match(/^\/globe-hd\/(\d{1,2})\/(\d{1,6})\/(\d{1,6})\.jpg$/);
+  if (hd && request.method === "GET") {
+    const z = +hd[1], y = +hd[2], x = +hd[3], n = 2 ** z;
+    if (z > 16 || y >= n || x >= n) return new Response("Not found", { status: 404, headers: corsHeaders });
+    if (!env.ESRI_KEY) return z > 14 ? new Response("Not found", { status: 404, headers: corsHeaders }) : Response.redirect(`${url.origin}/globe-tile/${z}/${y}/${x}.jpg`, 302);
+    const key = new Request(`https://perchposts-tiles.cache/esri-wi/${z}/${y}/${x}.jpg`);
+    const hit = await caches.default.match(key);
+    if (hit) return hit;
+    try {
+      const up = await fetch(`https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}?token=${encodeURIComponent(env.ESRI_KEY)}`);
+      if (!up.ok) return new Response("Tile unavailable", { status: up.status === 404 ? 404 : 502, headers: corsHeaders });
+      // kept a day at the edge (repeat views of the same spot) — not long-term, per Esri's basemap terms
+      const res = new Response(up.body, { headers: { ...corsHeaders, "Access-Control-Allow-Origin": "*", "Content-Type": up.headers.get("content-type") || "image/jpeg", "Cache-Control": "public, max-age=86400" } });
+      ctx.waitUntil(caches.default.put(key, res.clone()));
+      return res;
+    } catch (err) {
+      return new Response("Tile unavailable", { status: 502, headers: corsHeaders });
+    }
+  }
+
   // ── /globe ── the saved trending stories (public). /globe-build: mods (or the bot key) rebuild now; ?dry=1 only shows.
   if (url.pathname === "/globe") {
     try {

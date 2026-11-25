@@ -547,7 +547,11 @@
     let pend = 0, sbT = 0;
     const small = $('glLoadS');
     const busy = () => { clearTimeout(sbT); if (pend > 0) sbT = setTimeout(() => small && small.classList.toggle('on', pend > 0), 350); else small && small.classList.remove('on'); };
-    const TILE = (x, y, l) => { pend++; busy(); return `${API}/globe-tile/${l}/${y}/${x}.jpg`; };
+    // the closest levels (13+, Take flight height) use the sharp Esri imagery when the server has it switched on
+    tileSrc = (x, y, l) => hdOn && l >= HD_FROM ? `${API}/globe-hd/${l}/${y}/${x}.jpg` : `${API}/globe-tile/${l}/${y}/${x}.jpg`;
+    const TILE = (x, y, l) => { pend++; busy(); return tileSrc(x, y, l); };
+    fetch(API + '/globe-hd/status').then(r => r.json()).then(j => { if (!j || !j.on) return; hdOn = true; world.globeTileEngineMaxLevel(j.maxLevel || 15);
+      if (te) tuneHd(te); }).catch(() => {});
     try { new PerformanceObserver(list => { for (const e of list.getEntries()) if (e.name.includes('/globe-tile/')) pend = Math.max(0, pend - 1); busy(); }).observe({ type: 'resource', buffered: false }); } catch (e) {}
     // the library hides the whole-Earth image as soon as tiles switch on, which flashed black until they arrived:
     // keep it always showing underneath (a hair smaller, so tiles sit cleanly on top) — same imagery, so no seam
@@ -560,7 +564,7 @@
       if (te && tilesOn) { if (a > lastA * 1.004) { te.tileUrl = null; clearTimeout(outT); outT = setTimeout(() => { if (tilesOn) { te.tileUrl = TILE; const v = world.pointOfView(); world.pointOfView({ ...v, altitude: v.altitude + 1e-5 }); } }, 250); } }
       lastA = a;
       if (!tilesOn && a < ON) { tilesOn = true; keepBase(); world.globeTileEngineUrl(TILE);
-        if (!tuned) { try { world.scene().traverse(o => { if (!tuned && o && Array.isArray(o.thresholds) && 'tileUrl' in o) { o.thresholds = o.thresholds.map((v, i) => 8 / Math.pow(2, i - 1)); tuned = true; te = o; } }); } catch (e) {} } }
+        if (!tuned) { try { world.scene().traverse(o => { if (!tuned && o && Array.isArray(o.thresholds) && 'tileUrl' in o) { o.thresholds = o.thresholds.map((v, i) => 8 / Math.pow(2, i - 1)); tuned = true; te = o; tileEng = o; if (hdOn) tuneHd(o); } }); } catch (e) {} } }
       else if (tilesOn && a > OFF) { tilesOn = false; clearTimeout(outT); world.globeTileEngineUrl(null); try { world.globeTileEngineClearCache(); } catch (e) {} pend = 0; busy(); } };
     world.controls().addEventListener('change', imagery); setInterval(imagery, 500);
     try { world.onZoom(() => { imagery(); }); } catch (e) {}  // also during animated flights (double-tap, story picks)
@@ -580,6 +584,11 @@
     return { lat: decl / R, lng: ((-15 * (hrs - 12 + eqt / 60)) + 540) % 360 - 180 };
   }
   const isDay = (lat, lng, s = subsolar()) => { const R = Math.PI / 180; return Math.sin(lat * R) * Math.sin(s.lat * R) + Math.cos(lat * R) * Math.cos(s.lat * R) * Math.cos((lng - s.lng) * R) > -0.0145; };
+  // Sharp close-up imagery (Esri) for the closest levels: at Take flight height (~10 km up) it loads level 15 (~3 m a
+  // pixel), so houses and roads show. The levels above it are unchanged.
+  const HD_FROM = 13; let hdOn = false, tileEng = null, tileSrc = null;
+  function tuneHd(o) { const t = o.thresholds.slice(); while (t.length < 17) t.push(8 / Math.pow(2, t.length - 1));
+    t[13] = 0.0034; t[14] = 0.0026; t[15] = 0.0019; t[16] = 0.0011; o.thresholds = t; }
   // Night side: a see-through shell just above the map (so it also darkens the zoomed-in tiles) with a soft dusk band
   // and NASA Black Marble city lights (public domain). Built from the globe's own three.js classes; sun updates each minute.
   function dayNight() {
@@ -681,6 +690,7 @@
     const draw = () => {
       q = 0; const pov = world.pointOfView(), a = pov.altitude, b = bandOf(a);
       layer.classList.toggle('on', !!data && b > 0); credit.classList.toggle('on', a < 1.25);
+      { const esri = hdOn && tileEng && tileEng.level >= HD_FROM, txt = esri ? 'Imagery © Esri, Maxar, Earthstar Geographics, and the GIS User Community · Natural Earth' : 'Imagery © EOX Sentinel-2 cloudless 2023 (Copernicus data) · Natural Earth'; if (credit.textContent !== txt) credit.textContent = txt; }
       if (!data) { if (b > 0 && !loading) { loading = true; fetch('/globe/map-data.json').then(r => r.json()).then(d => { data = d; band = -1; paths(); draw(); }).catch(() => { loading = false; }); } return; }
       paths(); if (b === 0) { shown = []; return; }
       try { world.camera().updateMatrixWorld(); } catch (e) {}
@@ -785,6 +795,19 @@
       const f = Math.sin(P.ph), span = moving ? 0.55 + 0.45 * (0.5 + 0.5 * f) : 0.9 + 0.1 * (0.5 + 0.5 * f);
       return { span: P.hold ? (moving ? 1 : 1) : span, bk: P.bk };
     }
+    // Load ahead: map tiles a few km in front of the bird (and either side) are fetched and decoded in the background
+    // before they scroll on screen, so the map doesn't hitch decoding them mid-frame. Kept to the last 300.
+    const pre = new Map(); let preAt = 0;
+    function preload(now) {
+      if (!tileEng || !tileSrc || !me || zoomIn) return; const L = tileEng.level, h = headAt(me, now), p = posAt(me, now); if (!L || h == null || !p) return;
+      const Z = 2 ** L, kx = 111.2 * Math.cos(p[0] * R);
+      for (const d of [4, 6]) for (const s0 of [-1.8, 0, 1.8]) {
+        const la = p[0] + (d * Math.cos(h) - s0 * Math.sin(h)) / 111.2, lo = p[1] + (d * Math.sin(h) + s0 * Math.cos(h)) / kx;
+        const x = Math.floor((lo + 180) / 360 * Z), y = Math.floor((1 - Math.log(Math.tan(la * R) + 1 / Math.cos(la * R)) / Math.PI) / 2 * Z), url = tileSrc(x, y, L);
+        if (pre.has(url)) continue;
+        const im = new Image(); im.crossOrigin = 'anonymous'; im.src = url; if (im.decode) im.decode().catch(() => {}); pre.set(url, im);
+        if (pre.size > 300) pre.delete(pre.keys().next().value);
+      } }
     // headings on screen ease toward where the bird is going, so nothing snaps
     const ease = (cur, want, dt) => { if (cur == null) return want; let d = want - cur; d = Math.atan2(Math.sin(d), Math.cos(d)); return cur + d * (1 - Math.exp(-dt / 0.07)); };
     const myName = () => { try { return localStorage.getItem('_myUsername') || ''; } catch (e) { return ''; } };
@@ -1005,6 +1028,7 @@
         if (zoomIn) { const k = Math.min(1, (performance.now() + frameMs - zoomIn.t0) / 1000), e = 1 - Math.pow(1 - k, 3), dl = ((lo - zoomIn.lo + 540) % 360) - 180;
           la = zoomIn.la + (la - zoomIn.la) * e; lo = zoomIn.lo + dl * e; al = zoomIn.a + (GAME_ALT - zoomIn.a) * e; if (k >= 1) zoomIn = null; }
         world.pointOfView(al == null ? { lat: la, lng: lo } : { lat: la, lng: lo, altitude: al }, 0); }
+      if (pf > preAt) { preAt = pf + 400; preload(now); }
       // keep flying: a little before the far-ahead point is reached, carry on the same way
       if (p && me.b1 != null && me.arrive - now < 12000 && performance.now() > extAt) { extAt = performance.now() + 5000; flyDir(headAt(me, now)); }
       // the line under your worm count: day or night where your bird is
