@@ -580,7 +580,7 @@
     const R = Math.PI / 180; let data = null, loading = false, band = -1, q = 0;
     const host = world.renderer().domElement.parentElement;
     const layer = document.createElement('div'); layer.className = 'map-lbl'; host.insertBefore(layer, world.renderer().domElement.nextSibling);
-    const credit = document.createElement('div'); credit.className = 'map-credit'; credit.textContent = 'Imagery: Sentinel-2 cloudless by EOX (Copernicus Sentinel data 2023) · Map: Natural Earth'; document.body.appendChild(credit);
+    const credit = document.createElement('div'); credit.className = 'map-credit'; credit.textContent = 'Imagery © EOX Sentinel-2 cloudless 2023 (Copernicus data) · Natural Earth'; document.body.appendChild(credit);
     const els = new Map(); let shown = [];
     const mk = (key, txt, cls) => { let e = els.get(key); if (!e) { e = document.createElement('div'); e.className = cls; e.textContent = txt; layer.appendChild(e); els.set(key, e); } return e; };
     // altitude bands → what shows
@@ -596,7 +596,6 @@
     const draw = () => {
       q = 0; const pov = world.pointOfView(), a = pov.altitude, b = bandOf(a);
       layer.classList.toggle('on', !!data && b > 0); credit.classList.toggle('on', a < 1.25);
-      { const st = document.getElementById('strip'), r = st && st.getBoundingClientRect(); credit.style.bottom = (r && r.height ? Math.max(4, innerHeight - r.top + 4) : 4) + 'px'; }
       if (!data) { if (b > 0 && !loading) { loading = true; fetch('/globe/map-data.json').then(r => r.json()).then(d => { data = d; band = -1; paths(); draw(); }).catch(() => { loading = false; }); } return; }
       paths(); if (b === 0) { shown = []; return; }
       try { world.camera().updateMatrixWorld(); } catch (e) {}
