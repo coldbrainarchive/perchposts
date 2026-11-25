@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Patch v1378 -> v1379 (PREVIEW): tapping the post chat header grows the full post down from the top, over the chat.
+"""Patch v1378 -> v1379 : tapping the post chat header grows the full post down from the top, over the chat.
 - Under the post title: flaps | worms (bird posts only) | share, styled like the scroller panel row, usable without opening.
 - Tapping the header still opens the full post; the action row moves to the bottom of the opened post
   (the post card's own pills are hidden there so they aren't doubled). A grab handle sits under the row.
