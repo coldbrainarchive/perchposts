@@ -726,8 +726,31 @@
       if (w < 1e-9) return a; const s1 = Math.sin((1 - f) * w) / Math.sin(w), s2 = Math.sin(f * w) / Math.sin(w), V = [A[0] * s1 + B[0] * s2, A[1] * s1 + B[1] * s2, A[2] * s1 + B[2] * s2];
       return [Math.atan2(V[2], Math.hypot(V[0], V[1])) / R, Math.atan2(V[1], V[0]) / R]; };
     const posAt = (f, t) => { if (!f) return null; if (t >= f.arrive || f.arrive <= f.depart) return f.to; if (t <= f.depart) return f.from; return slerp(f.from, f.to, (t - f.depart) / (f.arrive - f.depart)); };
+    // where a worm is: up for a few seconds crawling a little, then under, then up again a few km away (same code as the worker)
+    const wormPlan = w => { let h = 2166136261; for (const ch of String(w.id)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
+      let a = h >>> 0; const rnd = () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+      const segs = []; let t = w.born, x = 0, y = 0;
+      while (t < w.gone) { const up = 4500 + rnd() * 3500, s = { a: t, b: Math.min(w.gone, t + up), x, y, hd: rnd() * 6.2832, ph: rnd() * 6.2832 }; segs.push(s);
+        const e = wormOff(s, (s.b - s.a) / 1000), jd = rnd() * 6.2832, j = 2 + rnd() * 4; x = e[0] + Math.cos(jd) * j; y = e[1] + Math.sin(jd) * j; t += up + 2500 + rnd() * 3000; }
+      return segs; };
+    const wormOff = (s, u) => { const wob = 1.2 * Math.sin(u * 1.3 + s.ph); return [s.x + 0.9 * u * Math.cos(s.hd) - wob * Math.sin(s.hd), s.y + 0.9 * u * Math.sin(s.hd) + wob * Math.cos(s.hd)]; };
+    const wormAt = (w, t) => { const segs = w._p || (w._p = wormPlan(w)), toLL = o => [w.lat + o[1] / 111.2, w.lng + o[0] / (111.2 * Math.cos(w.lat * Math.PI / 180))];
+      for (const s of segs) { if (t >= s.a && t < s.b) { const ll = toLL(wormOff(s, (t - s.a) / 1000)); return { up: true, lat: ll[0], lng: ll[1], fromUp: t - s.a, toDown: s.b - t }; }
+        if (t < s.a) { const ll = toLL([s.x, s.y]); return { up: false, lat: ll[0], lng: ll[1], toUp: s.a - t }; } }
+      const l = segs[segs.length - 1], ll = l ? toLL(wormOff(l, (l.b - l.a) / 1000)) : [w.lat, w.lng]; return { up: false, lat: ll[0], lng: ll[1], toUp: Infinity }; };
+    // the bird always flies: a tap sets its direction, and it keeps going that way (a point far ahead on that heading)
+    const AHEAD = 2000;
+    const bearing = (a, b) => { const y = Math.sin((b[1] - a[1]) * R) * Math.cos(b[0] * R), x = Math.cos(a[0] * R) * Math.sin(b[0] * R) - Math.sin(a[0] * R) * Math.cos(b[0] * R) * Math.cos((b[1] - a[1]) * R); return Math.atan2(y, x); };
+    const ahead = (a, brg, d) => { const dd = d / 6371, la = a[0] * R, la2 = Math.asin(Math.sin(la) * Math.cos(dd) + Math.cos(la) * Math.sin(dd) * Math.cos(brg));
+      let la2c = la2 / R; la2c = Math.max(-84, Math.min(84, la2c)); return [la2c, ((a[1] * R + Math.atan2(Math.sin(brg) * Math.sin(dd) * Math.cos(la), Math.cos(dd) - Math.sin(la) * Math.sin(la2))) / R + 540) % 360 - 180]; };
+    function flyDir(brg) {
+      const t = srv(), p = posAt(me, t), to = ahead(p, brg, AHEAD);
+      me = { from: p, to, depart: t, arrive: t + km(p, to) / SPEED * 1000 }; flySent = Date.now();
+      try { localStorage.setItem('pp_hunt_brg', String(brg)); } catch (e) {}
+      api('/hunt/fly', { lat: to[0], lng: to[1] }).then(x => { if (x.s === 200 && x.j.me && on) me = x.j.me; });
+    }
     const myName = () => { try { return localStorage.getItem('_myUsername') || ''; } catch (e) { return ''; } };
-    let on = false, me = null, birds = [], worms = new Map(), off = 0, balance = null, fx = [], target = null, raf = 0, pollT = 0, flySent = 0, panUntil = 0, ang = -Math.PI / 2, angs = new Map(), asking = new Set(), seenTaken = new Set(), hintUntil = 0;
+    let on = false, me = null, birds = [], worms = new Map(), off = 0, balance = null, fx = [], target = null, raf = 0, pollT = 0, flySent = 0, lockAt = 0, extAt = 0, ang = -Math.PI / 2, angs = new Map(), asking = new Set(), seenTaken = new Set(), hintUntil = 0;
     const srv = () => Date.now() + off;
     const api = (path, body) => fetch(API + path, { method: 'POST', headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify(body || {}) }).then(async r => ({ s: r.status, j: await r.json().catch(() => ({})) })).catch(() => ({ s: 0, j: {} }));
 
@@ -759,13 +782,14 @@
       if (on) return; on = true; loadKit(() => {});
       document.body.classList.add('hunting'); pill.classList.remove('in'); bar.classList.add('in');
       try { closeSheet(); focusPin(null); } catch (e) {}
-      const c = world.controls(); c.autoRotate = false;
-      const v = world.pointOfView(); world.pointOfView({ altitude: GAME_ALT }, 700);
+      // the screen stays on your bird, so the map can't be dragged during the hunt (pinch zoom still works)
+      const c = world.controls(); c.autoRotate = false; c.enableRotate = false;
+      const v = world.pointOfView(); world.pointOfView({ altitude: GAME_ALT }, 700); lockAt = performance.now() + 2000;
       $('huntN').textContent = balance == null ? '–' : balance; hintUntil = Date.now() + 4000;
       poll(true, [v.lat, v.lng]); loop();
     }
     function leave() {
-      if (!on) return; on = false; document.body.classList.remove('hunting'); bar.classList.remove('in');
+      if (!on) return; on = false; document.body.classList.remove('hunting'); bar.classList.remove('in'); world.controls().enableRotate = true;
       cancelAnimationFrame(raf); clearTimeout(pollT); cx.clearRect(0, 0, cv.width, cv.height); target = null; fx = []; pillCheck();
     }
     async function poll(start, at) {
@@ -782,10 +806,13 @@
         birds = r.j.birds || [];
         const now = srv(), ids = new Set((r.j.worms || []).map(w => w.id));
         // a worm that vanished early went to another bird: a little puff where it was
-        for (const [id, w] of worms) if (!ids.has(id) && w.gone > now + 800 && !w.mine) fx.push({ k: 'poof', lat: w.lat, lng: w.lng, t0: performance.now(), gold: w.v > 1 });
+        for (const [id, w] of worms) if (!ids.has(id) && w.gone > now + 800 && !w.mine && w.at) fx.push({ k: 'poof', lat: w.at[0], lng: w.at[1], t0: performance.now(), gold: w.v > 1 });
         const next = new Map(); for (const w of r.j.worms || []) next.set(w.id, worms.get(w.id) || { ...w, seen: performance.now() }); worms = next;
         // starting: if your bird is still out somewhere else (you were hunting a moment ago), go to it
-        if (start && me) { const p = posAt(me, now), v = world.pointOfView(); if (km(p, [v.lat, v.lng]) > 15) world.pointOfView({ lat: p[0], lng: p[1], altitude: GAME_ALT }, 900); }
+        // starting: your bird is already in the air — still flying from a moment ago, or it takes off on its last heading
+        if (start && me) {
+          if (me.arrive <= now) { let b0 = NaN; try { b0 = parseFloat(localStorage.getItem('pp_hunt_brg')); } catch (e) {} flyDir(isFinite(b0) ? b0 : Math.random() * 6.2832); }
+          const q = posAt(me, srv() + 800); world.pointOfView({ lat: q[0], lng: q[1], altitude: GAME_ALT }, 800); lockAt = performance.now() + 820; }
       }
       pollT = setTimeout(() => poll(), 2000);
     }
@@ -798,18 +825,17 @@
     can.addEventListener('pointerup', e => {
       if (!on || !down || !e.isPrimary) return; const d = down; down = null;
       if (d.n > 1 || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 10 || Date.now() - d.t > 400 || !me) return;
+      // tap anywhere: the bird turns and flies that way (and keeps going)
       const r = can.getBoundingClientRect(), g = world.toGlobeCoords(e.clientX - r.left, e.clientY - r.top); if (!g) return;
-      const t = srv(), p = posAt(me, t), to = [g.lat, g.lng];
-      me = { from: p, to, depart: t, arrive: t + km(p, to) / SPEED * 1000 }; flySent = Date.now();
-      target = { lat: g.lat, lng: g.lng, t0: performance.now() };
-      api('/hunt/fly', { lat: g.lat, lng: g.lng }).then(x => { if (x.s === 200 && x.j.me && on) me = x.j.me; });
+      const p = posAt(me, srv()); if (km(p, [g.lat, g.lng]) < 2) return;
+      flyDir(bearing(p, [g.lat, g.lng])); target = { lat: g.lat, lng: g.lng, t0: performance.now() };
     });
 
     async function tryCatch(w) {
       if (asking.has(w.id)) return; asking.add(w.id);
       const r = await api('/hunt/catch', { id: w.id });
-      if (r.s === 200 && r.j.ok) { w.mine = true; worms.delete(w.id); fx.push({ k: 'catch', lat: w.lat, lng: w.lng, t0: performance.now(), v: r.j.value }); if (r.j.balance != null) setBal(r.j.balance); return; }
-      if (r.s === 409) { worms.delete(w.id); if (!seenTaken.has(w.id)) { seenTaken.add(w.id); fx.push({ k: 'poof', lat: w.lat, lng: w.lng, t0: performance.now(), by: r.j.by, gold: w.v > 1 }); } return; }
+      if (r.s === 200 && r.j.ok) { w.mine = true; worms.delete(w.id); fx.push({ k: 'catch', lat: w.at ? w.at[0] : w.lat, lng: w.at ? w.at[1] : w.lng, t0: performance.now(), v: r.j.value }); if (r.j.balance != null) setBal(r.j.balance); return; }
+      if (r.s === 409) { worms.delete(w.id); if (!seenTaken.has(w.id)) { seenTaken.add(w.id); fx.push({ k: 'poof', lat: w.at ? w.at[0] : w.lat, lng: w.at ? w.at[1] : w.lng, t0: performance.now(), by: r.j.by, gold: w.v > 1 }); } return; }
       if (r.s === 410 || r.s === 404) { worms.delete(w.id); return; }
       setTimeout(() => asking.delete(w.id), 800);   // not close enough on the server's clock yet: try again in a moment
     }
@@ -838,11 +864,12 @@
       c.restore(); c.restore();
     }
     // a worm: a tiny wiggling squiggle (gold ones are worth 5)
-    function drawWorm(x, y, w, t) {
-      const c = cx, gold = w.v > 1, life = w.gone - srv(), age = (performance.now() - w.seen) / 1000;
-      const pop = Math.min(1, age / 0.5), fade = life < 4000 ? Math.max(0.25, life / 4000) : 1;
-      c.save(); c.globalAlpha = pop * fade; c.beginPath();
-      for (let i = 0; i <= 8; i++) { const f = i / 8, px = x - 5 + f * 10, py = y + Math.sin(t * 4 + f * 6) * 1.6; i ? c.lineTo(px, py) : c.moveTo(px, py); }
+    function drawWorm(x, y, w, t, e) {
+      const c = cx, gold = w.v > 1, n = Math.max(1, Math.round(8 * e));
+      // half in the ground while coming up / going down: a little hole and a shorter worm
+      if (e < 1) { c.beginPath(); c.arc(x - 5, y, 1.8, 0, 7); c.fillStyle = `rgba(60,38,20,${0.7 * (1 - e)})`; c.fill(); }
+      c.save(); c.globalAlpha = Math.max(0.3, e); c.beginPath();
+      for (let i = 0; i <= n; i++) { const f = i / 8, px = x - 5 + f * 10, py = y + Math.sin(t * 4 + f * 6) * 1.6; i ? c.lineTo(px, py) : c.moveTo(px, py); }
       c.lineCap = 'round'; c.lineJoin = 'round';
       c.strokeStyle = 'rgba(0,0,0,.35)'; c.lineWidth = 3.6; c.stroke();
       c.strokeStyle = gold ? '#fcd34d' : '#f2a0a4'; c.lineWidth = 2.2; c.stroke();
@@ -860,26 +887,33 @@
     }
     function loop() {
       raf = requestAnimationFrame(loop); if (!on) return;
+      const now = srv(), p = me && posAt(me, now);
+      // the screen moves with your bird (kept in the middle)
+      if (p && performance.now() > lockAt) world.pointOfView({ lat: p[0], lng: p[1] }, 0);
+      // keep flying: a little before the far-ahead point is reached, carry on the same way
+      if (p && me.arrive - now < 15000 && performance.now() > extAt) { extAt = performance.now() + 5000; flyDir(bearing(p, me.to)); }
       try { world.camera().updateMatrixWorld(); } catch (e) {}
-      const c = cx, now = srv(), t = performance.now() / 1000, mine = myName();
+      const c = cx, t = performance.now() / 1000, mine = myName();
       c.setTransform(DPR, 0, 0, DPR, 0, 0); c.clearRect(0, 0, W, H);
       const v = world.pointOfView(), cosCap = Math.cos(Math.acos(1 / (1 + v.altitude)) * 0.95);
       const front = (la, lo) => Math.sin(v.lat * R) * Math.sin(la * R) + Math.cos(v.lat * R) * Math.cos(la * R) * Math.cos((lo - v.lng) * R) > cosCap;
       const inView = s => s && s.x > -30 && s.x < W + 30 && s.y > 60 && s.y < H - 70;
-      const p = me && posAt(me, now);
-      // where you're headed: a small fading ring
-      if (target) { const s = sc(target.lat, target.lng), age = (performance.now() - target.t0) / 1000, done = p && km(p, [target.lat, target.lng]) < 3;
-        if (done && !target.done) target.done = performance.now();
-        const fade = target.done ? Math.max(0, 1 - (performance.now() - target.done) / 400) : 1;
-        if (fade <= 0) target = null; else if (s) { c.save(); c.globalAlpha = 0.85 * fade; c.strokeStyle = '#fff'; c.lineWidth = 2; c.setLineDash([4, 4]); c.lineDashOffset = -t * 20;
-          c.beginPath(); c.arc(s.x, s.y, 10 + 3 * Math.sin(age * 6), 0, 7); c.stroke(); c.restore(); } }
-      // worms (and arrows to the ones off the screen)
+      // where you tapped: a small ring that fades out
+      if (target) { const s = sc(target.lat, target.lng), age = (performance.now() - target.t0) / 1000;
+        if (age > 0.6) target = null; else if (s) { c.save(); c.globalAlpha = 0.7 * (1 - age / 0.6); c.strokeStyle = '#fff'; c.lineWidth = 1.5;
+          c.beginPath(); c.arc(s.x, s.y, 6 + 14 * age, 0, 7); c.stroke(); c.restore(); } }
+      // worms: only there while they're above ground (arrows point to the ones that are up off the screen)
       for (const w of worms.values()) {
         if (w.gone <= now) { worms.delete(w.id); continue; }
-        if (!front(w.lat, w.lng)) continue;
-        const s = sc(w.lat, w.lng); if (!s) continue;
-        if (inView(s)) drawWorm(s.x, s.y, w, t); else drawEdge(s.x, s.y, w.v > 1, t);
-        if (p && km(p, [w.lat, w.lng]) < CATCH_KM) tryCatch(w);
+        const q = wormAt(w, now);
+        if (!q.up) { // about to come up: the dirt stirs a little
+          if (q.toUp < 600) { const s = sc(q.lat, q.lng); if (s && inView(s)) { c.save(); c.globalAlpha = 0.6 * (1 - q.toUp / 600); c.fillStyle = '#6b4424'; for (let i = 0; i < 3; i++) { c.beginPath(); c.arc(s.x + Math.cos(t * 9 + i * 2.1) * 2.5, s.y + Math.sin(t * 9 + i * 2.1) * 1.5, 1.3, 0, 7); c.fill(); } c.restore(); } }
+          continue; }
+        w.at = [q.lat, q.lng];
+        if (!front(q.lat, q.lng)) continue;
+        const s = sc(q.lat, q.lng); if (!s) continue;
+        if (inView(s)) drawWorm(s.x, s.y, w, t, Math.min(1, q.fromUp / 450, q.toDown / 450)); else drawEdge(s.x, s.y, w.v > 1, t);
+        if (p && km(p, [q.lat, q.lng]) < CATCH_KM) tryCatch(w);
       }
       // other birds
       for (const b of birds) { const q = posAt(b, now); if (!q || !front(q[0], q[1])) continue; const s = sc(q[0], q[1]); if (!inView(s)) continue;
@@ -906,14 +940,10 @@
         if (s) { const moving = now < me.arrive, ah = posAt(me, now + 250), s2 = ah && sc(ah[0], ah[1]);
           if (moving && s2 && Math.hypot(s2.x - s.x, s2.y - s.y) > 0.5) ang = Math.atan2(s2.y - s.y, s2.x - s.x);
           else if (!moving) { // sitting still: the beak slowly turns toward the nearest worm
-            let best = null, bd = 1e9; for (const w of worms.values()) { const d = km(p, [w.lat, w.lng]); if (d < bd) { bd = d; best = w; } }
-            const ws = best && sc(best.lat, best.lng);
+            let best = null, bd = 1e9; for (const w of worms.values()) { if (!w.at) continue; const d = km(p, w.at); if (d < bd) { bd = d; best = w; } }
+            const ws = best && sc(best.at[0], best.at[1]);
             if (ws) { const want = Math.atan2(ws.y - s.y, ws.x - s.x); let d = want - ang; d = Math.atan2(Math.sin(d), Math.cos(d)); ang += d * 0.06; } }
-          drawBird(s.x, s.y, ang, mine, 1, t, 1, swoop, moving);
-          // the view follows your bird when it nears the edge of the screen
-          const mx = W * 0.16, top = 110, bot = H - 120;
-          if ((s.x < mx || s.x > W - mx || s.y < top || s.y > bot) && performance.now() > panUntil && !down) {
-            const ahead = posAt(me, now + 700); panUntil = performance.now() + 750; world.pointOfView({ lat: ahead[0], lng: ahead[1] }, 700); } } }
+          drawBird(s.x, s.y, ang, mine, 1, t, 1, swoop, moving); } }
       // the line under your worm count: day or night where your bird is
       const tEl = $('huntT'); if (tEl) { const hint = Date.now() < hintUntil; if (tEl.classList.contains('on') !== hint) tEl.classList.toggle('on', hint); }
     }

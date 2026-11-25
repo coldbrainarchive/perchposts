@@ -2379,7 +2379,19 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     const HS = env.HUNT_FAST ? 1 : 0;                       // local testing only: worms appear quickly
     const SPEED = 18;                                     // km per second (crosses a phone screen at hunt zoom in ~9 s)
     const REACH = 7;                                      // km — a worm this close to your flight path is caught
-    const LIFE = 30000, GOLD_LIFE = 22000, NEAR = 300;     // worm life (ms); what you can see around you (km)
+    const LIFE = 40000, GOLD_LIFE = 30000, NEAR = 300;     // worm life (ms); what you can see around you (km)
+    // a worm comes up, crawls a little, goes back under, and comes up again a few km away (same code on the globe page)
+    const wormPlan = w => { let h = 2166136261; for (const ch of String(w.id)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
+      let a = h >>> 0; const rnd = () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+      const segs = []; let t = w.born, x = 0, y = 0;
+      while (t < w.gone) { const up = 4500 + rnd() * 3500, s = { a: t, b: Math.min(w.gone, t + up), x, y, hd: rnd() * 6.2832, ph: rnd() * 6.2832 }; segs.push(s);
+        const e = wormOff(s, (s.b - s.a) / 1000), jd = rnd() * 6.2832, j = 2 + rnd() * 4; x = e[0] + Math.cos(jd) * j; y = e[1] + Math.sin(jd) * j; t += up + 2500 + rnd() * 3000; }
+      return segs; };
+    const wormOff = (s, u) => { const wob = 1.2 * Math.sin(u * 1.3 + s.ph); return [s.x + 0.9 * u * Math.cos(s.hd) - wob * Math.sin(s.hd), s.y + 0.9 * u * Math.sin(s.hd) + wob * Math.cos(s.hd)]; };
+    const wormAt = (w, t) => { const segs = w._p || (w._p = wormPlan(w)), toLL = o => [w.lat + o[1] / 111.2, w.lng + o[0] / (111.2 * Math.cos(w.lat * Math.PI / 180))];
+      for (const s of segs) { if (t >= s.a && t < s.b) { const ll = toLL(wormOff(s, (t - s.a) / 1000)); return { up: true, lat: ll[0], lng: ll[1], fromUp: t - s.a, toDown: s.b - t }; }
+        if (t < s.a) { const ll = toLL([s.x, s.y]); return { up: false, lat: ll[0], lng: ll[1], toUp: s.a - t }; } }
+      const l = segs[segs.length - 1], ll = l ? toLL(wormOff(l, (l.b - l.a) / 1000)) : [w.lat, w.lng]; return { up: false, lat: ll[0], lng: ll[1], toUp: Infinity }; };
     const R = Math.PI / 180, now = Date.now();
     const km = (a, b) => { const d = Math.sin((b[0] - a[0]) * R / 2) ** 2 + Math.cos(a[0] * R) * Math.cos(b[0] * R) * Math.sin((b[1] - a[1]) * R / 2) ** 2; return 12742 * Math.asin(Math.min(1, Math.sqrt(d))); };
     const slerp = (a, b, f) => { const toV = p => [Math.cos(p[0] * R) * Math.cos(p[1] * R), Math.cos(p[0] * R) * Math.sin(p[1] * R), Math.sin(p[0] * R)];
@@ -2447,7 +2459,9 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         if (w.caught_by) return json({ taken: true, by: w.caught_by === username ? null : w.caught_by }, 409);
         if (w.gone_at < now - 1500) return json({ gone: true }, 410);
         // where could this bird have been over the last 2.5 s? (allows for the phone being a moment behind)
-        let near = Infinity; for (let k = 0; k <= 10; k++) { const t = now - 2500 + k * 250; if (t < w.born_at - 500) continue; near = Math.min(near, km(posAt(me, t), [w.lat, w.lng])); }
+        // the worm has to be above ground, and your bird within reach of it, at the same moment
+        const ww = { id: w.id, lat: w.lat, lng: w.lng, born: w.born_at, gone: w.gone_at };
+        let near = Infinity; for (let k = 0; k <= 20; k++) { const t = now - 2500 + k * 125; const q = wormAt(ww, t); if (!q.up) continue; near = Math.min(near, km(posAt(me, t), [q.lat, q.lng])); }
         if (near > REACH) return json({ far: true, km: Math.round(near) }, 400);
         const up = await env.DB.prepare(`UPDATE hunt_worms SET caught_by = ?, caught_at = ? WHERE id = ? AND caught_by IS NULL`).bind(username, now, w.id).run();
         if (!up.meta || !up.meta.changes) return json({ taken: true }, 409);
