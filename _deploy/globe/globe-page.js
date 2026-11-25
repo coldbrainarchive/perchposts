@@ -508,7 +508,7 @@
     const c = world.controls(); c.autoRotate = true; c.autoRotateSpeed = 0.45; c.enableDamping = true;
     // Pins only show on the side of the Earth facing you (with a margin, so none float past the edge)
     const R = Math.PI / 180;
-    const vis = () => { const v = world.pointOfView(), a = v.lat * R, b = v.lng * R;
+    const vis = () => { if (inGame()) return; const v = world.pointOfView(), a = v.lat * R, b = v.lng * R;
       const hb = (document.querySelector('.top')?.getBoundingClientRect().bottom || 0) - 8;
       for (const p of marks) { if (!p.el) continue; const la = p.lat * R; const d = Math.sin(a) * Math.sin(la) + Math.cos(a) * Math.cos(la) * Math.cos(p.lng * R - b);
         // also hide markers sliding under the title bar
@@ -516,7 +516,7 @@
         p.el.classList.toggle('back', d < 0.3 || under); } };
     c.addEventListener('change', vis); setTimeout(vis, 50); setInterval(vis, 500);
     world.renderer().domElement.addEventListener('pointerdown', () => { c.autoRotate = false; });
-    c.addEventListener('change', () => { if (!olQ) olQ = requestAnimationFrame(() => { olQ = 0; overviewLabels(); }); });
+    c.addEventListener('change', () => { if (inGame()) return; if (!olQ) olQ = requestAnimationFrame(() => { olQ = 0; overviewLabels(); }); });
     // double-tap: zoom in on that spot; when already close, zoom back out to the whole globe
     // no text-selection highlight from double-taps (Safari selects the whole page otherwise)
     document.addEventListener('dblclick', ev => { ev.preventDefault(); try { getSelection().removeAllRanges(); } catch (er) {} });
@@ -692,7 +692,7 @@
       want.sort((x, y) => x.pr - y.pr);
       const now = [], placed = [], seen = new Set(), W = innerWidth, H = innerHeight, top = (document.querySelector('.top')?.getBoundingClientRect().bottom || 0);
       // story pins and previews win: map names never sit under them
-      for (const pe of document.querySelectorAll('.pin:not(.back), .ev:not(.back), .pin .pv, .ev .mini')) { const q = pe.getBoundingClientRect(); if (q.width && q.height) placed.push({ l: q.left - 2, r: q.right + 2, t: q.top - 2, b: q.bottom + 2 }); }
+      if (!inGame()) for (const pe of document.querySelectorAll('.pin:not(.back), .ev:not(.back), .pin .pv, .ev .mini')) { const q = pe.getBoundingClientRect(); if (q.width && q.height) placed.push({ l: q.left - 2, r: q.right + 2, t: q.top - 2, b: q.bottom + 2 }); }
       const pinCount = placed.length;
       for (const w of want) {
         const la = w.lat * R, d = Math.sin(la0) * Math.sin(la) + Math.cos(la0) * Math.cos(la) * Math.cos(w.lng * R - lo0);
@@ -711,7 +711,9 @@
     const glue = () => { if (!shown.length) return; try { world.camera().updateMatrixWorld(); } catch (e) {}
       for (const s of shown) { const p = world.getScreenCoords(s.lat, s.lng, inGame() ? 0 : 0.001); if (p) s.e.style.transform = `translate(${p.x}px,${p.y}px)`; } };
     let lastDraw = 0;
-    const ask = () => { glue(); if (q) return; const wait = Math.max(0, 140 - (performance.now() - lastDraw));
+    const ask = fromGame => { if (inGame() && fromGame !== true) return; glue();
+      if (inGame()) { if (performance.now() - lastDraw > 250) { lastDraw = performance.now(); draw(); } return; }
+      if (q) return; const wait = Math.max(0, 140 - (performance.now() - lastDraw));
       q = setTimeout(() => requestAnimationFrame(() => { lastDraw = performance.now(); draw(); }), wait); };
     world.controls().addEventListener('change', ask); setInterval(ask, 600); ask(); mapAsk = ask;
   }
@@ -721,7 +723,7 @@
   // follows it. Worms pop out of the ground now and then (more at night, near trending stories; gold ones are worth 5)
   // and go to the first bird to reach them. The server keeps every flight and checks every catch (worker /hunt/*).
   function hunt() {
-    const SPEED = 0.5, CATCH_KM = 0.25, PILL_ALT = 0.0045, GAME_ALT = innerWidth < 600 ? 0.00225 : 0.0019, EXIT_ALT = 0.05;
+    const SPEED = 0.35, CATCH_KM = 0.18, PILL_ALT = 0.0032, GAME_ALT = innerWidth < 600 ? 0.0016 : 0.00135, EXIT_ALT = 0.05;
     const R = Math.PI / 180, WORM_D = 'M5.3 2.4C3.9 4.5 4 7.6 6.6 7.8C9.4 8 12.6 4.3 16.3 3.9C19.3 3.6 20.6 6.7 18.3 8.7C15.9 10.6 10.6 10.9 8.1 13.2C5.9 15.4 7.4 19.3 11 19.4C14.5 19.5 18 17.6 20.7 15.8';
     const WORM_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${WORM_D}"/></svg>`;
     const km = (a, b) => { const d = Math.sin((b[0] - a[0]) * R / 2) ** 2 + Math.cos(a[0] * R) * Math.cos(b[0] * R) * Math.sin((b[1] - a[1]) * R / 2) ** 2; return 12742 * Math.asin(Math.min(1, Math.sqrt(d))); };
@@ -737,16 +739,16 @@
       const o = fOff(f, Math.max(0, Math.min(t, f.arrive) - f.depart) / 1000), la = Math.max(-84, Math.min(84, f.from[0] + o[1] / 111.2));
       return [la, ((f.from[1] + o[0] / (111.2 * Math.cos(f.from[0] * Math.PI / 180)) + 540) % 360) - 180]; };
     const headAt = (f, t) => f && f.b0 != null && f.b1 != null ? fOff(f, Math.max(0, Math.min(t, f.arrive) - f.depart) / 1000)[2] : null;
-    const flyFor = T => (T + 40 / SPEED) * 1000;    // a flight lasts its turn plus 40 km straight on (the page carries on before then)
+    const flyFor = T => (T + 14 / SPEED) * 1000;    // a flight lasts its turn plus 14 km straight on (the page carries on before then)
     const posAt = flyAt;
     // where a worm is: up for a few seconds crawling a little, then under, then up again a few km away (same code as the worker)
     const wormPlan = w => { let h = 2166136261; for (const ch of String(w.id)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
       let a = h >>> 0; const rnd = () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
       const segs = []; let t = w.born, x = 0, y = 0;
       while (t < w.gone) { const up = 4500 + rnd() * 3500, s = { a: t, b: Math.min(w.gone, t + up), x, y, hd: rnd() * 6.2832, ph: rnd() * 6.2832 }; segs.push(s);
-        const e = wormOff(s, (s.b - s.a) / 1000), jd = rnd() * 6.2832, j = 0.13 + rnd() * 0.27; x = e[0] + Math.cos(jd) * j; y = e[1] + Math.sin(jd) * j; t += up + 2500 + rnd() * 3000; }
+        const e = wormOff(s, (s.b - s.a) / 1000), jd = rnd() * 6.2832, j = 0.09 + rnd() * 0.19; x = e[0] + Math.cos(jd) * j; y = e[1] + Math.sin(jd) * j; t += up + 2500 + rnd() * 3000; }
       return segs; };
-    const wormOff = (s, u) => { const wob = 0.08 * Math.sin(u * 1.3 + s.ph); return [s.x + 0.055 * u * Math.cos(s.hd) - wob * Math.sin(s.hd), s.y + 0.055 * u * Math.sin(s.hd) + wob * Math.cos(s.hd)]; };
+    const wormOff = (s, u) => { const wob = 0.057 * Math.sin(u * 1.3 + s.ph); return [s.x + 0.04 * u * Math.cos(s.hd) - wob * Math.sin(s.hd), s.y + 0.04 * u * Math.sin(s.hd) + wob * Math.cos(s.hd)]; };
     const wormAt = (w, t) => { const segs = w._p || (w._p = wormPlan(w)), toLL = o => [w.lat + o[1] / 111.2, w.lng + o[0] / (111.2 * Math.cos(w.lat * Math.PI / 180))];
       for (const s of segs) { if (t >= s.a && t < s.b) { const ll = toLL(wormOff(s, (t - s.a) / 1000)); return { up: true, lat: ll[0], lng: ll[1], fromUp: t - s.a, toDown: s.b - t }; }
         if (t < s.a) { const ll = toLL([s.x, s.y]); return { up: false, lat: ll[0], lng: ll[1], toUp: s.a - t }; } }
@@ -786,7 +788,7 @@
     // headings on screen ease toward where the bird is going, so nothing snaps
     const ease = (cur, want, dt) => { if (cur == null) return want; let d = want - cur; d = Math.atan2(Math.sin(d), Math.cos(d)); return cur + d * (1 - Math.exp(-dt / 0.07)); };
     const myName = () => { try { return localStorage.getItem('_myUsername') || ''; } catch (e) { return ''; } };
-    let on = false, me = null, birds = [], worms = new Map(), off = 0, balance = null, fx = [], target = null, raf = 0, pollT = 0, flySent = 0, flyWait = 0, corr = null, lastF = 0, zoomIn = null, extAt = 0, ang = -Math.PI / 2, angs = new Map(), asking = new Set(), seenTaken = new Set(), hintUntil = 0;
+    let on = false, me = null, birds = [], worms = new Map(), off = 0, balance = null, fx = [], target = null, raf = 0, pollT = 0, flySent = 0, flyWait = 0, corr = null, lastF = 0, frameMs = 16.7, zoomIn = null, extAt = 0, ang = -Math.PI / 2, angs = new Map(), asking = new Set(), seenTaken = new Set(), hintUntil = 0;
     const srv = () => Date.now() + off;
     const api = (path, body) => fetch(API + path, { method: 'POST', headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify(body || {}) }).then(async r => ({ s: r.status, j: await r.json().catch(() => ({})) })).catch(() => ({ s: 0, j: {} }));
 
@@ -939,17 +941,13 @@
     function loop() {
       raf = requestAnimationFrame(loop); if (!on) return;
       const now = srv(), p = me && posAt(me, now), pf = performance.now(), dt = lastF ? Math.min(0.1, (pf - lastF) / 1000) : 0.016; lastF = pf;
+      frameMs += (Math.min(50, Math.max(8, dt * 1000)) - frameMs) * 0.1;
       const cc = corrNow(), pv = p && [p[0] + cc[0], p[1] + cc[1]];   // where the bird is drawn (p is where it really is)
-      // the screen moves with your bird (kept in the middle)
-      // (on entering it glides from where you were looking down to your bird at hunting height over ~1 s)
-      if (p) { let la = pv[0], lo = pv[1], al = null;
-        if (zoomIn) { const k = Math.min(1, (performance.now() - zoomIn.t0) / 1000), e = 1 - Math.pow(1 - k, 3), dl = ((lo - zoomIn.lo + 540) % 360) - 180;
-          la = zoomIn.la + (la - zoomIn.la) * e; lo = zoomIn.lo + dl * e; al = zoomIn.a + (GAME_ALT - zoomIn.a) * e; if (k >= 1) zoomIn = null; }
-        world.pointOfView(al == null ? { lat: la, lng: lo } : { lat: la, lng: lo, altitude: al }, 0); }
-      // keep flying: a little before the far-ahead point is reached, carry on the same way
-      if (p && me.b1 != null && me.arrive - now < 12000 && performance.now() > extAt) { extAt = performance.now() + 5000; flyDir(headAt(me, now)); }
+      // The globe draws the map earlier in each frame than this loop runs, so everything here is drawn with the camera the
+      // map was just drawn with, and only at the end is the camera moved on for the next frame: map, bird, worms and names
+      // always move together.
       try { world.camera().updateMatrixWorld(); } catch (e) {}
-      if (mapAsk) mapAsk();   // map names follow the moving view every frame
+      if (mapAsk) mapAsk(true);   // map names follow the moving view every frame
       const c = cx, t = performance.now() / 1000, mine = myName();
       c.setTransform(DPR, 0, 0, DPR, 0, 0); c.clearRect(0, 0, W, H);
       const v = world.pointOfView(), cosCap = Math.cos(Math.acos(1 / (1 + v.altitude)) * 0.95);
@@ -1001,6 +999,14 @@
             const ws = best && sc(best.at[0], best.at[1]);
             if (ws) { const want = Math.atan2(ws.y - s.y, ws.x - s.x); let d = want - ang; d = Math.atan2(Math.sin(d), Math.cos(d)); ang += d * 0.06; } }
           drawBird(s.x, s.y, ang, mine, 1, 1, swoop, pose('@me', moving, bankAt(me, now), dt)); } }
+      // the screen moves with your bird (kept in the middle): aim at where it will be when the map is next drawn
+      // (on entering it glides from where you were looking down to your bird at hunting height over ~1 s)
+      if (p) { const tn = srv() + frameMs, pn = posAt(me, tn), c2 = corrNow(); let la = pn[0] + c2[0], lo = pn[1] + c2[1], al = null;
+        if (zoomIn) { const k = Math.min(1, (performance.now() + frameMs - zoomIn.t0) / 1000), e = 1 - Math.pow(1 - k, 3), dl = ((lo - zoomIn.lo + 540) % 360) - 180;
+          la = zoomIn.la + (la - zoomIn.la) * e; lo = zoomIn.lo + dl * e; al = zoomIn.a + (GAME_ALT - zoomIn.a) * e; if (k >= 1) zoomIn = null; }
+        world.pointOfView(al == null ? { lat: la, lng: lo } : { lat: la, lng: lo, altitude: al }, 0); }
+      // keep flying: a little before the far-ahead point is reached, carry on the same way
+      if (p && me.b1 != null && me.arrive - now < 12000 && performance.now() > extAt) { extAt = performance.now() + 5000; flyDir(headAt(me, now)); }
       // the line under your worm count: day or night where your bird is
       const tEl = $('huntT'); if (tEl) { const hint = Date.now() < hintUntil; if (tEl.classList.contains('on') !== hint) tEl.classList.toggle('on', hint); }
     }
