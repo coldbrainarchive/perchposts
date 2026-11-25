@@ -2389,7 +2389,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   if (url.pathname.startsWith("/hunt/") && request.method === "POST") {
     if (!username || isBot) return signInRequired();
     const HS = env.HUNT_FAST ? 1 : 0;                       // local testing only: worms appear quickly
-    const SPEED = 1;                                      // km per second (Ireland in ~5 min; a phone screen at hunt zoom in ~6 s)
+    const SPEED = 0.5;                                    // km per second (a phone screen at hunt zoom in ~12 s; Ireland in ~9 min)
     const REACH = 0.3;                                    // km — a worm this close to your flight path is caught
     const LIFE = 40000, GOLD_LIFE = 30000, NEAR = 25;     // worm life (ms); what you can see around you (km)
     // a worm comes up, crawls a little, goes back under, and comes up again a few km away (same code on the globe page)

@@ -717,7 +717,7 @@
   // follows it. Worms pop out of the ground now and then (more at night, near trending stories; gold ones are worth 5)
   // and go to the first bird to reach them. The server keeps every flight and checks every catch (worker /hunt/*).
   function hunt() {
-    const SPEED = 1, CATCH_KM = 0.25, PILL_ALT = 0.0045, GAME_ALT = innerWidth < 600 ? 0.00225 : 0.0019, EXIT_ALT = 0.05;
+    const SPEED = 0.5, CATCH_KM = 0.25, PILL_ALT = 0.0045, GAME_ALT = innerWidth < 600 ? 0.00225 : 0.0019, EXIT_ALT = 0.05;
     const R = Math.PI / 180, WORM_D = 'M5.3 2.4C3.9 4.5 4 7.6 6.6 7.8C9.4 8 12.6 4.3 16.3 3.9C19.3 3.6 20.6 6.7 18.3 8.7C15.9 10.6 10.6 10.9 8.1 13.2C5.9 15.4 7.4 19.3 11 19.4C14.5 19.5 18 17.6 20.7 15.8';
     const WORM_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${WORM_D}"/></svg>`;
     const km = (a, b) => { const d = Math.sin((b[0] - a[0]) * R / 2) ** 2 + Math.cos(a[0] * R) * Math.cos(b[0] * R) * Math.sin((b[1] - a[1]) * R / 2) ** 2; return 12742 * Math.asin(Math.min(1, Math.sqrt(d))); };
@@ -759,7 +759,7 @@
     // bird hop a few pixels: the difference is blended away over a third of a second instead
     function setMe(f) {
       const t = srv(), a = me && posAt(me, t), b = posAt(f, t);
-      if (a && b && km(a, b) < 6) { const c0 = corrNow(); corr = { la: a[0] - b[0] + c0[0], lo: a[1] - b[1] + c0[1], t0: performance.now() }; }
+      if (a && b && km(a, b) < 1) { const c0 = corrNow(); corr = { la: a[0] - b[0] + c0[0], lo: a[1] - b[1] + c0[1], t0: performance.now() }; }
       me = f;
     }
     const corrNow = () => { if (!corr) return [0, 0]; const k = 1 - (performance.now() - corr.t0) / 350; if (k <= 0) { corr = null; return [0, 0]; } const e = k * k * (3 - 2 * k); return [corr.la * e, corr.lo * e]; };
@@ -859,7 +859,8 @@
       if (d.n > 1 || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 10 || Date.now() - d.t > 400 || !me) return;
       // tap anywhere: the bird turns and flies that way (and keeps going)
       const r = can.getBoundingClientRect(), g = world.toGlobeCoords(e.clientX - r.left, e.clientY - r.top); if (!g) return;
-      const p = posAt(me, srv()); if (km(p, [g.lat, g.lng]) < 2) return;
+      // a tap right on the bird (within 14 px on screen) has no direction to give, so it's skipped
+      const p = posAt(me, srv()), bs = sc(p[0], p[1]); if (bs && Math.hypot(e.clientX - r.left - bs.x, e.clientY - r.top - bs.y) < 14) return;
       flyDir(bearing(p, [g.lat, g.lng])); target = { lat: g.lat, lng: g.lng, t0: performance.now() };
     });
 
