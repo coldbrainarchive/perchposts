@@ -2369,6 +2369,98 @@ async function handleRequest(request, env, ctx, corsHeaders) {
 
   // ── /vote-post ────────────────────────────────────────────────────────────────
 
+  // ── /hunt/* ── the globe's worm hunt (shared). Each signed-in bird flies at one fixed speed; the server keeps
+  // every flight (from, to, departure, arrival) so it always knows where a bird can really be. Worms are rare, appear
+  // near birds that are hunting (more at night and near trending stories), last ~30 s and go to the first bird that
+  // reaches them. A catch only counts if the bird's own flight passes within reach of the worm — scripts can't
+  // teleport. Caught worms land in the normal worm balance (a worms row from '__hunt__', no post).
+  if (url.pathname.startsWith("/hunt/") && request.method === "POST") {
+    if (!username || isBot) return signInRequired();
+    const HS = env.HUNT_FAST ? 1 : 0;                       // local testing only: worms appear quickly
+    const SPEED = 90;                                     // km per second (crosses a phone screen at hunt zoom in ~10 s)
+    const REACH = 32;                                     // km — a worm this close to your flight path is caught
+    const LIFE = 30000, GOLD_LIFE = 22000, NEAR = 1500;   // worm life (ms); what you can see around you (km)
+    const R = Math.PI / 180, now = Date.now();
+    const km = (a, b) => { const d = Math.sin((b[0] - a[0]) * R / 2) ** 2 + Math.cos(a[0] * R) * Math.cos(b[0] * R) * Math.sin((b[1] - a[1]) * R / 2) ** 2; return 12742 * Math.asin(Math.min(1, Math.sqrt(d))); };
+    const slerp = (a, b, f) => { const toV = p => [Math.cos(p[0] * R) * Math.cos(p[1] * R), Math.cos(p[0] * R) * Math.sin(p[1] * R), Math.sin(p[0] * R)];
+      const A = toV(a), B = toV(b), dot = Math.max(-1, Math.min(1, A[0] * B[0] + A[1] * B[1] + A[2] * B[2])), w = Math.acos(dot);
+      if (w < 1e-9) return a; const s1 = Math.sin((1 - f) * w) / Math.sin(w), s2 = Math.sin(f * w) / Math.sin(w), V = [A[0] * s1 + B[0] * s2, A[1] * s1 + B[1] * s2, A[2] * s1 + B[2] * s2];
+      return [Math.atan2(V[2], Math.hypot(V[0], V[1])) / R, Math.atan2(V[1], V[0]) / R]; };
+    const posAt = (b, t) => { if (!b) return null; const a = [b.from_lat, b.from_lng], z = [b.to_lat, b.to_lng]; if (t >= b.arrive_at || b.arrive_at <= b.depart_at) return z; if (t <= b.depart_at) return a; return slerp(a, z, (t - b.depart_at) / (b.arrive_at - b.depart_at)); };
+    const okLL = (la, lo) => Number.isFinite(la) && Number.isFinite(lo) && Math.abs(la) <= 85 && Math.abs(lo) <= 180;
+    const flight = b => b && { from: [b.from_lat, b.from_lng], to: [b.to_lat, b.to_lng], depart: b.depart_at, arrive: b.arrive_at };
+    try {
+      let me = await env.DB.prepare(`SELECT * FROM hunt_birds WHERE username = ?`).bind(username).first();
+      if (url.pathname === "/hunt/state") {
+        // a new bird starts where you're looking; so does one that's been away 45 s+ when you start hunting again
+        // (it can't be seen or catch anything while away, so moving it then gains nothing)
+        if (!me || (body.start && me.seen_at < now - 45000 && okLL(+body.lat, +body.lng))) {
+          const la = +body.lat, lo = +body.lng; if (!okLL(la, lo)) return json({ error: "Where are you?" }, 400);
+          await env.DB.prepare(`INSERT OR REPLACE INTO hunt_birds (username, from_lat, from_lng, to_lat, to_lng, depart_at, arrive_at, seen_at, spawn_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+            .bind(username, la, lo, la, lo, now, now, now, now).run();
+          me = { username, from_lat: la, from_lng: lo, to_lat: la, to_lng: lo, depart_at: now, arrive_at: now, seen_at: now, spawn_at: now };
+        }
+        const p = posAt(me, now);
+        // occasionally a worm pops up near you: about one every ~90 s of hunting at night, ~3 min by day, a bit more
+        // near trending stories; never more than 2 around you at once
+        const { results: live = [] } = await env.DB.prepare(`SELECT id, lat, lng, value, born_at, gone_at FROM hunt_worms WHERE gone_at > ? AND caught_by IS NULL`).bind(now).all();
+        const around = live.filter(w => km(p, [w.lat, w.lng]) < 800).length;
+        const dt = Math.min(10000, Math.max(0, now - (me.spawn_at || now)));
+        let spawned = null;
+        if (around < 2 && live.length < 300 && dt > 0) {
+          const d = new Date(now), y0 = Date.UTC(d.getUTCFullYear(), 0, 0), day = Math.floor((now - y0) / 864e5), hrs = d.getUTCHours() + d.getUTCMinutes() / 60;
+          const g = 2 * Math.PI / 365 * (day - 1 + (hrs - 12) / 24), decl = 0.006918 - 0.399912 * Math.cos(g) + 0.070257 * Math.sin(g) - 0.006758 * Math.cos(2 * g) + 0.000907 * Math.sin(2 * g);
+          const eqt = 229.18 * (0.000075 + 0.001868 * Math.cos(g) - 0.032077 * Math.sin(g) - 0.014615 * Math.cos(2 * g) - 0.040849 * Math.sin(2 * g)), sLng = -15 * (hrs - 12 + eqt / 60);
+          const night = Math.sin(p[0] * R) * Math.sin(decl) + Math.cos(p[0] * R) * Math.cos(decl) * Math.cos((p[1] - sLng) * R) < 0;
+          let story = null;
+          try { const gc = await env.DB.prepare(`SELECT v FROM globe_cache WHERE k = 'trending'`).first(); const st = gc ? (JSON.parse(gc.v).stories || []) : [];
+            for (const s of st) { const o = s.origin || s; const ll = [o.lat ?? s.lat, o.lng ?? s.lng]; if (okLL(+ll[0], +ll[1]) && km(p, ll) < 1500) { story = ll; break; } } } catch (e) {}
+          const mean = (HS ? 5000 : (night ? 90000 : 180000)) * (story ? 0.7 : 1);
+          if (Math.random() < dt / mean) {
+            let base = p, r0 = 150, r1 = 600;
+            if (story && Math.random() < 0.5) { base = story; r0 = 20; r1 = 220; }
+            const brg = Math.random() * 2 * Math.PI, dist = (r0 + Math.random() * (r1 - r0)) / 6371;
+            const la1 = Math.asin(Math.sin(base[0] * R) * Math.cos(dist) + Math.cos(base[0] * R) * Math.sin(dist) * Math.cos(brg));
+            const lo1 = base[1] * R + Math.atan2(Math.sin(brg) * Math.sin(dist) * Math.cos(base[0] * R), Math.cos(dist) - Math.sin(base[0] * R) * Math.sin(la1));
+            const gold = Math.random() < 0.06, w = { id: crypto.randomUUID(), lat: la1 / R, lng: ((lo1 / R + 540) % 360) - 180, value: gold ? 5 : 1, born_at: now, gone_at: now + (gold ? GOLD_LIFE : LIFE) };
+            if (Math.abs(w.lat) < 84) { await env.DB.prepare(`INSERT INTO hunt_worms (id, lat, lng, value, born_at, gone_at) VALUES (?, ?, ?, ?, ?, ?)`).bind(w.id, w.lat, w.lng, w.value, w.born_at, w.gone_at).run(); live.push(w); spawned = w.id; }
+          }
+        }
+        await env.DB.prepare(`UPDATE hunt_birds SET seen_at = ?, spawn_at = ? WHERE username = ?`).bind(now, now, username).run();
+        const { results: birds = [] } = await env.DB.prepare(`SELECT * FROM hunt_birds WHERE seen_at > ? AND username != ?`).bind(now - 45000, username).all();
+        if (Math.random() < 0.02) ctx.waitUntil(env.DB.prepare(`DELETE FROM hunt_worms WHERE gone_at < ?`).bind(now - 3600e3).run().catch(() => {}));
+        return json({ now, me: flight(me), balance: await wormBalance(username),
+          birds: birds.filter(b => km(p, posAt(b, now)) < 3000).slice(0, 30).map(b => ({ u: b.username, ...flight(b) })),
+          worms: live.filter(w => km(p, [w.lat, w.lng]) < NEAR).map(w => ({ id: w.id, lat: w.lat, lng: w.lng, v: w.value, born: w.born_at, gone: w.gone_at })), spawned });
+      }
+      if (!me) return json({ error: "Start the hunt first" }, 400);
+      if (url.pathname === "/hunt/fly") {
+        const la = +body.lat, lo = +body.lng; if (!okLL(la, lo)) return json({ error: "Bad spot" }, 400);
+        const p = posAt(me, now), ms = Math.round(km(p, [la, lo]) / SPEED * 1000);
+        await env.DB.prepare(`UPDATE hunt_birds SET from_lat = ?, from_lng = ?, to_lat = ?, to_lng = ?, depart_at = ?, arrive_at = ?, seen_at = ? WHERE username = ?`)
+          .bind(p[0], p[1], la, lo, now, now + ms, now, username).run();
+        return json({ now, me: { from: p, to: [la, lo], depart: now, arrive: now + ms } });
+      }
+      if (url.pathname === "/hunt/catch") {
+        const w = await env.DB.prepare(`SELECT * FROM hunt_worms WHERE id = ?`).bind(String(body.id || "")).first();
+        if (!w) return json({ error: "No worm" }, 404);
+        if (w.caught_by) return json({ taken: true, by: w.caught_by === username ? null : w.caught_by }, 409);
+        if (w.gone_at < now - 1500) return json({ gone: true }, 410);
+        // where could this bird have been over the last 2.5 s? (allows for the phone being a moment behind)
+        let near = Infinity; for (let k = 0; k <= 10; k++) { const t = now - 2500 + k * 250; if (t < w.born_at - 500) continue; near = Math.min(near, km(posAt(me, t), [w.lat, w.lng])); }
+        if (near > REACH) return json({ far: true, km: Math.round(near) }, 400);
+        const up = await env.DB.prepare(`UPDATE hunt_worms SET caught_by = ?, caught_at = ? WHERE id = ? AND caught_by IS NULL`).bind(username, now, w.id).run();
+        if (!up.meta || !up.meta.changes) return json({ taken: true }, 409);
+        const iso = new Date(now).toISOString(), ins = env.DB.prepare(`INSERT INTO worms (id, giver, receiver, post_id, comment_id, created_at) VALUES (?, '__hunt__', ?, NULL, NULL, ?)`);
+        await env.DB.batch(Array.from({ length: w.value }, () => ins.bind(crypto.randomUUID(), username, iso)));
+        return json({ ok: true, value: w.value, balance: await wormBalance(username) });
+      }
+      return json({ error: "Not found" }, 404);
+    } catch (err) {
+      return serverError(err);
+    }
+  }
+
   // ── /give-worm ─────────────────────────────────────────────────────────────
   // body: { post_id } or { comment_id }. One worm per call (people can give as many as they like); it goes to the
   // post's author, or for a chirp to whoever wrote the chirp. Bots, system lines and archived posts can't get worms.
@@ -3622,7 +3714,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       // to the top and counts as new again when they give more, like chirp notifications)
       if (me) {
         const { results: wg = [] } = await env.DB.prepare(
-          `SELECT giver, post_id, comment_id, MAX(created_at) AS created_at, COUNT(*) AS n FROM worms WHERE receiver = ? AND giver != ? AND created_at > ? GROUP BY giver, post_id, comment_id ORDER BY created_at DESC LIMIT 60`
+          `SELECT giver, post_id, comment_id, MAX(created_at) AS created_at, COUNT(*) AS n FROM worms WHERE receiver = ? AND giver != ? AND giver != '__hunt__' AND created_at > ? GROUP BY giver, post_id, comment_id ORDER BY created_at DESC LIMIT 60`
         ).bind(me, me, clearedSince).all();
         if (wg.length) {
           const cids = [...new Set(wg.filter(w => w.comment_id).map(w => w.comment_id))];
