@@ -717,40 +717,49 @@
   // follows it. Worms pop out of the ground now and then (more at night, near trending stories; gold ones are worth 5)
   // and go to the first bird to reach them. The server keeps every flight and checks every catch (worker /hunt/*).
   function hunt() {
-    const SPEED = 18, CATCH_KM = 5.5, PILL_ALT = 0.12, GAME_ALT = innerWidth < 600 ? 0.06 : 0.05, EXIT_ALT = 0.2;
+    const SPEED = 4.5, CATCH_KM = 1.8, PILL_ALT = 0.04, GAME_ALT = innerWidth < 600 ? 0.02 : 0.017, EXIT_ALT = 0.07;
     const R = Math.PI / 180, WORM_D = 'M5.3 2.4C3.9 4.5 4 7.6 6.6 7.8C9.4 8 12.6 4.3 16.3 3.9C19.3 3.6 20.6 6.7 18.3 8.7C15.9 10.6 10.6 10.9 8.1 13.2C5.9 15.4 7.4 19.3 11 19.4C14.5 19.5 18 17.6 20.7 15.8';
     const WORM_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${WORM_D}"/></svg>`;
     const km = (a, b) => { const d = Math.sin((b[0] - a[0]) * R / 2) ** 2 + Math.cos(a[0] * R) * Math.cos(b[0] * R) * Math.sin((b[1] - a[1]) * R / 2) ** 2; return 12742 * Math.asin(Math.min(1, Math.sqrt(d))); };
-    const slerp = (a, b, f) => { const toV = p => [Math.cos(p[0] * R) * Math.cos(p[1] * R), Math.cos(p[0] * R) * Math.sin(p[1] * R), Math.sin(p[0] * R)];
-      const A = toV(a), B = toV(b), dot = Math.max(-1, Math.min(1, A[0] * B[0] + A[1] * B[1] + A[2] * B[2])), w = Math.acos(dot);
-      if (w < 1e-9) return a; const s1 = Math.sin((1 - f) * w) / Math.sin(w), s2 = Math.sin(f * w) / Math.sin(w), V = [A[0] * s1 + B[0] * s2, A[1] * s1 + B[1] * s2, A[2] * s1 + B[2] * s2];
-      return [Math.atan2(V[2], Math.hypot(V[0], V[1])) / R, Math.atan2(V[1], V[0]) / R]; };
-    const posAt = (f, t) => { if (!f) return null; if (t >= f.arrive || f.arrive <= f.depart) return f.to; if (t <= f.depart) return f.from; return slerp(f.from, f.to, (t - f.depart) / (f.arrive - f.depart)); };
+    // a flight: from a point, turn like a bird (at TURN rad/s) from heading b0 to b1, then fly straight on b1 at SPEED
+    // (bearings clockwise from north; flat-map maths over these short distances — the same code runs on the globe page)
+    const TURN = 120 * Math.PI / 180;
+    const fTurn = f => { if (f._T == null) { let d = ((f.b1 - f.b0) % 6.283185307) + 6.283185307; d = (d % 6.283185307); if (d > Math.PI) d -= 6.283185307; f._s = d < 0 ? -1 : 1; f._T = Math.abs(d) / TURN; } return f; };
+    const fOff = (f, u) => { fTurn(f); const T = f._T, s = f._s, ut = Math.min(u, T), bt = f.b0 + s * TURN * ut; let x = 0, y = 0;
+      if (T > 0) { const k = SPEED / (s * TURN); x = k * (Math.cos(f.b0) - Math.cos(bt)); y = k * (Math.sin(bt) - Math.sin(f.b0)); }
+      if (u > T) { x += SPEED * (u - T) * Math.sin(f.b1); y += SPEED * (u - T) * Math.cos(f.b1); }
+      return [x, y, u < T ? bt : f.b1]; };
+    const flyAt = (f, t) => { if (!f) return null; if (f.b0 == null || f.b1 == null) return f.to || f.from;
+      const o = fOff(f, Math.max(0, Math.min(t, f.arrive) - f.depart) / 1000), la = Math.max(-84, Math.min(84, f.from[0] + o[1] / 111.2));
+      return [la, ((f.from[1] + o[0] / (111.2 * Math.cos(f.from[0] * Math.PI / 180)) + 540) % 360) - 180]; };
+    const headAt = (f, t) => f && f.b0 != null && f.b1 != null ? fOff(f, Math.max(0, Math.min(t, f.arrive) - f.depart) / 1000)[2] : null;
+    const flyFor = T => (T + 150 / SPEED) * 1000;   // a flight lasts its turn plus 150 km straight on (the page carries on before then)
+    const posAt = flyAt;
     // where a worm is: up for a few seconds crawling a little, then under, then up again a few km away (same code as the worker)
     const wormPlan = w => { let h = 2166136261; for (const ch of String(w.id)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
       let a = h >>> 0; const rnd = () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
       const segs = []; let t = w.born, x = 0, y = 0;
       while (t < w.gone) { const up = 4500 + rnd() * 3500, s = { a: t, b: Math.min(w.gone, t + up), x, y, hd: rnd() * 6.2832, ph: rnd() * 6.2832 }; segs.push(s);
-        const e = wormOff(s, (s.b - s.a) / 1000), jd = rnd() * 6.2832, j = 2 + rnd() * 4; x = e[0] + Math.cos(jd) * j; y = e[1] + Math.sin(jd) * j; t += up + 2500 + rnd() * 3000; }
+        const e = wormOff(s, (s.b - s.a) / 1000), jd = rnd() * 6.2832, j = 0.6 + rnd() * 1.2; x = e[0] + Math.cos(jd) * j; y = e[1] + Math.sin(jd) * j; t += up + 2500 + rnd() * 3000; }
       return segs; };
-    const wormOff = (s, u) => { const wob = 1.2 * Math.sin(u * 1.3 + s.ph); return [s.x + 0.9 * u * Math.cos(s.hd) - wob * Math.sin(s.hd), s.y + 0.9 * u * Math.sin(s.hd) + wob * Math.cos(s.hd)]; };
+    const wormOff = (s, u) => { const wob = 0.35 * Math.sin(u * 1.3 + s.ph); return [s.x + 0.25 * u * Math.cos(s.hd) - wob * Math.sin(s.hd), s.y + 0.25 * u * Math.sin(s.hd) + wob * Math.cos(s.hd)]; };
     const wormAt = (w, t) => { const segs = w._p || (w._p = wormPlan(w)), toLL = o => [w.lat + o[1] / 111.2, w.lng + o[0] / (111.2 * Math.cos(w.lat * Math.PI / 180))];
       for (const s of segs) { if (t >= s.a && t < s.b) { const ll = toLL(wormOff(s, (t - s.a) / 1000)); return { up: true, lat: ll[0], lng: ll[1], fromUp: t - s.a, toDown: s.b - t }; }
         if (t < s.a) { const ll = toLL([s.x, s.y]); return { up: false, lat: ll[0], lng: ll[1], toUp: s.a - t }; } }
       const l = segs[segs.length - 1], ll = l ? toLL(wormOff(l, (l.b - l.a) / 1000)) : [w.lat, w.lng]; return { up: false, lat: ll[0], lng: ll[1], toUp: Infinity }; };
-    // the bird always flies: a tap sets its direction, and it keeps going that way (a point far ahead on that heading)
-    const AHEAD = 2000;
+    // the bird always flies: a tap sets a new heading; it glides round to it like a bird, then flies straight on
     const bearing = (a, b) => { const y = Math.sin((b[1] - a[1]) * R) * Math.cos(b[0] * R), x = Math.cos(a[0] * R) * Math.sin(b[0] * R) - Math.sin(a[0] * R) * Math.cos(b[0] * R) * Math.cos((b[1] - a[1]) * R); return Math.atan2(y, x); };
-    const ahead = (a, brg, d) => { const dd = d / 6371, la = a[0] * R, la2 = Math.asin(Math.sin(la) * Math.cos(dd) + Math.cos(la) * Math.sin(dd) * Math.cos(brg));
-      let la2c = la2 / R; la2c = Math.max(-84, Math.min(84, la2c)); return [la2c, ((a[1] * R + Math.atan2(Math.sin(brg) * Math.sin(dd) * Math.cos(la), Math.cos(dd) - Math.sin(la) * Math.sin(la2))) / R + 540) % 360 - 180]; };
     function flyDir(brg) {
-      const t = srv(), p = posAt(me, t), to = ahead(p, brg, AHEAD);
-      me = { from: p, to, depart: t, arrive: t + km(p, to) / SPEED * 1000 }; flySent = Date.now();
+      const t = srv(), p = posAt(me, t), h = me && t < me.arrive ? headAt(me, t) : null;
+      const f = fTurn({ from: p, to: p, b0: h == null ? brg : h, b1: brg, depart: t }); f.arrive = t + flyFor(f._T); me = f; flySent = Date.now();
       try { localStorage.setItem('pp_hunt_brg', String(brg)); } catch (e) {}
-      api('/hunt/fly', { lat: to[0], lng: to[1] }).then(x => { if (x.s === 200 && x.j.me && on) me = x.j.me; });
+      api('/hunt/fly', { brg }).then(x => { if (x.s === 200 && x.j.me && on) me = x.j.me; });
     }
+    // how far the bird is leaning into a turn (−1 left … 1 right): it tips in as the turn starts and levels out after
+    const bankAt = (f, t) => { if (!f || f.b0 == null || f.b1 == null) return 0; fTurn(f); const u = (t - f.depart) / 1000, T = f._T;
+      if (T < 0.05 || u > T + 0.4) return 0; return f._s * Math.max(0, Math.min(1, u / 0.2, (T + 0.4 - u) / 0.45)) * Math.min(1, T * TURN / 0.9); };
     const myName = () => { try { return localStorage.getItem('_myUsername') || ''; } catch (e) { return ''; } };
-    let on = false, me = null, birds = [], worms = new Map(), off = 0, balance = null, fx = [], target = null, raf = 0, pollT = 0, flySent = 0, lockAt = 0, extAt = 0, ang = -Math.PI / 2, angs = new Map(), asking = new Set(), seenTaken = new Set(), hintUntil = 0;
+    let on = false, me = null, birds = [], worms = new Map(), off = 0, balance = null, fx = [], target = null, raf = 0, pollT = 0, flySent = 0, zoomIn = null, extAt = 0, ang = -Math.PI / 2, angs = new Map(), asking = new Set(), seenTaken = new Set(), hintUntil = 0;
     const srv = () => Date.now() + off;
     const api = (path, body) => fetch(API + path, { method: 'POST', headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify(body || {}) }).then(async r => ({ s: r.status, j: await r.json().catch(() => ({})) })).catch(() => ({ s: 0, j: {} }));
 
@@ -784,7 +793,7 @@
       try { closeSheet(); focusPin(null); } catch (e) {}
       // the screen stays on your bird, so the map can't be dragged during the hunt (pinch zoom still works)
       const c = world.controls(); c.autoRotate = false; c.enableRotate = false;
-      const v = world.pointOfView(); world.pointOfView({ altitude: GAME_ALT }, 700); lockAt = performance.now() + 2000;
+      const v = world.pointOfView();
       $('huntN').textContent = balance == null ? '–' : balance; hintUntil = Date.now() + 4000;
       poll(true, [v.lat, v.lng]); loop();
     }
@@ -811,8 +820,8 @@
         // starting: if your bird is still out somewhere else (you were hunting a moment ago), go to it
         // starting: your bird is already in the air — still flying from a moment ago, or it takes off on its last heading
         if (start && me) {
-          if (me.arrive <= now) { let b0 = NaN; try { b0 = parseFloat(localStorage.getItem('pp_hunt_brg')); } catch (e) {} flyDir(isFinite(b0) ? b0 : Math.random() * 6.2832); }
-          const q = posAt(me, srv() + 800); world.pointOfView({ lat: q[0], lng: q[1], altitude: GAME_ALT }, 800); lockAt = performance.now() + 820; }
+          if (me.arrive <= now || me.b1 == null) { let b0 = NaN; try { b0 = parseFloat(localStorage.getItem('pp_hunt_brg')); } catch (e) {} flyDir(isFinite(b0) ? b0 : Math.random() * 6.2832); }
+          const v0 = world.pointOfView(); zoomIn = { la: v0.lat, lo: v0.lng, a: v0.altitude, t0: performance.now() }; }
       }
       pollT = setTimeout(() => poll(), 2000);
     }
@@ -843,24 +852,29 @@
     // ── drawing ──
     const sc = (la, lo) => world.getScreenCoords(la, lo, 0.001);
     // a simple bird seen from above in the bird's colour; the beak points where it's going
-    function drawBird(x, y, a, name, s, t, alpha, swoop, moving) {
-      const c = cx, cl = col(name), dk = shade(cl), sw = swoop || 0, k = s * 0.8 * (1 - 0.2 * sw);
-      const flap = Math.sin(t * (moving ? 13 : 4)), span = moving ? 0.55 + 0.45 * (0.5 + 0.5 * flap) : 0.9 + 0.1 * (0.5 + 0.5 * flap);
-      const shape = () => { const q = span; c.beginPath();
-        c.moveTo(12, 0);                                                   // head
-        c.quadraticCurveTo(10, -4, 4, -4.5);
-        c.quadraticCurveTo(0, -20 * q, -8, -27 * q);                       // left wing tip
-        c.quadraticCurveTo(-6, -12 * q, -8, -4);
-        c.lineTo(-17, -6); c.lineTo(-14, 0); c.lineTo(-17, 6); c.lineTo(-8, 4);   // tail
-        c.quadraticCurveTo(-6, 12 * q, -8, 27 * q);                        // right wing tip
-        c.quadraticCurveTo(0, 20 * q, 4, 4.5);
-        c.quadraticCurveTo(10, 4, 12, 0); c.closePath(); };
+    function drawBird(x, y, a, name, s, t, alpha, swoop, moving, bank) {
+      const c = cx, cl = col(name), dk = shade(cl), sw = swoop || 0, k = s * 0.8 * (1 - 0.2 * sw), bk = bank || 0, ab = Math.abs(bk);
+      // in a turn it stops flapping and glides with its wings out; seen from above, the wing it leans toward looks shorter
+      const flap = Math.sin(t * (moving ? 13 : 4)), flapSpan = moving ? 0.55 + 0.45 * (0.5 + 0.5 * flap) : 0.9 + 0.1 * (0.5 + 0.5 * flap);
+      const glide = Math.min(1, ab * 3), span = flapSpan * (1 - glide) + glide;
+      const qL = span * (bk < 0 ? 1 - 0.4 * ab : 1 - 0.05 * ab), qR = span * (bk > 0 ? 1 - 0.4 * ab : 1 - 0.05 * ab), roll = bk * 2;
+      const shape = () => { c.beginPath();
+        c.moveTo(12, roll);                                                // head
+        c.quadraticCurveTo(10, -4 + roll, 4, -4.5 + roll);
+        c.quadraticCurveTo(0, -20 * qL, -8, -27 * qL);                     // left wing tip
+        c.quadraticCurveTo(-6, -12 * qL, -8, -4 + roll);
+        c.lineTo(-17, -6 + roll); c.lineTo(-14, roll); c.lineTo(-17, 6 + roll); c.lineTo(-8, 4 + roll);   // tail
+        c.quadraticCurveTo(-6, 12 * qR, -8, 27 * qR);                      // right wing tip
+        c.quadraticCurveTo(0, 20 * qR, 4, 4.5 + roll);
+        c.quadraticCurveTo(10, 4 + roll, 12, roll); c.closePath(); };
       c.save(); c.globalAlpha = alpha;
       const so = (8 - 7 * sw) * s;
       c.save(); c.translate(x + so * 0.4, y + so); c.rotate(a); c.scale(k, k); c.fillStyle = 'rgba(0,0,0,.22)'; shape(); c.fill(); c.restore();
       c.save(); c.translate(x, y); c.rotate(a); c.scale(k, k);
       shape(); c.fillStyle = cl; c.fill();
-      c.beginPath(); c.moveTo(12, -1.8); c.lineTo(17, 0); c.lineTo(12, 1.8); c.closePath(); c.fillStyle = dk; c.fill();   // beak
+      // the lowered wing is a little in shadow
+      if (ab > 0.05) { c.save(); c.beginPath(); c.rect(-30, bk > 0 ? roll + 5 : -45, 42, 40 + roll * 0); c.clip(); shape(); c.fillStyle = `rgba(0,0,0,${0.12 * ab})`; c.fill(); c.restore(); }
+      c.beginPath(); c.moveTo(12, -1.8 + roll); c.lineTo(17, roll); c.lineTo(12, 1.8 + roll); c.closePath(); c.fillStyle = dk; c.fill();   // beak
       c.restore(); c.restore();
     }
     // a worm: a tiny wiggling squiggle (gold ones are worth 5)
@@ -889,9 +903,13 @@
       raf = requestAnimationFrame(loop); if (!on) return;
       const now = srv(), p = me && posAt(me, now);
       // the screen moves with your bird (kept in the middle)
-      if (p && performance.now() > lockAt) world.pointOfView({ lat: p[0], lng: p[1] }, 0);
+      // (on entering it glides from where you were looking down to your bird at hunting height over ~1 s)
+      if (p) { let la = p[0], lo = p[1], al = null;
+        if (zoomIn) { const k = Math.min(1, (performance.now() - zoomIn.t0) / 1000), e = 1 - Math.pow(1 - k, 3), dl = ((lo - zoomIn.lo + 540) % 360) - 180;
+          la = zoomIn.la + (la - zoomIn.la) * e; lo = zoomIn.lo + dl * e; al = zoomIn.a + (GAME_ALT - zoomIn.a) * e; if (k >= 1) zoomIn = null; }
+        world.pointOfView(al == null ? { lat: la, lng: lo } : { lat: la, lng: lo, altitude: al }, 0); }
       // keep flying: a little before the far-ahead point is reached, carry on the same way
-      if (p && me.arrive - now < 15000 && performance.now() > extAt) { extAt = performance.now() + 5000; flyDir(bearing(p, me.to)); }
+      if (p && me.b1 != null && me.arrive - now < 12000 && performance.now() > extAt) { extAt = performance.now() + 5000; flyDir(headAt(me, now)); }
       try { world.camera().updateMatrixWorld(); } catch (e) {}
       const c = cx, t = performance.now() / 1000, mine = myName();
       c.setTransform(DPR, 0, 0, DPR, 0, 0); c.clearRect(0, 0, W, H);
@@ -919,7 +937,7 @@
       for (const b of birds) { const q = posAt(b, now); if (!q || !front(q[0], q[1])) continue; const s = sc(q[0], q[1]); if (!inView(s)) continue;
         const moving = now < b.arrive, ahead = posAt(b, now + 250), s2 = ahead && sc(ahead[0], ahead[1]);
         let a = angs.get(b.u) ?? -Math.PI / 2; if (moving && s2 && Math.hypot(s2.x - s.x, s2.y - s.y) > 0.5) a = Math.atan2(s2.y - s.y, s2.x - s.x); angs.set(b.u, a);
-        drawBird(s.x, s.y, a, b.u, 0.8, t + b.u.length, 0.92, 0, moving);
+        drawBird(s.x, s.y, a, b.u, 0.8, t + b.u.length, 0.92, 0, moving, bankAt(b, now));
         c.save(); c.font = '600 9.5px -apple-system,system-ui,sans-serif'; c.textAlign = 'center'; c.fillStyle = 'rgba(255,255,255,.75)'; c.shadowColor = 'rgba(0,0,0,.9)'; c.shadowBlur = 3; c.fillText(b.u, s.x, s.y + 26); c.restore(); }
       // effects: catches (your bird dives, the worm is pulled up, +1 / +5 rises) and worms another bird took
       let swoop = 0;
@@ -943,7 +961,7 @@
             let best = null, bd = 1e9; for (const w of worms.values()) { if (!w.at) continue; const d = km(p, w.at); if (d < bd) { bd = d; best = w; } }
             const ws = best && sc(best.at[0], best.at[1]);
             if (ws) { const want = Math.atan2(ws.y - s.y, ws.x - s.x); let d = want - ang; d = Math.atan2(Math.sin(d), Math.cos(d)); ang += d * 0.06; } }
-          drawBird(s.x, s.y, ang, mine, 1, t, 1, swoop, moving); } }
+          drawBird(s.x, s.y, ang, mine, 1, t, 1, swoop, moving, bankAt(me, now)); } }
       // the line under your worm count: day or night where your bird is
       const tEl = $('huntT'); if (tEl) { const hint = Date.now() < hintUntil; if (tEl.classList.contains('on') !== hint) tEl.classList.toggle('on', hint); }
     }

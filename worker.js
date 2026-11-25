@@ -2377,30 +2377,39 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   if (url.pathname.startsWith("/hunt/") && request.method === "POST") {
     if (!username || isBot) return signInRequired();
     const HS = env.HUNT_FAST ? 1 : 0;                       // local testing only: worms appear quickly
-    const SPEED = 18;                                     // km per second (crosses a phone screen at hunt zoom in ~9 s)
-    const REACH = 7;                                      // km — a worm this close to your flight path is caught
-    const LIFE = 40000, GOLD_LIFE = 30000, NEAR = 300;     // worm life (ms); what you can see around you (km)
+    const SPEED = 4.5;                                    // km per second (crosses a phone screen at hunt zoom in ~12 s)
+    const REACH = 2.2;                                    // km — a worm this close to your flight path is caught
+    const LIFE = 40000, GOLD_LIFE = 30000, NEAR = 100;     // worm life (ms); what you can see around you (km)
     // a worm comes up, crawls a little, goes back under, and comes up again a few km away (same code on the globe page)
     const wormPlan = w => { let h = 2166136261; for (const ch of String(w.id)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
       let a = h >>> 0; const rnd = () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
       const segs = []; let t = w.born, x = 0, y = 0;
       while (t < w.gone) { const up = 4500 + rnd() * 3500, s = { a: t, b: Math.min(w.gone, t + up), x, y, hd: rnd() * 6.2832, ph: rnd() * 6.2832 }; segs.push(s);
-        const e = wormOff(s, (s.b - s.a) / 1000), jd = rnd() * 6.2832, j = 2 + rnd() * 4; x = e[0] + Math.cos(jd) * j; y = e[1] + Math.sin(jd) * j; t += up + 2500 + rnd() * 3000; }
+        const e = wormOff(s, (s.b - s.a) / 1000), jd = rnd() * 6.2832, j = 0.6 + rnd() * 1.2; x = e[0] + Math.cos(jd) * j; y = e[1] + Math.sin(jd) * j; t += up + 2500 + rnd() * 3000; }
       return segs; };
-    const wormOff = (s, u) => { const wob = 1.2 * Math.sin(u * 1.3 + s.ph); return [s.x + 0.9 * u * Math.cos(s.hd) - wob * Math.sin(s.hd), s.y + 0.9 * u * Math.sin(s.hd) + wob * Math.cos(s.hd)]; };
+    const wormOff = (s, u) => { const wob = 0.35 * Math.sin(u * 1.3 + s.ph); return [s.x + 0.25 * u * Math.cos(s.hd) - wob * Math.sin(s.hd), s.y + 0.25 * u * Math.sin(s.hd) + wob * Math.cos(s.hd)]; };
     const wormAt = (w, t) => { const segs = w._p || (w._p = wormPlan(w)), toLL = o => [w.lat + o[1] / 111.2, w.lng + o[0] / (111.2 * Math.cos(w.lat * Math.PI / 180))];
       for (const s of segs) { if (t >= s.a && t < s.b) { const ll = toLL(wormOff(s, (t - s.a) / 1000)); return { up: true, lat: ll[0], lng: ll[1], fromUp: t - s.a, toDown: s.b - t }; }
         if (t < s.a) { const ll = toLL([s.x, s.y]); return { up: false, lat: ll[0], lng: ll[1], toUp: s.a - t }; } }
       const l = segs[segs.length - 1], ll = l ? toLL(wormOff(l, (l.b - l.a) / 1000)) : [w.lat, w.lng]; return { up: false, lat: ll[0], lng: ll[1], toUp: Infinity }; };
     const R = Math.PI / 180, now = Date.now();
     const km = (a, b) => { const d = Math.sin((b[0] - a[0]) * R / 2) ** 2 + Math.cos(a[0] * R) * Math.cos(b[0] * R) * Math.sin((b[1] - a[1]) * R / 2) ** 2; return 12742 * Math.asin(Math.min(1, Math.sqrt(d))); };
-    const slerp = (a, b, f) => { const toV = p => [Math.cos(p[0] * R) * Math.cos(p[1] * R), Math.cos(p[0] * R) * Math.sin(p[1] * R), Math.sin(p[0] * R)];
-      const A = toV(a), B = toV(b), dot = Math.max(-1, Math.min(1, A[0] * B[0] + A[1] * B[1] + A[2] * B[2])), w = Math.acos(dot);
-      if (w < 1e-9) return a; const s1 = Math.sin((1 - f) * w) / Math.sin(w), s2 = Math.sin(f * w) / Math.sin(w), V = [A[0] * s1 + B[0] * s2, A[1] * s1 + B[1] * s2, A[2] * s1 + B[2] * s2];
-      return [Math.atan2(V[2], Math.hypot(V[0], V[1])) / R, Math.atan2(V[1], V[0]) / R]; };
-    const posAt = (b, t) => { if (!b) return null; const a = [b.from_lat, b.from_lng], z = [b.to_lat, b.to_lng]; if (t >= b.arrive_at || b.arrive_at <= b.depart_at) return z; if (t <= b.depart_at) return a; return slerp(a, z, (t - b.depart_at) / (b.arrive_at - b.depart_at)); };
+    // a flight: from a point, turn like a bird (at TURN rad/s) from heading b0 to b1, then fly straight on b1 at SPEED
+    // (bearings clockwise from north; flat-map maths over these short distances — the same code runs on the globe page)
+    const TURN = 120 * Math.PI / 180;
+    const fTurn = f => { if (f._T == null) { let d = ((f.b1 - f.b0) % 6.283185307) + 6.283185307; d = (d % 6.283185307); if (d > Math.PI) d -= 6.283185307; f._s = d < 0 ? -1 : 1; f._T = Math.abs(d) / TURN; } return f; };
+    const fOff = (f, u) => { fTurn(f); const T = f._T, s = f._s, ut = Math.min(u, T), bt = f.b0 + s * TURN * ut; let x = 0, y = 0;
+      if (T > 0) { const k = SPEED / (s * TURN); x = k * (Math.cos(f.b0) - Math.cos(bt)); y = k * (Math.sin(bt) - Math.sin(f.b0)); }
+      if (u > T) { x += SPEED * (u - T) * Math.sin(f.b1); y += SPEED * (u - T) * Math.cos(f.b1); }
+      return [x, y, u < T ? bt : f.b1]; };
+    const flyAt = (f, t) => { if (!f) return null; if (f.b0 == null || f.b1 == null) return f.to || f.from;
+      const o = fOff(f, Math.max(0, Math.min(t, f.arrive) - f.depart) / 1000), la = Math.max(-84, Math.min(84, f.from[0] + o[1] / 111.2));
+      return [la, ((f.from[1] + o[0] / (111.2 * Math.cos(f.from[0] * Math.PI / 180)) + 540) % 360) - 180]; };
+    const headAt = (f, t) => f && f.b0 != null && f.b1 != null ? fOff(f, Math.max(0, Math.min(t, f.arrive) - f.depart) / 1000)[2] : null;
+    const flyFor = T => (T + 150 / SPEED) * 1000;   // a flight lasts its turn plus 150 km straight on (the page carries on before then)
+    const posAt = (b, t) => b ? flyAt(flight(b), t) : null;
     const okLL = (la, lo) => Number.isFinite(la) && Number.isFinite(lo) && Math.abs(la) <= 85 && Math.abs(lo) <= 180;
-    const flight = b => b && { from: [b.from_lat, b.from_lng], to: [b.to_lat, b.to_lng], depart: b.depart_at, arrive: b.arrive_at };
+    const flight = b => b && { from: [b.from_lat, b.from_lng], to: [b.to_lat, b.to_lng], b0: b.brg0 ?? null, b1: b.brg1 ?? null, depart: b.depart_at, arrive: b.arrive_at };
     try {
       let me = await env.DB.prepare(`SELECT * FROM hunt_birds WHERE username = ?`).bind(username).first();
       if (url.pathname === "/hunt/state") {
@@ -2408,15 +2417,15 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         // (it can't be seen or catch anything while away, so moving it then gains nothing)
         if (!me || (body.start && me.seen_at < now - 45000 && okLL(+body.lat, +body.lng))) {
           const la = +body.lat, lo = +body.lng; if (!okLL(la, lo)) return json({ error: "Where are you?" }, 400);
-          await env.DB.prepare(`INSERT OR REPLACE INTO hunt_birds (username, from_lat, from_lng, to_lat, to_lng, depart_at, arrive_at, seen_at, spawn_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          await env.DB.prepare(`INSERT OR REPLACE INTO hunt_birds (username, from_lat, from_lng, to_lat, to_lng, depart_at, arrive_at, seen_at, spawn_at, brg0, brg1) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`)
             .bind(username, la, lo, la, lo, now, now, now, now).run();
           me = { username, from_lat: la, from_lng: lo, to_lat: la, to_lng: lo, depart_at: now, arrive_at: now, seen_at: now, spawn_at: now };
         }
         const p = posAt(me, now);
         // occasionally a worm pops up near you: about one every ~90 s of hunting at night, ~3 min by day, a bit more
-        // near trending stories; never more than 2 around you at once (within 160 km)
+        // near trending stories; never more than 2 around you at once (within 50 km)
         const { results: live = [] } = await env.DB.prepare(`SELECT id, lat, lng, value, born_at, gone_at FROM hunt_worms WHERE gone_at > ? AND caught_by IS NULL`).bind(now).all();
-        const around = live.filter(w => km(p, [w.lat, w.lng]) < 160).length;
+        const around = live.filter(w => km(p, [w.lat, w.lng]) < 50).length;
         const dt = Math.min(10000, Math.max(0, now - (me.spawn_at || now)));
         let spawned = null;
         if (around < 2 && live.length < 300 && dt > 0) {
@@ -2426,11 +2435,11 @@ async function handleRequest(request, env, ctx, corsHeaders) {
           const night = Math.sin(p[0] * R) * Math.sin(decl) + Math.cos(p[0] * R) * Math.cos(decl) * Math.cos((p[1] - sLng) * R) < 0;
           let story = null;
           try { const gc = await env.DB.prepare(`SELECT v FROM globe_cache WHERE k = 'trending'`).first(); const st = gc ? (JSON.parse(gc.v).stories || []) : [];
-            for (const s of st) { const o = s.origin || s; const ll = [o.lat ?? s.lat, o.lng ?? s.lng]; if (okLL(+ll[0], +ll[1]) && km(p, ll) < 150) { story = ll; break; } } } catch (e) {}
+            for (const s of st) { const o = s.origin || s; const ll = [o.lat ?? s.lat, o.lng ?? s.lng]; if (okLL(+ll[0], +ll[1]) && km(p, ll) < 50) { story = ll; break; } } } catch (e) {}
           const mean = (HS ? 5000 : (night ? 90000 : 180000)) * (story ? 0.7 : 1);
           if (Math.random() < dt / mean) {
-            let base = p, r0 = 30, r1 = 120;
-            if (story && Math.random() < 0.5) { base = story; r0 = 5; r1 = 50; }
+            let base = p, r0 = 8, r1 = 35;
+            if (story && Math.random() < 0.5) { base = story; r0 = 2; r1 = 15; }
             const brg = Math.random() * 2 * Math.PI, dist = (r0 + Math.random() * (r1 - r0)) / 6371;
             const la1 = Math.asin(Math.sin(base[0] * R) * Math.cos(dist) + Math.cos(base[0] * R) * Math.sin(dist) * Math.cos(brg));
             const lo1 = base[1] * R + Math.atan2(Math.sin(brg) * Math.sin(dist) * Math.cos(base[0] * R), Math.cos(dist) - Math.sin(base[0] * R) * Math.sin(la1));
@@ -2442,16 +2451,18 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         const { results: birds = [] } = await env.DB.prepare(`SELECT * FROM hunt_birds WHERE seen_at > ? AND username != ?`).bind(now - 45000, username).all();
         if (Math.random() < 0.02) ctx.waitUntil(env.DB.prepare(`DELETE FROM hunt_worms WHERE gone_at < ?`).bind(now - 3600e3).run().catch(() => {}));
         return json({ now, me: flight(me), balance: await wormBalance(username),
-          birds: birds.filter(b => km(p, posAt(b, now)) < 600).slice(0, 30).map(b => ({ u: b.username, ...flight(b) })),
+          birds: birds.filter(b => km(p, posAt(b, now)) < 200).slice(0, 30).map(b => ({ u: b.username, ...flight(b) })),
           worms: live.filter(w => km(p, [w.lat, w.lng]) < NEAR).map(w => ({ id: w.id, lat: w.lat, lng: w.lng, v: w.value, born: w.born_at, gone: w.gone_at })), spawned });
       }
       if (!me) return json({ error: "Start the hunt first" }, 400);
       if (url.pathname === "/hunt/fly") {
-        const la = +body.lat, lo = +body.lng; if (!okLL(la, lo)) return json({ error: "Bad spot" }, 400);
-        const p = posAt(me, now), ms = Math.round(km(p, [la, lo]) / SPEED * 1000);
-        await env.DB.prepare(`UPDATE hunt_birds SET from_lat = ?, from_lng = ?, to_lat = ?, to_lng = ?, depart_at = ?, arrive_at = ?, seen_at = ? WHERE username = ?`)
-          .bind(p[0], p[1], la, lo, now, now + ms, now, username).run();
-        return json({ now, me: { from: p, to: [la, lo], depart: now, arrive: now + ms } });
+        // a new heading: the bird turns from the way it's going now (gliding round), then flies straight on
+        const brg = +body.brg; if (!Number.isFinite(brg) || Math.abs(brg) > 100) return json({ error: "Bad heading" }, 400);
+        const f0 = flight(me), p = posAt(me, now), h = now < me.arrive_at ? headAt(f0, now) : null;
+        const f = fTurn({ from: p, to: p, b0: h == null ? brg : h, b1: brg, depart: now }); f.arrive = now + Math.round(flyFor(f._T));
+        await env.DB.prepare(`UPDATE hunt_birds SET from_lat = ?, from_lng = ?, to_lat = ?, to_lng = ?, brg0 = ?, brg1 = ?, depart_at = ?, arrive_at = ?, seen_at = ? WHERE username = ?`)
+          .bind(p[0], p[1], p[0], p[1], f.b0, f.b1, now, f.arrive, now, username).run();
+        return json({ now, me: { from: p, to: p, b0: f.b0, b1: f.b1, depart: now, arrive: f.arrive } });
       }
       if (url.pathname === "/hunt/catch") {
         const w = await env.DB.prepare(`SELECT * FROM hunt_worms WHERE id = ?`).bind(String(body.id || "")).first();
