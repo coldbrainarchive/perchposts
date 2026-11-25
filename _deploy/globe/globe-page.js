@@ -751,15 +751,38 @@
     const bearing = (a, b) => { const y = Math.sin((b[1] - a[1]) * R) * Math.cos(b[0] * R), x = Math.cos(a[0] * R) * Math.sin(b[0] * R) - Math.sin(a[0] * R) * Math.cos(b[0] * R) * Math.cos((b[1] - a[1]) * R); return Math.atan2(y, x); };
     function flyDir(brg) {
       const t = srv(), p = posAt(me, t), h = me && t < me.arrive ? headAt(me, t) : null;
-      const f = fTurn({ from: p, to: p, b0: h == null ? brg : h, b1: brg, depart: t }); f.arrive = t + flyFor(f._T); me = f; flySent = Date.now();
+      const f = fTurn({ from: p, to: p, b0: h == null ? brg : h, b1: brg, depart: t }); f.arrive = t + flyFor(f._T); me = f; flySent = Date.now(); flyWait++;
       try { localStorage.setItem('pp_hunt_brg', String(brg)); } catch (e) {}
-      api('/hunt/fly', { brg }).then(x => { if (x.s === 200 && x.j.me && on) me = x.j.me; });
+      api('/hunt/fly', { brg }).then(x => { flyWait = Math.max(0, flyWait - 1); if (x.s === 200 && x.j.me && on && flyWait === 0) setMe(x.j.me); });
     }
+    // the server's copy of a flight starts a moment later than the one the page drew, so swapping to it would make the
+    // bird hop a few pixels: the difference is blended away over a third of a second instead
+    function setMe(f) {
+      const t = srv(), a = me && posAt(me, t), b = posAt(f, t);
+      if (a && b && km(a, b) < 6) { const c0 = corrNow(); corr = { la: a[0] - b[0] + c0[0], lo: a[1] - b[1] + c0[1], t0: performance.now() }; }
+      me = f;
+    }
+    const corrNow = () => { if (!corr) return [0, 0]; const k = 1 - (performance.now() - corr.t0) / 350; if (k <= 0) { corr = null; return [0, 0]; } const e = k * k * (3 - 2 * k); return [corr.la * e, corr.lo * e]; };
     // how far the bird is leaning into a turn (−1 left … 1 right): it tips in as the turn starts and levels out after
     const bankAt = (f, t) => { if (!f || f.b0 == null || f.b1 == null) return 0; fTurn(f); const u = (t - f.depart) / 1000, T = f._T;
-      if (T < 0.05 || u > T + 0.4) return 0; return f._s * Math.max(0, Math.min(1, u / 0.2, (T + 0.4 - u) / 0.45)) * Math.min(1, T * TURN / 0.9); };
+      return T < 0.05 || u < 0 || u > T ? 0 : f._s * Math.min(1, T * TURN / 0.9); };
+    // each bird's wings: flapping keeps its own rhythm; when a turn starts it finishes the beat it's in (until the wings
+    // are fully out), then holds them out and leans into the turn smoothly, and picks the beat back up after
+    const poses = new Map();
+    function pose(id, moving, want, dt) {
+      let P = poses.get(id); if (!P) { P = { ph: Math.random() * 6.283, hold: false, bk: 0 }; poses.set(id, P); }
+      const rate = moving ? 13 : 4, top = Math.PI / 2, turning = Math.abs(want) > 0.02;
+      if (!P.hold) { const before = P.ph; P.ph += dt * rate;
+        if (turning && Math.floor((before - top) / 6.2832) !== Math.floor((P.ph - top) / 6.2832)) { P.ph = top + 6.2832 * Math.floor((P.ph - top) / 6.2832); P.hold = true; } }
+      else if (!turning && Math.abs(P.bk) < 0.15) P.hold = false;
+      P.bk += ((P.hold && turning ? want : 0) - P.bk) * (1 - Math.exp(-dt / 0.14));
+      const f = Math.sin(P.ph), span = moving ? 0.55 + 0.45 * (0.5 + 0.5 * f) : 0.9 + 0.1 * (0.5 + 0.5 * f);
+      return { span: P.hold ? (moving ? 1 : 1) : span, bk: P.bk };
+    }
+    // headings on screen ease toward where the bird is going, so nothing snaps
+    const ease = (cur, want, dt) => { if (cur == null) return want; let d = want - cur; d = Math.atan2(Math.sin(d), Math.cos(d)); return cur + d * (1 - Math.exp(-dt / 0.07)); };
     const myName = () => { try { return localStorage.getItem('_myUsername') || ''; } catch (e) { return ''; } };
-    let on = false, me = null, birds = [], worms = new Map(), off = 0, balance = null, fx = [], target = null, raf = 0, pollT = 0, flySent = 0, zoomIn = null, extAt = 0, ang = -Math.PI / 2, angs = new Map(), asking = new Set(), seenTaken = new Set(), hintUntil = 0;
+    let on = false, me = null, birds = [], worms = new Map(), off = 0, balance = null, fx = [], target = null, raf = 0, pollT = 0, flySent = 0, flyWait = 0, corr = null, lastF = 0, zoomIn = null, extAt = 0, ang = -Math.PI / 2, angs = new Map(), asking = new Set(), seenTaken = new Set(), hintUntil = 0;
     const srv = () => Date.now() + off;
     const api = (path, body) => fetch(API + path, { method: 'POST', headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify(body || {}) }).then(async r => ({ s: r.status, j: await r.json().catch(() => ({})) })).catch(() => ({ s: 0, j: {} }));
 
@@ -810,7 +833,7 @@
       if (r.s === 401) { leave(); toast('Sign in to take flight', true); return; }
       if (r.s === 200 && r.j.now) {
         const t1 = Date.now(); off = r.j.now - (t0 + t1) / 2;
-        if (sent > flySent) me = r.j.me;   // a flight you just set wins over an older answer
+        if (sent > flySent && !flyWait && r.j.me && (!me || r.j.me.depart >= me.depart - 50)) setMe(r.j.me);   // a flight you just set wins over an older answer
         if (r.j.balance != null) setBal(r.j.balance);
         birds = r.j.birds || [];
         const now = srv(), ids = new Set((r.j.worms || []).map(w => w.id));
@@ -852,11 +875,9 @@
     // ── drawing ──
     const sc = (la, lo) => world.getScreenCoords(la, lo, 0.001);
     // a simple bird seen from above in the bird's colour; the beak points where it's going
-    function drawBird(x, y, a, name, s, t, alpha, swoop, moving, bank) {
-      const c = cx, cl = col(name), dk = shade(cl), sw = swoop || 0, k = s * 0.8 * (1 - 0.2 * sw), bk = bank || 0, ab = Math.abs(bk);
-      // in a turn it stops flapping and glides with its wings out; seen from above, the wing it leans toward looks shorter
-      const flap = Math.sin(t * (moving ? 13 : 4)), flapSpan = moving ? 0.55 + 0.45 * (0.5 + 0.5 * flap) : 0.9 + 0.1 * (0.5 + 0.5 * flap);
-      const glide = Math.min(1, ab * 3), span = flapSpan * (1 - glide) + glide;
+    function drawBird(x, y, a, name, s, alpha, swoop, ps) {
+      const c = cx, cl = col(name), dk = shade(cl), sw = swoop || 0, k = s * 0.8 * (1 - 0.2 * sw), bk = ps.bk, ab = Math.abs(bk), span = ps.span;
+      // in a turn it glides with its wings out; seen from above, the wing it leans toward looks shorter
       const qL = span * (bk < 0 ? 1 - 0.4 * ab : 1 - 0.05 * ab), qR = span * (bk > 0 ? 1 - 0.4 * ab : 1 - 0.05 * ab), roll = bk * 2;
       const shape = () => { c.beginPath();
         c.moveTo(12, roll);                                                // head
@@ -901,10 +922,11 @@
     }
     function loop() {
       raf = requestAnimationFrame(loop); if (!on) return;
-      const now = srv(), p = me && posAt(me, now);
+      const now = srv(), p = me && posAt(me, now), pf = performance.now(), dt = lastF ? Math.min(0.1, (pf - lastF) / 1000) : 0.016; lastF = pf;
+      const cc = corrNow(), pv = p && [p[0] + cc[0], p[1] + cc[1]];   // where the bird is drawn (p is where it really is)
       // the screen moves with your bird (kept in the middle)
       // (on entering it glides from where you were looking down to your bird at hunting height over ~1 s)
-      if (p) { let la = p[0], lo = p[1], al = null;
+      if (p) { let la = pv[0], lo = pv[1], al = null;
         if (zoomIn) { const k = Math.min(1, (performance.now() - zoomIn.t0) / 1000), e = 1 - Math.pow(1 - k, 3), dl = ((lo - zoomIn.lo + 540) % 360) - 180;
           la = zoomIn.la + (la - zoomIn.la) * e; lo = zoomIn.lo + dl * e; al = zoomIn.a + (GAME_ALT - zoomIn.a) * e; if (k >= 1) zoomIn = null; }
         world.pointOfView(al == null ? { lat: la, lng: lo } : { lat: la, lng: lo, altitude: al }, 0); }
@@ -936,8 +958,8 @@
       // other birds
       for (const b of birds) { const q = posAt(b, now); if (!q || !front(q[0], q[1])) continue; const s = sc(q[0], q[1]); if (!inView(s)) continue;
         const moving = now < b.arrive, ahead = posAt(b, now + 250), s2 = ahead && sc(ahead[0], ahead[1]);
-        let a = angs.get(b.u) ?? -Math.PI / 2; if (moving && s2 && Math.hypot(s2.x - s.x, s2.y - s.y) > 0.5) a = Math.atan2(s2.y - s.y, s2.x - s.x); angs.set(b.u, a);
-        drawBird(s.x, s.y, a, b.u, 0.8, t + b.u.length, 0.92, 0, moving, bankAt(b, now));
+        let a = angs.get(b.u) ?? -Math.PI / 2; if (moving && s2 && Math.hypot(s2.x - s.x, s2.y - s.y) > 0.5) a = ease(a, Math.atan2(s2.y - s.y, s2.x - s.x), dt); angs.set(b.u, a);
+        drawBird(s.x, s.y, a, b.u, 0.8, 0.92, 0, pose(b.u, moving, bankAt(b, now), dt));
         c.save(); c.font = '600 9.5px -apple-system,system-ui,sans-serif'; c.textAlign = 'center'; c.fillStyle = 'rgba(255,255,255,.75)'; c.shadowColor = 'rgba(0,0,0,.9)'; c.shadowBlur = 3; c.fillText(b.u, s.x, s.y + 26); c.restore(); }
       // effects: catches (your bird dives, the worm is pulled up, +1 / +5 rises) and worms another bird took
       let swoop = 0;
@@ -954,14 +976,14 @@
           return age < 1.6; }
         return false; });
       // your bird, on top of everything
-      if (p) { const s = sc(p[0], p[1]);
-        if (s) { const moving = now < me.arrive, ah = posAt(me, now + 250), s2 = ah && sc(ah[0], ah[1]);
-          if (moving && s2 && Math.hypot(s2.x - s.x, s2.y - s.y) > 0.5) ang = Math.atan2(s2.y - s.y, s2.x - s.x);
+      if (p) { const s = sc(pv[0], pv[1]);
+        if (s) { const moving = now < me.arrive, ah = posAt(me, now + 250), s2 = ah && sc(ah[0] + cc[0], ah[1] + cc[1]);
+          if (moving && s2 && Math.hypot(s2.x - s.x, s2.y - s.y) > 0.5) ang = ease(ang, Math.atan2(s2.y - s.y, s2.x - s.x), dt);
           else if (!moving) { // sitting still: the beak slowly turns toward the nearest worm
             let best = null, bd = 1e9; for (const w of worms.values()) { if (!w.at) continue; const d = km(p, w.at); if (d < bd) { bd = d; best = w; } }
             const ws = best && sc(best.at[0], best.at[1]);
             if (ws) { const want = Math.atan2(ws.y - s.y, ws.x - s.x); let d = want - ang; d = Math.atan2(Math.sin(d), Math.cos(d)); ang += d * 0.06; } }
-          drawBird(s.x, s.y, ang, mine, 1, t, 1, swoop, moving, bankAt(me, now)); } }
+          drawBird(s.x, s.y, ang, mine, 1, 1, swoop, pose('@me', moving, bankAt(me, now), dt)); } }
       // the line under your worm count: day or night where your bird is
       const tEl = $('huntT'); if (tEl) { const hint = Date.now() < hintUntil; if (tEl.classList.contains('on') !== hint) tEl.classList.toggle('on', hint); }
     }
