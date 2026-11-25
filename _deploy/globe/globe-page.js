@@ -712,7 +712,7 @@
     world.controls().addEventListener('change', ask); setInterval(ask, 600); ask();
   }
 
-  // ── Worm hunt (2026-11-25): a shared mini-game when zoomed in close. A "Worm hunt" pill appears; in the game your
+  // ── Take flight (worm hunt, 2026-11-25): a shared mini-game when zoomed in close. A "Take flight" pill appears; in the game your
   // bird (its face, wings in its colour, seen from above) flies at one fixed speed to wherever you tap and the view
   // follows it. Worms pop out of the ground now and then (more at night, near trending stories; gold ones are worth 5)
   // and go to the first bird to reach them. The server keeps every flight and checks every catch (worker /hunt/*).
@@ -769,12 +769,12 @@
     const cx = cv.getContext('2d'); let W = 0, H = 0, DPR = 1;
     const size = () => { DPR = Math.min(2, devicePixelRatio || 1); W = innerWidth; H = innerHeight; cv.width = W * DPR; cv.height = H * DPR; cv.style.width = W + 'px'; cv.style.height = H + 'px'; };
     size(); addEventListener('resize', size);
-    const pill = document.createElement('button'); pill.type = 'button'; pill.className = 'hunt-pill'; pill.innerHTML = `<span class="hw">${WORM_SVG}</span>Worm hunt`; document.body.appendChild(pill);
+    const pill = document.createElement('button'); pill.type = 'button'; pill.className = 'hunt-pill'; pill.innerHTML = `<span class="hf"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12.0,5.91Q10.32,6.75 10.11,9.27Q3.6,10.95 0.66,14.31Q6.96,13.47 10.32,14.31L9.48,18.09L12.0,16.83L14.52,18.09L13.68,14.31Q17.04,13.47 23.34,14.31Q20.4,10.95 13.89,9.27Q13.68,6.75 12.0,5.91Z"/></svg></span>Take flight`; document.body.appendChild(pill);
     const bar = document.createElement('div'); bar.className = 'hunt-bar';
-    bar.innerHTML = `<span class="hb-n"><span class="hw">${WORM_SVG}</span><b id="huntN">–</b></span><span class="hb-t" id="huntT">Tap to fly</span><button type="button" class="hb-x" aria-label="Leave the worm hunt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>`;
+    bar.innerHTML = `<span class="hb-n"><span class="hw">${WORM_SVG}</span><b id="huntN">–</b></span><span class="hb-t" id="huntT">Tap to fly</span><button type="button" class="hb-x" aria-label="Land (leave Take flight)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>`;
     document.body.appendChild(bar);
     for (const el of [pill, bar]) { el.addEventListener('pointerdown', ev => ev.stopPropagation()); }
-    pill.addEventListener('click', () => { if (!tok()) { toast('Sign in to hunt worms', true); return; } enter(); });
+    pill.addEventListener('click', () => { if (!tok()) { toast('Sign in to take flight', true); return; } enter(); });
     bar.querySelector('.hb-x').addEventListener('click', () => leave());
 
     // the pill shows only when zoomed in close (and sits just above the story cards)
@@ -807,7 +807,7 @@
       const t0 = Date.now(), sent = t0;
       const r = await api('/hunt/state', start ? { start: 1, lat: at[0], lng: at[1] } : {});
       if (!on) return;
-      if (r.s === 401) { leave(); toast('Sign in to hunt worms', true); return; }
+      if (r.s === 401) { leave(); toast('Sign in to take flight', true); return; }
       if (r.s === 200 && r.j.now) {
         const t1 = Date.now(); off = r.j.now - (t0 + t1) / 2;
         if (sent > flySent) me = r.j.me;   // a flight you just set wins over an older answer
@@ -877,7 +877,7 @@
       c.beginPath(); c.moveTo(12, -1.8 + roll); c.lineTo(17, roll); c.lineTo(12, 1.8 + roll); c.closePath(); c.fillStyle = dk; c.fill();   // beak
       c.restore(); c.restore();
     }
-    // a worm: a tiny wiggling squiggle (gold ones are worth 5)
+    // a worm: a tiny wiggling squiggle (rare purple ones are worth 5)
     function drawWorm(x, y, w, t, e) {
       const c = cx, gold = w.v > 1, n = Math.max(1, Math.round(8 * e));
       // half in the ground while coming up / going down: a little hole and a shorter worm
@@ -886,7 +886,7 @@
       for (let i = 0; i <= n; i++) { const f = i / 8, px = x - 5 + f * 10, py = y + Math.sin(t * 4 + f * 6) * 1.6; i ? c.lineTo(px, py) : c.moveTo(px, py); }
       c.lineCap = 'round'; c.lineJoin = 'round';
       c.strokeStyle = 'rgba(0,0,0,.35)'; c.lineWidth = 3.6; c.stroke();
-      c.strokeStyle = gold ? '#fcd34d' : '#f2a0a4'; c.lineWidth = 2.2; c.stroke();
+      c.strokeStyle = gold ? '#c084fc' : '#f2a0a4'; c.lineWidth = 2.2; c.stroke();
       c.restore();
     }
     function drawEdge(x, y, gold, t) {
@@ -897,7 +897,7 @@
       const ex = cx0 + dx * f, ey = cy0 + dy * f, a = Math.atan2(dy, dx), pulse = 1;
       const c = cx; c.save(); c.translate(ex, ey); c.rotate(a); c.globalAlpha = pulse;
       c.beginPath(); c.moveTo(5, 0); c.lineTo(-3, -4); c.lineTo(-3, 4); c.closePath();
-      c.fillStyle = gold ? 'rgba(252,211,77,.8)' : 'rgba(242,160,164,.75)'; c.fill(); c.restore();
+      c.fillStyle = gold ? 'rgba(192,132,252,.85)' : 'rgba(242,160,164,.75)'; c.fill(); c.restore();
     }
     function loop() {
       raf = requestAnimationFrame(loop); if (!on) return;
@@ -944,9 +944,9 @@
       fx = fx.filter(f => { const age = (performance.now() - f.t0) / 1000, s = sc(f.lat, f.lng); if (!s) return age < 1.4;
         if (f.k === 'catch') {
           if (age < 0.5) swoop = Math.max(swoop, Math.sin(Math.PI * age / 0.5));
-          if (age < 0.35) { c.save(); c.globalAlpha = 1 - age / 0.35; c.translate(s.x, s.y - 12 * age / 0.35); c.scale(1 - age / 0.35, 1 - age / 0.35); c.beginPath(); c.moveTo(-5, 0); c.quadraticCurveTo(0, -3, 5, 0); c.strokeStyle = f.v > 1 ? '#fcd34d' : '#f2a0a4'; c.lineWidth = 2.2; c.lineCap = 'round'; c.stroke(); c.restore(); }
+          if (age < 0.35) { c.save(); c.globalAlpha = 1 - age / 0.35; c.translate(s.x, s.y - 12 * age / 0.35); c.scale(1 - age / 0.35, 1 - age / 0.35); c.beginPath(); c.moveTo(-5, 0); c.quadraticCurveTo(0, -3, 5, 0); c.strokeStyle = f.v > 1 ? '#c084fc' : '#f2a0a4'; c.lineWidth = 2.2; c.lineCap = 'round'; c.stroke(); c.restore(); }
           c.save(); c.globalAlpha = Math.max(0, 1 - Math.max(0, age - 0.7) / 0.7); c.font = '700 13px -apple-system,system-ui,sans-serif'; c.textAlign = 'center';
-          c.fillStyle = f.v > 1 ? '#fcd34d' : '#f2a0a4'; c.shadowColor = 'rgba(0,0,0,.8)'; c.shadowBlur = 3; c.fillText('+' + f.v, s.x, s.y - 18 - 16 * age); c.restore();
+          c.fillStyle = f.v > 1 ? '#c084fc' : '#f2a0a4'; c.shadowColor = 'rgba(0,0,0,.8)'; c.shadowBlur = 3; c.fillText('+' + f.v, s.x, s.y - 18 - 16 * age); c.restore();
           return age < 1.4; }
         if (f.k === 'poof') {
           for (let i = 0; i < 5; i++) { const an = i / 5 * 6.283, d = 3 + 10 * age; c.beginPath(); c.arc(s.x + Math.cos(an) * d, s.y + Math.sin(an) * d * 0.6, Math.max(0, 1.6 * (1 - age / 1.2)), 0, 7); c.fillStyle = `rgba(160,120,90,${Math.max(0, 0.8 - age / 1.2)})`; c.fill(); }
