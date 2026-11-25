@@ -54,7 +54,7 @@
     // the preview pinned to the outlet: ‹ › step through the story's outlets (list order); tapping the preview drops
     // down the article preview (summary + Open post / Read at source)
     el.innerHTML = `<i></i><span class="lb">${esc(p.outlet)}</span><div class="pv"><div class="pv-row"><button type="button" class="pv-nav" data-d="-1" aria-label="Previous outlet">‹</button>${p.image ? `<img src="${esc(p.image)}" alt="" referrerpolicy="no-referrer">` : ''}<span class="pt"><b>${esc(p.title)}</b><span>${esc(flag(p.country))} ${esc(p.outlet)} · ${esc(p.city)} · ${ago(p.t)}</span></span><button type="button" class="pv-nav" data-d="1" aria-label="Next outlet">›</button></div>
-      <div class="pv-more"><a class="pv-site" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${esc(siteOf(p.url))}</a>${p.desc ? `<p>${esc(p.desc)}</p>` : ''}<div class="pv-acts"><button type="button" class="pa fl" aria-label="Flap">${IC.flap}<b></b></button><a class="pa ch" href="/post/${encodeURIComponent(p.id)}?chat=1&via=card" aria-label="Chirps">${IC.chat}<b></b></a><button type="button" class="pa shr" aria-label="Share">${IC.share}<b>Share</b></button></div></div></div>`;
+      <div class="pv-more"><a class="pv-site" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${esc(siteOf(p.url))}</a>${p.desc ? `<p>${esc(p.desc)}</p>` : ''}<div class="pv-acts"><button type="button" class="pa fl" aria-label="Flap">${IC.flap}<b></b></button><a class="pa ch" href="/post/${encodeURIComponent(p.id)}?chat=1&via=card" aria-label="Chirps">${IC.chat}<b></b></a><button type="button" class="pa shr" aria-label="Share">${IC.share}<b></b></button></div></div></div>`;
     fillActs(p, el);
     const im = el.querySelector('.pv img'); im && im.addEventListener('error', () => im.remove());
     el.addEventListener('pointerdown', ev => { ev.stopPropagation(); });
@@ -75,9 +75,12 @@
   // Flaps · chirps · share on each article preview (in place of a View post button). Counts are live, loaded for a
   // story's articles when one of its pins is focused; chirps opens the post's chat; flap / share work right here.
   const IC = {
-    flap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 13.5C4 9.5 8.5 8.5 12 15C15.5 8.5 20 9.5 22 13.5"/></svg>',
+    flap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 13.5C4 9.5 8.5 8.5 12 15C15.5 8.5 20 9.5 22 13.5"><animate attributeName="d" dur=".75s" begin="indefinite" fill="remove" calcMode="spline" keyTimes="0;.17;.33;.5;.67;.83;1" keySplines=".4 0 .6 1;.4 0 .6 1;.4 0 .6 1;.4 0 .6 1;.4 0 .6 1;.4 0 .6 1" values="M2 13.5C4 9.5 8.5 8.5 12 15C15.5 8.5 20 9.5 22 13.5;M4.5 7C6 5 9.5 6 12 15C14.5 6 18 5 19.5 7;M2 13.5C4 9.5 8.5 8.5 12 15C15.5 8.5 20 9.5 22 13.5;M3 18C4.5 14.5 8.5 13 12 15C15.5 13 19.5 14.5 21 18;M2 13.5C4 9.5 8.5 8.5 12 15C15.5 8.5 20 9.5 22 13.5;M4.5 7C6 5 9.5 6 12 15C14.5 6 18 5 19.5 7;M2 13.5C4 9.5 8.5 8.5 12 15C15.5 8.5 20 9.5 22 13.5"/></path></svg>',
     chat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 11.5c0 4.4-3.8 8-8.5 8-1.2 0-2.4-.2-3.4-.7L4 20l1.3-3.6c-1.1-1.4-1.8-3.1-1.8-4.9 0-4.4 3.8-8 8.5-8s8.5 3.6 8.5 8z"/></svg>',
-    share: '<svg viewBox="5 5 14 14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M11 7h6v6"/></svg>'
+    share: '<svg viewBox="5 5 14 14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M11 7h6v6"/></svg>',
+    huddle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 8.5c0 3.3-2.9 6-6.5 6-.9 0-1.8-.2-2.6-.5L2.5 15l1-2.6C2.9 11.3 2.5 10 2.5 8.5c0-3.3 2.9-6 6-6s6 2.7 6 6z"/><path d="M17 9.6c2.7.6 4.5 2.8 4.5 5.4 0 1.3-.4 2.5-1.1 3.4l.9 2.6-2.9-1c-.8.3-1.6.5-2.5.5-2.5 0-4.6-1.3-5.5-3.2"/></svg>',
+    link: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>',
+    up: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>'
   };
   const cnt = new Map(), asked = new Set();
   const tok = () => { try { return localStorage.getItem('auth_token') || ''; } catch (e) { return ''; } };
@@ -87,7 +90,7 @@
     const f = el.querySelector('.pa.fl'), ch = el.querySelector('.pa.ch'), sh = el.querySelector('.pa.shr');
     if (f) { f.querySelector('b').textContent = c.f; f.classList.toggle('on', !!c.m); }
     if (ch) ch.querySelector('b').textContent = c.c;
-    if (sh) sh.querySelector('b').textContent = c.s ? 'Share ' + c.s : 'Share';
+    if (sh) sh.querySelector('b').textContent = c.s > 0 ? c.s : '';
   }
   function loadCounts(s) {
     const ids = pins.filter(q => q.s === s && q.id && !asked.has(q.id)).map(q => q.id).slice(0, 40);
@@ -99,8 +102,9 @@
     }).catch(() => ids.forEach(id => asked.delete(id)));
   }
   function flap(p) {
-    if (!tok()) { location.href = '/post/' + encodeURIComponent(p.id) + '?chat=1&via=card'; return; }
+    if (!tok()) { toast('Sign in to flap', true); return; }
     const c = cnt.get(p.id) || { f: 0, m: 0, c: 0, s: 0 }, v = c.m ? 0 : 1;
+    if (v && p.el) p.el.querySelectorAll('.pa.fl animate').forEach(a => { try { a.endElement && a.endElement(); a.beginElement(); } catch (e) {} });
     let bid = ''; try { bid = localStorage.getItem('browser_id') || ''; if (!bid) { bid = crypto.randomUUID(); localStorage.setItem('browser_id', bid); } } catch (e) { bid = 'globe'; }
     cnt.set(p.id, { ...c, m: v, f: Math.max(0, c.f + (v ? 1 : -1)) }); fillActs(p);
     fetch(API + '/vote-post', { method: 'POST', headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ post_id: p.id, browser_id: bid, value: v }) })
@@ -112,10 +116,74 @@
   }
   function share(p) {
     const u = location.origin + '/post/' + p.id;
+    if (tok()) { shareSheet(p, u); return; }
     const count = () => { if (!tok()) return; fetch(API + '/share', { method: 'POST', headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ post_id: p.id, via: 'more' }) })
       .then(r => r.json()).then(j => { if (j && j.counted) { const c = cnt.get(p.id); if (c) { c.s = j.share_count; fillActs(p); } } }).catch(() => {}); };
     if (navigator.share) navigator.share({ url: u, title: p.title }).then(count).catch(() => {});
     else if (navigator.clipboard) navigator.clipboard.writeText(u).then(() => { count(); const b = p.el && p.el.querySelector('.pa.shr b'); if (b) { b.textContent = 'Copied'; setTimeout(() => fillActs(p), 1400); } }).catch(() => {});
+  }
+
+  function shared(p, via) {
+    fetch(API + '/share', { method: 'POST', headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ post_id: p.id, via }) })
+      .then(r => r.ok ? r.json() : null).then(j => { if (j && j.share_count != null) { const c = cnt.get(p.id); if (c) { c.s = j.share_count; fillActs(p); } } }).catch(() => {});
+  }
+  // the site's Share sheet: pick huddles (+ optional message) to send the post to, or Copy link / More…
+  function shareSheet(p, u) {
+    if (document.querySelector('.ps-ov')) return;
+    const ov = document.createElement('div'); ov.className = 'ps-ov';
+    ov.innerHTML = `<div class="ps-sheet" role="dialog" aria-label="Share"><div class="ps-grab"></div><div class="ps-lbl">Send to a huddle</div><div class="ps-list"><div class="ps-empty">Loading…</div></div>
+      <div class="ps-msg" hidden><div class="ps-bub"><input type="search" name="search_ps_msg" autocomplete="off" enterkeyhint="send" placeholder="Add a message…" maxlength="1000"></div><button type="button" class="ps-send" aria-label="Send">${IC.up}</button></div>
+      <div class="ps-sep"></div><div class="ps-lns"><button type="button" class="ps-ln" data-k="copy">${IC.link}Copy link</button><button type="button" class="ps-ln" data-k="more">${IC.share}More…</button></div><div class="ps-note" role="status"></div></div>`;
+    document.body.appendChild(ov);
+    const $q = s => ov.querySelector(s), note = $q('.ps-note'), msgRow = $q('.ps-msg'), inp = $q('input'), send = $q('.ps-send');
+    let hs = [], sel = [], busy = false;
+    const bye = () => { ov.classList.remove('in'); removeEventListener('keydown', esc2); setTimeout(() => ov.remove(), 240); };
+    const done = t => { note.textContent = t; setTimeout(bye, 850); };
+    const esc2 = ev => { if (ev.key === 'Escape') bye(); };
+    addEventListener('keydown', esc2);
+    requestAnimationFrame(() => requestAnimationFrame(() => ov.classList.add('in')));
+    ov.addEventListener('pointerdown', ev => ev.stopPropagation());
+    ov.addEventListener('click', ev => { ev.stopPropagation(); if (ev.target === ov) bye(); });
+    const draw = () => {
+      const box = $q('.ps-list');
+      if (!hs.length) { box.innerHTML = `<div class="ps-empty">You're not in any huddles yet.</div>`; return; }
+      box.innerHTML = `<div class="ps-hds">${hs.map(h => `<button type="button" class="ps-hd${sel.includes(h.id) ? ' on' : ''}" data-id="${esc(h.id)}" aria-pressed="${sel.includes(h.id)}"><span class="ps-av">${IC.huddle}</span><span class="ps-nm">${esc(h.title || 'Huddle')}</span></button>`).join('')}</div>`;
+      msgRow.hidden = !sel.length;
+      send.setAttribute('aria-label', sel.length > 1 ? `Send to ${sel.length} huddles` : 'Send');
+    };
+    fetch(API + '/my-huddles', { headers: hdr() }).then(r => r.ok ? r.json() : { huddles: [] }).then(x => { hs = x.huddles || []; draw(); }).catch(() => { hs = []; draw(); });
+    $q('.ps-list').addEventListener('click', ev => {
+      const b = ev.target.closest('.ps-hd'); if (!b) return;
+      const id = b.dataset.id; sel = sel.includes(id) ? sel.filter(x => x !== id) : [...sel, id];
+      const sx = $q('.ps-hds') && $q('.ps-hds').scrollLeft; draw(); if (sx) $q('.ps-hds').scrollLeft = sx;
+    });
+    const go = async () => {
+      if (!sel.length || busy) return; busy = true; send.disabled = true; note.textContent = '';
+      let ok = 0, err = ''; const att = '\n\n[ATTACH:' + JSON.stringify({ type: 'post', id: p.id }) + ']';
+      let bid = ''; try { bid = localStorage.getItem('browser_id') || ''; if (!bid) { bid = crypto.randomUUID(); localStorage.setItem('browser_id', bid); } } catch (e) {}
+      for (const h of sel) {
+        try {
+          const r = await fetch(API + '/add-comment', { method: 'POST', headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ content: inp.value.trim() + att, post_id: h, parent_comment_id: null, browser_id: bid }) });
+          if (r.ok) ok++; else { const j = await r.json().catch(() => ({})); err = j.error || "Couldn't send"; }
+        } catch (e) { err = "Couldn't send"; }
+      }
+      busy = false; send.disabled = false;
+      if (ok) { shared(p, 'huddle'); const one = sel.length === 1 && hs.find(x => x.id === sel[0]); done(`Sent to ${one ? one.title : ok + ' huddles'}`); }
+      else note.textContent = err === 'Caged' ? "You're Caged: you can only chirp in The Cage" : err;
+    };
+    send.addEventListener('click', go);
+    inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); go(); } });
+    $q('[data-k=copy]').addEventListener('click', async () => { try { await navigator.clipboard.writeText(u); shared(p, 'copy'); done('Link copied'); } catch (e) { note.textContent = "Couldn't copy the link"; } });
+    $q('[data-k=more]').addEventListener('click', async () => { try { if (navigator.share) { await navigator.share({ url: u }); shared(p, 'more'); bye(); } else { await navigator.clipboard.writeText(u); shared(p, 'copy'); done('Link copied'); } } catch (e) {} });
+  }
+  // the site's "sign in" nudge (signed-out flap): a small toast with a Sign in button
+  let toastT = 0;
+  function toast(t, signIn) {
+    let el = document.querySelector('.g-toast');
+    if (!el) { el = document.createElement('div'); el.className = 'g-toast'; document.body.appendChild(el); el.addEventListener('pointerdown', ev => ev.stopPropagation()); }
+    el.innerHTML = `<span>${esc(t)}</span>${signIn ? '<a href="/?signin=1">Sign in</a>' : ''}`;
+    requestAnimationFrame(() => el.classList.add('in'));
+    clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove('in'), 2600);
   }
 
   // ‹ › on the preview: the previous / next outlet in the list order, flying the globe there
