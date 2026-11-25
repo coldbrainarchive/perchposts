@@ -617,17 +617,30 @@
     const offTxt = m => { if (!m) return '±0'; const s = m > 0 ? '+' : '−', a = Math.abs(m), h = Math.floor(a / 60), mm = a % 60; return s + h + (mm ? ':' + String(mm).padStart(2, '0') : ''); };
     const btn = $('utc'); const panel = document.createElement('div'); panel.className = 'wcp'; panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', 'World times'); document.body.appendChild(panel);
     const draw = () => { const s = subsolar(); const rows = CITIES.map(([n, la, lo, tz]) => ({ n, la, lo, t: time(tz), o: offset(tz), day: isDay(la, lo, s) })).sort((x, y) => y.o - x.o);
-      panel.innerHTML = `<div class="wcp-h"><span>WORLD TIME</span><span>UTC</span></div>` + rows.map(r => `<button type="button" class="${r.day ? 'day' : 'night'}" data-la="${r.la}" data-lo="${r.lo}"><span class="ci">${r.day ? SUN : MOON}</span><span class="cn">${r.n}</span><span class="ct">${r.t}</span><span class="co">${offTxt(r.o)}</span></button>`).join(''); };
+      const u = new Date(); panel.innerHTML = `<div class="wcp-h"><span>WORLD TIME</span><span><b>${String(u.getUTCHours()).padStart(2, '0')}:${String(u.getUTCMinutes()).padStart(2, '0')}</b> UTC</span></div>` + rows.map(r => `<button type="button" class="${r.day ? 'day' : 'night'}" data-la="${r.la}" data-lo="${r.lo}"><span class="ci">${r.day ? SUN : MOON}</span><span class="cn">${r.n}</span><span class="ct">${r.t}</span><span class="co">${offTxt(r.o)}</span></button>`).join(''); };
     const open = on => { panel.classList.toggle('in', on); btn.setAttribute('aria-expanded', on ? 'true' : 'false'); if (on) draw(); };
     btn.addEventListener('click', ev => { ev.stopPropagation(); open(!panel.classList.contains('in')); });
+    btn.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(!panel.classList.contains('in')); } });
     panel.addEventListener('pointerdown', ev => ev.stopPropagation());
     panel.addEventListener('click', ev => { ev.stopPropagation(); const b = ev.target.closest('button[data-la]'); if (!b) return; open(false);
       if (world) { world.controls().autoRotate = false; world.pointOfView({ lat: +b.dataset.la, lng: +b.dataset.lo, altitude: innerWidth < 600 ? 1.6 : 1.3 }, 1400); } });
     document.addEventListener('pointerdown', ev => { if (panel.classList.contains('in') && !panel.contains(ev.target) && !btn.contains(ev.target)) open(false); }, true);
     addEventListener('keydown', ev => { if (ev.key === 'Escape') open(false); });
-    const tick = () => { const d = new Date(), s = subsolar(d); const tEl = $('utcT'); if (tEl) tEl.textContent = String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0');
+    // split-flap digits like the site's header clock: the old top half folds down, the new bottom half swings in
+    const tEl = $('utcT'); let qs = [];
+    if (tEl) { tEl.textContent = ''; qs = [...'00:00'].map(ch => { const q = document.createElement('span'); q.className = 'q'; q.innerHTML = '<i></i><span class="h top nt"><s></s></span><span class="h bot ob"><s></s></span><span class="h top ot"><s></s></span><span class="h bot nb"><s></s></span>'; q._ch = ''; tEl.appendChild(q); return q; }); }
+    const still = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const flip = (q, ch, d) => new Promise(res => { if (q._ch === ch) return res(); const old = q._ch; q._ch = ch;
+      if (!old || still()) { q.querySelector('i').textContent = ch; return res(); }
+      const S = k => q.querySelector('.' + k + '>s'); S('ot').textContent = old; S('ob').textContent = old; S('nt').textContent = ch; S('nb').textContent = ch;
+      q.style.setProperty('--fd', d + 'ms'); q.classList.remove('go'); void q.offsetWidth; q.classList.add('go');
+      setTimeout(() => { q.querySelector('i').textContent = ch; q.classList.remove('go'); res(); }, d * 2 + 20); });
+    const tick = () => { const d = new Date(), s = subsolar(d); const str = String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0');
+      [...str].forEach((ch, i) => qs[i] && setTimeout(() => flip(qs[i], ch, 130), i * 45));
       btn.classList.toggle('night', !isDay(51.48, 0, s)); if (panel.classList.contains('in')) draw(); };
-    tick(); setInterval(tick, 15000);
+    // checks every second so the minute flips on time; the panel redraws only when the minute changes
+    let lastM = -1; const sec = () => { const m = new Date().getUTCMinutes(); if (m !== lastM) { lastM = m; tick(); } };
+    tick(); lastM = new Date().getUTCMinutes(); setInterval(sec, 1000);
   })();
   function hiRes() {
     if (!(matchMedia('(pointer: fine)').matches && innerWidth >= 900)) return;
