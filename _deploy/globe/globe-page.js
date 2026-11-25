@@ -565,10 +565,56 @@
     world.controls().addEventListener('change', imagery); setInterval(imagery, 500);
     try { world.onZoom(() => { imagery(); }); } catch (e) {}  // also during animated flights (double-tap, story picks)
     mapOverlay();
+    dayNight();
     const fit = () => { world.width(innerWidth).height(innerHeight); };
     fit(); addEventListener('resize', fit);
     world.pointOfView({ lat: 22, lng: 20, altitude: innerWidth < 600 ? 2.9 : 2.2 });
   }
+  // Where the sun is overhead right now (NOAA approximation, good to a fraction of a degree)
+  function subsolar(d = new Date()) {
+    const R = Math.PI / 180, y0 = Date.UTC(d.getUTCFullYear(), 0, 0), day = Math.floor((d - y0) / 864e5);
+    const hrs = d.getUTCHours() + d.getUTCMinutes() / 60 + d.getUTCSeconds() / 3600, g = 2 * Math.PI / 365 * (day - 1 + (hrs - 12) / 24);
+    const eqt = 229.18 * (0.000075 + 0.001868 * Math.cos(g) - 0.032077 * Math.sin(g) - 0.014615 * Math.cos(2 * g) - 0.040849 * Math.sin(2 * g));
+    const decl = 0.006918 - 0.399912 * Math.cos(g) + 0.070257 * Math.sin(g) - 0.006758 * Math.cos(2 * g) + 0.000907 * Math.sin(2 * g) - 0.002697 * Math.cos(3 * g) + 0.00148 * Math.sin(3 * g);
+    return { lat: decl / R, lng: ((-15 * (hrs - 12 + eqt / 60)) + 540) % 360 - 180 };
+  }
+  const isDay = (lat, lng, s = subsolar()) => { const R = Math.PI / 180; return Math.sin(lat * R) * Math.sin(s.lat * R) + Math.cos(lat * R) * Math.cos(s.lat * R) * Math.cos((lng - s.lng) * R) > -0.0145; };
+  // Night side: a see-through shell just above the map (so it also darkens the zoomed-in tiles) with a soft dusk band
+  // and NASA Black Marble city lights (public domain). Built from the globe's own three.js classes; sun updates each minute.
+  function dayNight() {
+    const t = setInterval(() => {
+      let g = null, atm = null;
+      try { world.scene().traverse(o => { if (o.__globeObjType === 'globe' && o.children) g = g || o.children.find(m => m.isMesh); if (o.isMesh && o.material && o.material.type === 'ShaderMaterial' && !atm) atm = o; }); } catch (e) {}
+      if (!g || !atm || !g.material || !g.material.map) return; clearInterval(t);
+      const Mesh = g.constructor, Geo = g.geometry.constructor, Shader = atm.material.constructor, Tex = g.material.map.constructor;
+      const R0 = (g.geometry.parameters && g.geometry.parameters.radius) || 100;
+      const img = new Image(); img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const lights = new Tex(img); lights.needsUpdate = true; try { lights.colorSpace = g.material.map.colorSpace; } catch (e) {}
+        const mat = new Shader({ transparent: true, depthWrite: false,
+          uniforms: { sLat: { value: 0 }, sLng: { value: 0 }, lights: { value: lights } },
+          vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+          fragmentShader: 'uniform float sLat; uniform float sLng; uniform sampler2D lights; varying vec2 vUv; void main(){ float lat = (vUv.y - 0.5) * 3.14159265; float lng = (vUv.x - 0.5) * 6.2831853; float d = sin(lat) * sin(sLat) + cos(lat) * cos(sLat) * cos(lng - sLng); float night = smoothstep(0.08, -0.16, d); vec3 L = texture2D(lights, vUv).rgb; float lum = dot(L, vec3(0.3,0.59,0.11)); lum = smoothstep(0.02, 0.24, lum); float a = night * max(0.7, lum); vec3 c = mix(vec3(0.01, 0.016, 0.05), vec3(1.0, 0.86, 0.58), lum); gl_FragColor = vec4(c, a); }' });
+        const sh = new Mesh(new Geo(R0 * 1.0016, 128, 64), mat); sh.rotation.copy(g.rotation); sh.renderOrder = 2;
+        g.parent.add(sh);
+        const upd = () => { const s = subsolar(); mat.uniforms.sLat.value = s.lat * Math.PI / 180; mat.uniforms.sLng.value = s.lng * Math.PI / 180; };
+        upd(); setInterval(upd, 60000);
+      };
+      img.src = '/globe/earth-night.jpg';
+    }, 200);
+  }
+  // Header clock: UTC (sun / moon by whether it's day at the point under the clock — Greenwich) + world clocks row
+  (function clocks() {
+    const SUN = document.querySelector('.utc .ic-sun')?.outerHTML || '', MOON = document.querySelector('.utc .ic-moon')?.outerHTML || '';
+    const CITIES = [['London', 51.5, -0.1, 'Europe/London'], ['New York', 40.7, -74, 'America/New_York'], ['Los Angeles', 34.05, -118.2, 'America/Los_Angeles'], ['São Paulo', -23.5, -46.6, 'America/Sao_Paulo'], ['Lagos', 6.5, 3.4, 'Africa/Lagos'], ['Dubai', 25.2, 55.3, 'Asia/Dubai'], ['Mumbai', 19.1, 72.9, 'Asia/Kolkata'], ['Tokyo', 35.7, 139.7, 'Asia/Tokyo'], ['Sydney', -33.9, 151.2, 'Australia/Sydney']];
+    const fmt = tz => { try { return new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz }).format(new Date()); } catch (e) { return ''; } };
+    if (/[?&]clocks=1/.test(location.search)) document.body.classList.add('wclocks');
+    const tick = () => { const d = new Date(), s = subsolar(d), hh = String(d.getUTCHours()).padStart(2, '0'), mm = String(d.getUTCMinutes()).padStart(2, '0');
+      const tEl = $('utcT'); if (tEl) tEl.innerHTML = `${hh}<span class="col">:</span>${mm}`;
+      const u = $('utc'); u && u.classList.toggle('night', !isDay(51.48, 0, s));
+      const w = $('wclk'); if (w && document.body.classList.contains('wclocks')) w.innerHTML = CITIES.map(([n, la, lo, tz]) => `<span>${isDay(la, lo, s) ? SUN : MOON}<em>${n}</em>${fmt(tz)}</span>`).join(''); };
+    tick(); setInterval(tick, 15000);
+  })();
   function hiRes() {
     if (!(matchMedia('(pointer: fine)').matches && innerWidth >= 900)) return;
     const im = new Image(); im.onload = () => { try { world.globeImageUrl('/globe/earth-s2-8k.jpg'); } catch (e) {} };
@@ -665,7 +711,7 @@
       A.lat -= dy * push; B.lat += dy * push; A.lng -= dx * push / cl; B.lng += dx * push / cl;
     }
     marks = [...pins, ...events];
-    if (d.built_at) $('sub').textContent = `Last 24 hours · ${stories.length} top stories · updated ${ago(d.built_at)}`;
+    if (d.built_at) $('sub').textContent = `${stories.length} stories · updated ${ago(d.built_at)}`;
     $('empty').remove();
     if (!stories.length) { $('sub').textContent = 'No trending stories yet — check back soon'; }
     strip(); start();
