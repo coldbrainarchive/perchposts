@@ -2377,9 +2377,9 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   if (url.pathname.startsWith("/hunt/") && request.method === "POST") {
     if (!username || isBot) return signInRequired();
     const HS = env.HUNT_FAST ? 1 : 0;                       // local testing only: worms appear quickly
-    const SPEED = 90;                                     // km per second (crosses a phone screen at hunt zoom in ~10 s)
-    const REACH = 32;                                     // km — a worm this close to your flight path is caught
-    const LIFE = 30000, GOLD_LIFE = 22000, NEAR = 1500;   // worm life (ms); what you can see around you (km)
+    const SPEED = 18;                                     // km per second (crosses a phone screen at hunt zoom in ~9 s)
+    const REACH = 7;                                      // km — a worm this close to your flight path is caught
+    const LIFE = 30000, GOLD_LIFE = 22000, NEAR = 300;     // worm life (ms); what you can see around you (km)
     const R = Math.PI / 180, now = Date.now();
     const km = (a, b) => { const d = Math.sin((b[0] - a[0]) * R / 2) ** 2 + Math.cos(a[0] * R) * Math.cos(b[0] * R) * Math.sin((b[1] - a[1]) * R / 2) ** 2; return 12742 * Math.asin(Math.min(1, Math.sqrt(d))); };
     const slerp = (a, b, f) => { const toV = p => [Math.cos(p[0] * R) * Math.cos(p[1] * R), Math.cos(p[0] * R) * Math.sin(p[1] * R), Math.sin(p[0] * R)];
@@ -2402,9 +2402,9 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         }
         const p = posAt(me, now);
         // occasionally a worm pops up near you: about one every ~90 s of hunting at night, ~3 min by day, a bit more
-        // near trending stories; never more than 2 around you at once
+        // near trending stories; never more than 2 around you at once (within 160 km)
         const { results: live = [] } = await env.DB.prepare(`SELECT id, lat, lng, value, born_at, gone_at FROM hunt_worms WHERE gone_at > ? AND caught_by IS NULL`).bind(now).all();
-        const around = live.filter(w => km(p, [w.lat, w.lng]) < 800).length;
+        const around = live.filter(w => km(p, [w.lat, w.lng]) < 160).length;
         const dt = Math.min(10000, Math.max(0, now - (me.spawn_at || now)));
         let spawned = null;
         if (around < 2 && live.length < 300 && dt > 0) {
@@ -2414,11 +2414,11 @@ async function handleRequest(request, env, ctx, corsHeaders) {
           const night = Math.sin(p[0] * R) * Math.sin(decl) + Math.cos(p[0] * R) * Math.cos(decl) * Math.cos((p[1] - sLng) * R) < 0;
           let story = null;
           try { const gc = await env.DB.prepare(`SELECT v FROM globe_cache WHERE k = 'trending'`).first(); const st = gc ? (JSON.parse(gc.v).stories || []) : [];
-            for (const s of st) { const o = s.origin || s; const ll = [o.lat ?? s.lat, o.lng ?? s.lng]; if (okLL(+ll[0], +ll[1]) && km(p, ll) < 1500) { story = ll; break; } } } catch (e) {}
+            for (const s of st) { const o = s.origin || s; const ll = [o.lat ?? s.lat, o.lng ?? s.lng]; if (okLL(+ll[0], +ll[1]) && km(p, ll) < 150) { story = ll; break; } } } catch (e) {}
           const mean = (HS ? 5000 : (night ? 90000 : 180000)) * (story ? 0.7 : 1);
           if (Math.random() < dt / mean) {
-            let base = p, r0 = 150, r1 = 600;
-            if (story && Math.random() < 0.5) { base = story; r0 = 20; r1 = 220; }
+            let base = p, r0 = 30, r1 = 120;
+            if (story && Math.random() < 0.5) { base = story; r0 = 5; r1 = 50; }
             const brg = Math.random() * 2 * Math.PI, dist = (r0 + Math.random() * (r1 - r0)) / 6371;
             const la1 = Math.asin(Math.sin(base[0] * R) * Math.cos(dist) + Math.cos(base[0] * R) * Math.sin(dist) * Math.cos(brg));
             const lo1 = base[1] * R + Math.atan2(Math.sin(brg) * Math.sin(dist) * Math.cos(base[0] * R), Math.cos(dist) - Math.sin(base[0] * R) * Math.sin(la1));
@@ -2430,7 +2430,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         const { results: birds = [] } = await env.DB.prepare(`SELECT * FROM hunt_birds WHERE seen_at > ? AND username != ?`).bind(now - 45000, username).all();
         if (Math.random() < 0.02) ctx.waitUntil(env.DB.prepare(`DELETE FROM hunt_worms WHERE gone_at < ?`).bind(now - 3600e3).run().catch(() => {}));
         return json({ now, me: flight(me), balance: await wormBalance(username),
-          birds: birds.filter(b => km(p, posAt(b, now)) < 3000).slice(0, 30).map(b => ({ u: b.username, ...flight(b) })),
+          birds: birds.filter(b => km(p, posAt(b, now)) < 600).slice(0, 30).map(b => ({ u: b.username, ...flight(b) })),
           worms: live.filter(w => km(p, [w.lat, w.lng]) < NEAR).map(w => ({ id: w.id, lat: w.lat, lng: w.lng, v: w.value, born: w.born_at, gone: w.gone_at })), spawned });
       }
       if (!me) return json({ error: "Start the hunt first" }, 400);

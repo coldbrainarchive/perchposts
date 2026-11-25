@@ -717,7 +717,7 @@
   // follows it. Worms pop out of the ground now and then (more at night, near trending stories; gold ones are worth 5)
   // and go to the first bird to reach them. The server keeps every flight and checks every catch (worker /hunt/*).
   function hunt() {
-    const SPEED = 90, CATCH_KM = 26, PILL_ALT = 0.5, GAME_ALT = innerWidth < 600 ? 0.3 : 0.24, EXIT_ALT = 0.8;
+    const SPEED = 18, CATCH_KM = 5.5, PILL_ALT = 0.12, GAME_ALT = innerWidth < 600 ? 0.06 : 0.05, EXIT_ALT = 0.2;
     const R = Math.PI / 180, WORM_D = 'M5.3 2.4C3.9 4.5 4 7.6 6.6 7.8C9.4 8 12.6 4.3 16.3 3.9C19.3 3.6 20.6 6.7 18.3 8.7C15.9 10.6 10.6 10.9 8.1 13.2C5.9 15.4 7.4 19.3 11 19.4C14.5 19.5 18 17.6 20.7 15.8';
     const WORM_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${WORM_D}"/></svg>`;
     const km = (a, b) => { const d = Math.sin((b[0] - a[0]) * R / 2) ** 2 + Math.cos(a[0] * R) * Math.cos(b[0] * R) * Math.sin((b[1] - a[1]) * R / 2) ** 2; return 12742 * Math.asin(Math.min(1, Math.sqrt(d))); };
@@ -739,7 +739,7 @@
     size(); addEventListener('resize', size);
     const pill = document.createElement('button'); pill.type = 'button'; pill.className = 'hunt-pill'; pill.innerHTML = `<span class="hw">${WORM_SVG}</span>Worm hunt`; document.body.appendChild(pill);
     const bar = document.createElement('div'); bar.className = 'hunt-bar';
-    bar.innerHTML = `<span class="hb-n"><span class="hw">${WORM_SVG}</span><b id="huntN">–</b></span><span class="hb-t" id="huntT"></span><button type="button" class="hb-x" aria-label="Leave the worm hunt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>`;
+    bar.innerHTML = `<span class="hb-n"><span class="hw">${WORM_SVG}</span><b id="huntN">–</b></span><span class="hb-t" id="huntT">Tap to fly</span><button type="button" class="hb-x" aria-label="Leave the worm hunt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>`;
     document.body.appendChild(bar);
     for (const el of [pill, bar]) { el.addEventListener('pointerdown', ev => ev.stopPropagation()); }
     pill.addEventListener('click', () => { if (!tok()) { toast('Sign in to hunt worms', true); return; } enter(); });
@@ -752,17 +752,6 @@
       if (on && a > EXIT_ALT) leave(); };
     world.controls().addEventListener('change', pillCheck); setInterval(pillCheck, 500);
 
-    // bird faces from the site's bird kit, drawn onto the canvas
-    const pics = new Map(), picWait = new Set();
-    const pic = name => { const K = window._ppKit; if (!K || !name) return null;
-      const got = pics.get(name); if (got) return got.ok ? got : null;
-      const l = name.toLowerCase(), adm = admins.has(l), nm = adm ? 'admin' : name;
-      let h = 0; for (let i = 0; i < nm.length; i++) h = nm.charCodeAt(i) + ((h << 5) - h);
-      const r = K.get(nm, adm ? 'A' : ['🐤', '🐦', '🐧'][Math.abs(h) % 3], 't');
-      const src = r && !r.fail && r.t ? r.t : adm && r && r.fail ? '/admin-bird.png' : null;
-      if (src) { const e = { im: new Image(), g: r.fail ? 0 : (r.g || 0), ok: false }; e.im.onload = () => { e.ok = true; }; e.im.src = src; pics.set(name, e); return null; }
-      if (!r && !picWait.has(nm)) { picWait.add(nm); K.sub(nm, adm ? 'A' : ['🐤', '🐦', '🐧'][Math.abs(h) % 3], () => {}, 't'); }
-      return null; };
     const col = name => { try { return window._ppKit ? window._ppKit.tagCol(name) : 'hsl(275, 72%, 68%)'; } catch (e) { return 'hsl(275, 72%, 68%)'; } };
     const shade = c => c.replace(/hsl\((\d+),\s*\d+%,\s*\d+%\)/, 'hsl($1, 48%, 42%)');
 
@@ -772,7 +761,7 @@
       try { closeSheet(); focusPin(null); } catch (e) {}
       const c = world.controls(); c.autoRotate = false;
       const v = world.pointOfView(); world.pointOfView({ altitude: GAME_ALT }, 700);
-      $('huntN').textContent = balance == null ? '–' : balance; hintUntil = Date.now() + 6000;
+      $('huntN').textContent = balance == null ? '–' : balance; hintUntil = Date.now() + 4000;
       poll(true, [v.lat, v.lng]); loop();
     }
     function leave() {
@@ -796,7 +785,7 @@
         for (const [id, w] of worms) if (!ids.has(id) && w.gone > now + 800 && !w.mine) fx.push({ k: 'poof', lat: w.lat, lng: w.lng, t0: performance.now(), gold: w.v > 1 });
         const next = new Map(); for (const w of r.j.worms || []) next.set(w.id, worms.get(w.id) || { ...w, seen: performance.now() }); worms = next;
         // starting: if your bird is still out somewhere else (you were hunting a moment ago), go to it
-        if (start && me) { const p = posAt(me, now), v = world.pointOfView(); if (km(p, [v.lat, v.lng]) > 60) world.pointOfView({ lat: p[0], lng: p[1], altitude: GAME_ALT }, 900); }
+        if (start && me) { const p = posAt(me, now), v = world.pointOfView(); if (km(p, [v.lat, v.lng]) > 15) world.pointOfView({ lat: p[0], lng: p[1], altitude: GAME_ALT }, 900); }
       }
       pollT = setTimeout(() => poll(), 2000);
     }
@@ -827,53 +816,36 @@
 
     // ── drawing ──
     const sc = (la, lo) => world.getScreenCoords(la, lo, 0.001);
+    // a simple bird seen from above in the bird's colour; the beak points where it's going
     function drawBird(x, y, a, name, s, t, alpha, swoop, moving) {
-      const c = cx, cl = col(name), dk = shade(cl), sw = swoop || 0, k = s * (1 - 0.22 * sw);
-      // seen from above, a flapping wing looks shorter at the top and bottom of each beat
-      const flap = Math.sin(t * (moving ? 15 : 6)), span = moving ? 0.42 + 0.58 * (0.5 + 0.5 * flap) : 0.78 + 0.22 * (0.5 + 0.5 * flap);
+      const c = cx, cl = col(name), dk = shade(cl), sw = swoop || 0, k = s * 0.8 * (1 - 0.2 * sw);
+      const flap = Math.sin(t * (moving ? 13 : 4)), span = moving ? 0.55 + 0.45 * (0.5 + 0.5 * flap) : 0.9 + 0.1 * (0.5 + 0.5 * flap);
+      const shape = () => { const q = span; c.beginPath();
+        c.moveTo(12, 0);                                                   // head
+        c.quadraticCurveTo(10, -4, 4, -4.5);
+        c.quadraticCurveTo(0, -20 * q, -8, -27 * q);                       // left wing tip
+        c.quadraticCurveTo(-6, -12 * q, -8, -4);
+        c.lineTo(-17, -6); c.lineTo(-14, 0); c.lineTo(-17, 6); c.lineTo(-8, 4);   // tail
+        c.quadraticCurveTo(-6, 12 * q, -8, 27 * q);                        // right wing tip
+        c.quadraticCurveTo(0, 20 * q, 4, 4.5);
+        c.quadraticCurveTo(10, 4, 12, 0); c.closePath(); };
       c.save(); c.globalAlpha = alpha;
-      const wing = sd => { const q = sd * span; c.beginPath(); c.moveTo(7, sd * 5);
-        c.bezierCurveTo(10, 18 * q, 5, 30 * q, -1, 38 * q);                 // leading edge out to the tip
-        c.quadraticCurveTo(-6, 33 * q, -7, 29 * q); c.quadraticCurveTo(-11, 25 * q, -11, 20 * q);   // feathered trailing edge
-        c.quadraticCurveTo(-14, 15 * q, -12, 10 * q); c.quadraticCurveTo(-12, 7 * q, -9, sd * 5); c.closePath(); };
-      const tail = () => { c.beginPath(); c.moveTo(-11, -3.5); c.lineTo(-25, -9); c.quadraticCurveTo(-29, 0, -25, 9); c.lineTo(-11, 3.5); c.closePath(); };
-      // shadow on the ground (closer when it dives for a worm)
-      const so = (11 - 9 * sw) * s;
-      c.save(); c.translate(x + so * 0.45, y + so); c.rotate(a); c.scale(k, k); c.fillStyle = 'rgba(0,0,0,.28)';
-      wing(-1); c.fill(); wing(1); c.fill(); tail(); c.fill(); c.beginPath(); c.ellipse(-1, 0, 13, 8, 0, 0, 7); c.fill(); c.restore();
-      c.save(); c.translate(x, y); c.rotate(a); c.scale(k, k); c.lineJoin = 'round';
-      tail(); c.fillStyle = dk; c.fill(); c.strokeStyle = 'rgba(0,0,0,.35)'; c.lineWidth = 1.1; c.stroke();
-      for (const sd of [-1, 1]) {
-        wing(sd); c.fillStyle = cl; c.fill(); c.strokeStyle = 'rgba(0,0,0,.4)'; c.lineWidth = 1.2; c.stroke();
-        // darker flight feathers along the back of the wing
-        c.beginPath(); c.moveTo(-2, sd * 12 * span); c.lineTo(-7, sd * 29 * span); c.moveTo(-5, sd * 10 * span); c.lineTo(-10, sd * 21 * span); c.moveTo(2, sd * 13 * span); c.lineTo(-2, sd * 33 * span);
-        c.strokeStyle = dk; c.lineWidth = 1.5; c.lineCap = 'round'; c.stroke();
-      }
-      c.beginPath(); c.ellipse(-1, 0, 13, 8, 0, 0, 7); c.fillStyle = cl; c.fill(); c.strokeStyle = 'rgba(0,0,0,.4)'; c.lineWidth = 1.2; c.stroke();
-      c.restore();
-      // the head is the bird's own face, kept upright so you can tell who it is
-      const hx = x + Math.cos(a) * 11 * k, hy = y + Math.sin(a) * 11 * k, p = pic(name), z = 30 * k;
-      if (p) { const w = z * (1 + 2 * p.g); c.drawImage(p.im, hx - w / 2, hy - w / 2, w, w); }
-      else { c.beginPath(); c.arc(hx, hy, 10 * k, 0, 7); c.fillStyle = cl; c.fill(); c.strokeStyle = 'rgba(0,0,0,.4)'; c.stroke(); }
-      c.restore();
+      const so = (8 - 7 * sw) * s;
+      c.save(); c.translate(x + so * 0.4, y + so); c.rotate(a); c.scale(k, k); c.fillStyle = 'rgba(0,0,0,.22)'; shape(); c.fill(); c.restore();
+      c.save(); c.translate(x, y); c.rotate(a); c.scale(k, k);
+      shape(); c.fillStyle = cl; c.fill();
+      c.beginPath(); c.moveTo(12, -1.8); c.lineTo(17, 0); c.lineTo(12, 1.8); c.closePath(); c.fillStyle = dk; c.fill();   // beak
+      c.restore(); c.restore();
     }
+    // a worm: a tiny wiggling squiggle (gold ones are worth 5)
     function drawWorm(x, y, w, t) {
       const c = cx, gold = w.v > 1, life = w.gone - srv(), age = (performance.now() - w.seen) / 1000;
-      const pop = Math.min(1, age / 0.45), ease = 1 - Math.pow(1 - pop, 3);
-      const blink = life < 5000 ? 0.45 + 0.55 * Math.abs(Math.cos(t * 6)) : 1;
-      c.save(); c.globalAlpha = blink;
-      // a ring that keeps pulsing so worms are easy to spot on the map
-      const rp = (t * 0.7) % 1; c.beginPath(); c.arc(x, y, 8 + 22 * rp, 0, 7); c.strokeStyle = gold ? `rgba(251,191,36,${0.7 * (1 - rp)})` : `rgba(232,85,92,${0.6 * (1 - rp)})`; c.lineWidth = 2; c.stroke();
-      // the dirt it popped out of
-      c.beginPath(); c.ellipse(x, y + 2, 11, 5, 0, 0, 7); c.fillStyle = '#4a2f18'; c.fill();
-      c.beginPath(); c.ellipse(x, y + 1, 8, 3.2, 0, 0, 7); c.fillStyle = '#6b4424'; c.fill();
-      // the worm, wiggling up out of the hole
-      const hgt = 20 * ease, segs = 10; c.beginPath();
-      for (let i = 0; i <= segs; i++) { const f = i / segs, px = x + Math.sin(t * 5 + f * 4) * 4 * f, py = y - f * hgt; i ? c.lineTo(px, py) : c.moveTo(px, py); }
+      const pop = Math.min(1, age / 0.5), fade = life < 4000 ? Math.max(0.25, life / 4000) : 1;
+      c.save(); c.globalAlpha = pop * fade; c.beginPath();
+      for (let i = 0; i <= 8; i++) { const f = i / 8, px = x - 5 + f * 10, py = y + Math.sin(t * 4 + f * 6) * 1.6; i ? c.lineTo(px, py) : c.moveTo(px, py); }
       c.lineCap = 'round'; c.lineJoin = 'round';
-      if (gold) { c.shadowColor = '#fbbf24'; c.shadowBlur = 14; }
-      c.strokeStyle = 'rgba(0,0,0,.45)'; c.lineWidth = 7; c.stroke(); c.strokeStyle = gold ? '#fbbf24' : '#e8555c'; c.lineWidth = 5; c.stroke();
-      c.shadowBlur = 0; c.strokeStyle = gold ? '#fff7d6' : '#f6a3a6'; c.lineWidth = 1.5; c.stroke();
+      c.strokeStyle = 'rgba(0,0,0,.35)'; c.lineWidth = 3.6; c.stroke();
+      c.strokeStyle = gold ? '#fcd34d' : '#f2a0a4'; c.lineWidth = 2.2; c.stroke();
       c.restore();
     }
     function drawEdge(x, y, gold, t) {
@@ -881,10 +853,10 @@
       const m = 26, topY = 80, botY = H - 90;
       const cx0 = W / 2, cy0 = (topY + botY) / 2, dx = x - cx0, dy = y - cy0;
       const sx = (W / 2 - m) / Math.abs(dx || 1e-6), sy = ((botY - topY) / 2) / Math.abs(dy || 1e-6), f = Math.min(sx, sy);
-      const ex = cx0 + dx * f, ey = cy0 + dy * f, a = Math.atan2(dy, dx), pulse = 0.65 + 0.35 * Math.sin(t * 5);
+      const ex = cx0 + dx * f, ey = cy0 + dy * f, a = Math.atan2(dy, dx), pulse = 1;
       const c = cx; c.save(); c.translate(ex, ey); c.rotate(a); c.globalAlpha = pulse;
-      c.beginPath(); c.moveTo(10, 0); c.lineTo(-6, -8); c.lineTo(-2, 0); c.lineTo(-6, 8); c.closePath();
-      c.fillStyle = gold ? '#fbbf24' : '#e8555c'; c.shadowColor = c.fillStyle; c.shadowBlur = 10; c.fill(); c.restore();
+      c.beginPath(); c.moveTo(5, 0); c.lineTo(-3, -4); c.lineTo(-3, 4); c.closePath();
+      c.fillStyle = gold ? 'rgba(252,211,77,.8)' : 'rgba(242,160,164,.75)'; c.fill(); c.restore();
     }
     function loop() {
       raf = requestAnimationFrame(loop); if (!on) return;
@@ -914,32 +886,36 @@
         const moving = now < b.arrive, ahead = posAt(b, now + 250), s2 = ahead && sc(ahead[0], ahead[1]);
         let a = angs.get(b.u) ?? -Math.PI / 2; if (moving && s2 && Math.hypot(s2.x - s.x, s2.y - s.y) > 0.5) a = Math.atan2(s2.y - s.y, s2.x - s.x); angs.set(b.u, a);
         drawBird(s.x, s.y, a, b.u, 0.8, t + b.u.length, 0.92, 0, moving);
-        c.save(); c.font = '700 10.5px -apple-system,system-ui,sans-serif'; c.textAlign = 'center'; c.fillStyle = 'rgba(255,255,255,.9)'; c.shadowColor = 'rgba(0,0,0,.9)'; c.shadowBlur = 3; c.fillText(b.u, s.x, s.y + 34); c.restore(); }
+        c.save(); c.font = '600 9.5px -apple-system,system-ui,sans-serif'; c.textAlign = 'center'; c.fillStyle = 'rgba(255,255,255,.75)'; c.shadowColor = 'rgba(0,0,0,.9)'; c.shadowBlur = 3; c.fillText(b.u, s.x, s.y + 26); c.restore(); }
       // effects: catches (your bird dives, the worm is pulled up, +1 / +5 rises) and worms another bird took
       let swoop = 0;
       fx = fx.filter(f => { const age = (performance.now() - f.t0) / 1000, s = sc(f.lat, f.lng); if (!s) return age < 1.4;
         if (f.k === 'catch') {
           if (age < 0.5) swoop = Math.max(swoop, Math.sin(Math.PI * age / 0.5));
-          if (age < 0.35) { c.save(); c.globalAlpha = 1 - age / 0.35; c.translate(s.x, s.y - 12 * age / 0.35); c.scale(1 - age / 0.35, 1 - age / 0.35); c.beginPath(); c.moveTo(-6, 0); c.quadraticCurveTo(0, -12, 6, 0); c.strokeStyle = f.v > 1 ? '#fbbf24' : '#e8555c'; c.lineWidth = 5; c.lineCap = 'round'; c.stroke(); c.restore(); }
-          c.save(); c.globalAlpha = Math.max(0, 1 - Math.max(0, age - 0.7) / 0.7); c.font = '900 22px -apple-system,system-ui,sans-serif'; c.textAlign = 'center';
-          c.fillStyle = f.v > 1 ? '#fbbf24' : '#f87171'; c.shadowColor = 'rgba(0,0,0,.85)'; c.shadowBlur = 6; c.fillText('+' + f.v, s.x, s.y - 30 - 40 * age); c.restore();
+          if (age < 0.35) { c.save(); c.globalAlpha = 1 - age / 0.35; c.translate(s.x, s.y - 12 * age / 0.35); c.scale(1 - age / 0.35, 1 - age / 0.35); c.beginPath(); c.moveTo(-5, 0); c.quadraticCurveTo(0, -3, 5, 0); c.strokeStyle = f.v > 1 ? '#fcd34d' : '#f2a0a4'; c.lineWidth = 2.2; c.lineCap = 'round'; c.stroke(); c.restore(); }
+          c.save(); c.globalAlpha = Math.max(0, 1 - Math.max(0, age - 0.7) / 0.7); c.font = '700 13px -apple-system,system-ui,sans-serif'; c.textAlign = 'center';
+          c.fillStyle = f.v > 1 ? '#fcd34d' : '#f2a0a4'; c.shadowColor = 'rgba(0,0,0,.8)'; c.shadowBlur = 3; c.fillText('+' + f.v, s.x, s.y - 18 - 16 * age); c.restore();
           return age < 1.4; }
         if (f.k === 'poof') {
-          for (let i = 0; i < 7; i++) { const an = i / 7 * 6.283, d = 6 + 22 * age; c.beginPath(); c.arc(s.x + Math.cos(an) * d, s.y + Math.sin(an) * d * 0.6, Math.max(0, 3 * (1 - age / 1.2)), 0, 7); c.fillStyle = `rgba(160,120,90,${Math.max(0, 0.8 - age / 1.2)})`; c.fill(); }
-          if (f.by) { c.save(); c.globalAlpha = Math.max(0, 1 - age / 1.6); c.font = '700 11.5px -apple-system,system-ui,sans-serif'; c.textAlign = 'center'; c.fillStyle = '#e2e8f0'; c.shadowColor = 'rgba(0,0,0,.9)'; c.shadowBlur = 4; c.fillText(f.by + ' got it first', s.x, s.y - 18 - 10 * age); c.restore(); }
+          for (let i = 0; i < 5; i++) { const an = i / 5 * 6.283, d = 3 + 10 * age; c.beginPath(); c.arc(s.x + Math.cos(an) * d, s.y + Math.sin(an) * d * 0.6, Math.max(0, 1.6 * (1 - age / 1.2)), 0, 7); c.fillStyle = `rgba(160,120,90,${Math.max(0, 0.8 - age / 1.2)})`; c.fill(); }
+          if (f.by) { c.save(); c.globalAlpha = Math.max(0, 1 - age / 1.6); c.font = '600 10.5px -apple-system,system-ui,sans-serif'; c.textAlign = 'center'; c.fillStyle = 'rgba(226,232,240,.85)'; c.shadowColor = 'rgba(0,0,0,.9)'; c.shadowBlur = 4; c.fillText(f.by + ' got it first', s.x, s.y - 18 - 10 * age); c.restore(); }
           return age < 1.6; }
         return false; });
       // your bird, on top of everything
       if (p) { const s = sc(p[0], p[1]);
         if (s) { const moving = now < me.arrive, ah = posAt(me, now + 250), s2 = ah && sc(ah[0], ah[1]);
           if (moving && s2 && Math.hypot(s2.x - s.x, s2.y - s.y) > 0.5) ang = Math.atan2(s2.y - s.y, s2.x - s.x);
+          else if (!moving) { // sitting still: the beak slowly turns toward the nearest worm
+            let best = null, bd = 1e9; for (const w of worms.values()) { const d = km(p, [w.lat, w.lng]); if (d < bd) { bd = d; best = w; } }
+            const ws = best && sc(best.lat, best.lng);
+            if (ws) { const want = Math.atan2(ws.y - s.y, ws.x - s.x); let d = want - ang; d = Math.atan2(Math.sin(d), Math.cos(d)); ang += d * 0.06; } }
           drawBird(s.x, s.y, ang, mine, 1, t, 1, swoop, moving);
           // the view follows your bird when it nears the edge of the screen
           const mx = W * 0.16, top = 110, bot = H - 120;
           if ((s.x < mx || s.x > W - mx || s.y < top || s.y > bot) && performance.now() > panUntil && !down) {
             const ahead = posAt(me, now + 700); panUntil = performance.now() + 750; world.pointOfView({ lat: ahead[0], lng: ahead[1] }, 700); } } }
       // the line under your worm count: day or night where your bird is
-      const tEl = $('huntT'); if (tEl) { const txt = Date.now() < hintUntil ? 'Tap anywhere to fly' : p ? (isDay(p[0], p[1]) ? 'Daytime · worms are scarce' : 'Night · the worms are out') : 'Finding your bird…'; if (tEl.textContent !== txt) tEl.textContent = txt; }
+      const tEl = $('huntT'); if (tEl) { const hint = Date.now() < hintUntil; if (tEl.classList.contains('on') !== hint) tEl.classList.toggle('on', hint); }
     }
   }
 
