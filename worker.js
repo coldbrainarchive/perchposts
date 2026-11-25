@@ -1725,19 +1725,19 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       }
       // Here rather than a separate request: listing every chirp id in a URL fails on long chats,
       // and this keeps huddle reactions behind the member check above
-      // Top chirps of the whole conversation (posts and huddles): score = emoji reactions + 1.5 per worm (user's call,
+      // Top chirps of the whole conversation (posts and huddles; no cap — user 2026-11-25): score = emoji reactions + 1.5 per worm (user's call,
       // 2026-11-25: straight 1.5 per worm, not per giver); 1+ reaction or worm while the site is small; newest wins ties.
       // They may be older than the loaded page, so their reactions ride along below
       const { results: topRows } = await env.DB.prepare(
         `SELECT * FROM (SELECT c.*, (SELECT COUNT(*) FROM comment_reactions r WHERE r.comment_id = c.id) AS rx_count,
                 (SELECT COUNT(*) FROM worms w WHERE w.comment_id = c.id) AS worm_count
            FROM comments c WHERE c.post_id = ? AND c.deleted = 0)
-         WHERE rx_count + worm_count > 0 ORDER BY rx_count + 1.5 * worm_count DESC, created_at DESC LIMIT 20`
+         WHERE rx_count + worm_count > 0 ORDER BY rx_count + 1.5 * worm_count DESC, created_at DESC`
       ).bind(id).all();
       const top = topRows || [];
       // Most replied chirps (1+ replies while the site is small), for the preview's "Most replied" section
       const { results: repRows } = await env.DB.prepare(
-        `SELECT c.*, COUNT(r.id) AS reply_count FROM comments c JOIN comments r ON r.parent_comment_id = c.id AND r.deleted = 0 WHERE c.post_id = ? AND c.deleted = 0 GROUP BY c.id HAVING COUNT(r.id) >= 1 ORDER BY reply_count DESC, c.created_at DESC LIMIT 20`
+        `SELECT c.*, COUNT(r.id) AS reply_count FROM comments c JOIN comments r ON r.parent_comment_id = c.id AND r.deleted = 0 WHERE c.post_id = ? AND c.deleted = 0 GROUP BY c.id HAVING COUNT(r.id) >= 1 ORDER BY reply_count DESC, c.created_at DESC`
       ).bind(id).all();
       const replied = repRows || [];
       const rxIds = [...new Set([...comments.map(c => c.id), ...top.map(c => c.id), ...replied.map(c => c.id)])];
