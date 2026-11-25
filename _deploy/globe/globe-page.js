@@ -591,7 +591,10 @@
       const img = new Image(); img.crossOrigin = 'anonymous';
       img.onload = () => {
         const lights = new Tex(img); lights.needsUpdate = true; try { lights.colorSpace = g.material.map.colorSpace; } catch (e) {}
-        const mat = new Shader({ transparent: true, depthWrite: false,
+        // depthTest off: at a distance the shell and the globe are too close for the depth buffer to tell apart, which
+        // made the night flicker in patches (z-fighting). Only the shell's near side draws (back faces are culled), so it
+        // never shows through the globe.
+        const mat = new Shader({ transparent: true, depthWrite: false, depthTest: false,
           uniforms: { sLat: { value: 0 }, sLng: { value: 0 }, fade: { value: 1 }, lights: { value: lights } },
           vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
           fragmentShader: 'uniform float sLat; uniform float sLng; uniform float fade; uniform sampler2D lights; varying vec2 vUv; void main(){ float lat = (vUv.y - 0.5) * 3.14159265; float lng = (vUv.x - 0.5) * 6.2831853; float d = sin(lat) * sin(sLat) + cos(lat) * cos(sLat) * cos(lng - sLng); float night = smoothstep(0.08, -0.16, d); vec3 L = texture2D(lights, vUv).rgb; float lum = dot(L, vec3(0.3,0.59,0.11)); lum = smoothstep(0.02, 0.24, lum); float a = night * max(0.7, lum) * fade; vec3 c = mix(vec3(0.01, 0.016, 0.05), vec3(1.0, 0.86, 0.58), lum); gl_FragColor = vec4(c, a); }' });
