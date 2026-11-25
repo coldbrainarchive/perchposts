@@ -63,7 +63,7 @@ patch("children:[site&&bot?(0,L.jsx)(`span`,{className:`s`,children:site}):post.
 
 patch("body .lb-ic{",
  "body .ch-th.ch-hx{position:relative;background:#1f222b;border-radius:50%!important;overflow:visible}"
- "body .ch-th.ch-hx .b{position:absolute;display:inline-flex;line-height:1}body .ch-th.ch-hx .b1{left:3px;top:4px;z-index:1}body .ch-th.ch-hx .b2{right:2px;bottom:3px;transform:scaleX(-1)}body .ch-th.ch-hx .solo{display:inline-flex}"
+ "body .ch-th.ch-hx .b{position:absolute;display:inline-flex;line-height:1}body .ch-th.ch-hx .b1{left:4px;top:6px;z-index:1}body .ch-th.ch-hx .b2{right:3px;bottom:5px;transform:scaleX(-1)}body .ch-th.ch-hx .solo{display:inline-flex}"
  "body .ch-th.ch-hx .hi{width:20px;height:20px;color:#94a3b8;display:inline-flex}body .ch-th.ch-hx .hi svg{width:100%;height:100%}"
  "body .chp.chp-full>.pp-pblk.hp-card{border:0!important;background:none!important;box-shadow:none!important;padding:0!important;margin:0!important}"
  "body .ch-dock.ch-dock-h{border-top:0;padding-top:4px}"
