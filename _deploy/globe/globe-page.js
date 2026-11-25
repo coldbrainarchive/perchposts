@@ -604,7 +604,7 @@
         const upd = () => { const s = subsolar(); mat.uniforms.sLat.value = s.lat * Math.PI / 180; mat.uniforms.sLng.value = s.lng * Math.PI / 180; };
         upd(); setInterval(upd, 60000);
         // zoomed in close the night fades to a faint tint (altitude 0.55 → 0.2), so the detail you zoomed in for shows
-        const fd = () => { const a = world.pointOfView().altitude; mat.uniforms.fade.value = a >= 0.55 ? 1 : a <= 0.2 ? 0.22 : 0.22 + 0.78 * (a - 0.2) / 0.35; };
+        const fd = () => { const a = world.pointOfView().altitude; mat.uniforms.fade.value = document.body.classList.contains('hunting') ? 0 : a >= 0.55 ? 1 : a <= 0.2 ? 0.22 : 0.22 + 0.78 * (a - 0.2) / 0.35; };
         world.controls().addEventListener('change', fd); fd(); setInterval(fd, 400);
       };
       img.src = '/globe/earth-night.jpg';
@@ -665,7 +665,7 @@
     const els = new Map(); let shown = [];
     const mk = (key, txt, cls) => { let e = els.get(key); if (!e) { e = document.createElement('div'); e.className = cls; e.textContent = txt; layer.appendChild(e); els.set(key, e); } return e; };
     // altitude bands → what shows
-    const bandOf = a => a > 1.25 ? 0 : a > 0.9 ? 1 : a > 0.6 ? 2 : a > 0.38 ? 3 : a > 0.24 ? 4 : 5;
+    const bandOf = a => document.body.classList.contains('hunting') ? 0 : a > 1.25 ? 0 : a > 0.9 ? 1 : a > 0.6 ? 2 : a > 0.38 ? 3 : a > 0.24 ? 4 : 5;
     const paths = () => {
       const b = bandOf(world.pointOfView().altitude); if (b === band) return; band = b;
       if (!data || b === 0) { world.pathsData([]); return; }
@@ -813,7 +813,7 @@
     function enter() {
       if (on) return; on = true; loadKit(() => {});
       document.body.classList.add('hunting'); pill.classList.remove('in'); bar.classList.add('in');
-      try { closeSheet(); focusPin(null); } catch (e) {}
+      try { closeSheet(); focusPin(null); world.arcsData([]); world.ringsData([]); } catch (e) {}
       // the screen stays on your bird, so the map can't be dragged or pinch-zoomed during the hunt (leave with the ×)
       const c = world.controls(); c.autoRotate = false; c.enableRotate = false; c.enableZoom = false;
       const v = world.pointOfView();
@@ -821,7 +821,7 @@
       poll(true, [v.lat, v.lng]); loop();
     }
     function leave() {
-      if (!on) return; on = false; document.body.classList.remove('hunting'); bar.classList.remove('in'); world.controls().enableRotate = true; world.controls().enableZoom = true;
+      if (!on) return; on = false; document.body.classList.remove('hunting'); bar.classList.remove('in'); world.controls().enableRotate = true; world.controls().enableZoom = true; try { paint(); } catch (e) {}
       cancelAnimationFrame(raf); clearTimeout(pollT); cx.clearRect(0, 0, cv.width, cv.height); target = null; fx = []; pillCheck();
     }
     async function poll(start, at) {
@@ -874,7 +874,8 @@
     }
 
     // ── drawing ──
-    const sc = (la, lo) => world.getScreenCoords(la, lo, 0.001);
+    // right on the ground: anything drawn even a few km up slides against the map when the camera is this low
+    const sc = (la, lo) => world.getScreenCoords(la, lo, 0);
     // a simple bird seen from above in the bird's colour; the beak points where it's going
     function drawBird(x, y, a, name, s, alpha, swoop, ps) {
       const c = cx, cl = col(name), dk = shade(cl), sw = swoop || 0, k = s * 0.8 * (1 - 0.2 * sw), bk = ps.bk, ab = Math.abs(bk), span = ps.span;
