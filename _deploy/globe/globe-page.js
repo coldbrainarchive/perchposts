@@ -657,6 +657,10 @@
   }
   // Map overlay (only when zoomed in close): Natural Earth borders on the globe + country / city names that fade in
   // as you get closer. Data (~190 KB gzipped) loads the first time you zoom in that far.
+  // in the game the camera is only ~14 km up, so names and border lines go right down on the ground (from far away they
+  // sit a little above it so the globe never covers them)
+  const inGame = () => document.body.classList.contains('hunting');
+  let mapAsk = null;   // the game calls this every frame so the names keep up with the moving view
   function mapOverlay() {
     const R = Math.PI / 180; let data = null, loading = false, band = -1, q = 0;
     const host = world.renderer().domElement.parentElement;
@@ -665,12 +669,12 @@
     const els = new Map(); let shown = [];
     const mk = (key, txt, cls) => { let e = els.get(key); if (!e) { e = document.createElement('div'); e.className = cls; e.textContent = txt; layer.appendChild(e); els.set(key, e); } return e; };
     // altitude bands → what shows
-    const bandOf = a => document.body.classList.contains('hunting') ? 0 : a > 1.25 ? 0 : a > 0.9 ? 1 : a > 0.6 ? 2 : a > 0.38 ? 3 : a > 0.24 ? 4 : 5;
+    const bandOf = a => a > 1.25 ? 0 : a > 0.9 ? 1 : a > 0.6 ? 2 : a > 0.38 ? 3 : a > 0.24 ? 4 : 5;
     const paths = () => {
-      const b = bandOf(world.pointOfView().altitude); if (b === band) return; band = b;
+      const b = bandOf(world.pointOfView().altitude), key = b + (inGame() ? 10 : 0); if (key === band) return; band = key;
       if (!data || b === 0) { world.pathsData([]); return; }
       const ln = data.b.map(p => ({ p, k: 'b' })).concat(b >= 3 ? data.s.map(p => ({ p, k: 's' })) : []);
-      world.pathsData(ln).pathPoints('p').pathPointLat(p => p[1]).pathPointLng(p => p[0]).pathPointAlt(0.0012)
+      world.pathsData(ln).pathPoints('p').pathPointLat(p => p[1]).pathPointLng(p => p[0]).pathPointAlt(inGame() ? 0.00002 : 0.0012)
         .pathColor(d => d.k === 'b' ? `rgba(255,255,255,${[0, .35, .5, .55, .6, .6][b]})` : 'rgba(255,255,255,.28)')
         .pathStroke(d => d.k === 'b' ? (b >= 4 ? 1.1 : 0.7) : 0.5).pathDashLength(d => d.k === 's' ? 0.6 : 1).pathDashGap(d => d.k === 's' ? 0.4 : 0).pathTransitionDuration(0);
     };
@@ -693,7 +697,7 @@
       for (const w of want) {
         const la = w.lat * R, d = Math.sin(la0) * Math.sin(la) + Math.cos(la0) * Math.cos(la) * Math.cos(w.lng * R - lo0);
         if (d < cap) continue;
-        const s = world.getScreenCoords(w.lat, w.lng, 0.001); if (!s || s.x < 4 || s.x > W - 4 || s.y < top + 6 || s.y > H - 10) continue;
+        const s = world.getScreenCoords(w.lat, w.lng, inGame() ? 0 : 0.001); if (!s || s.x < 4 || s.x > W - 4 || s.y < top + 6 || s.y > H - 10) continue;
         const e = mk(w.k, w.t, w.cls); const bw = e._w || (e._w = e.offsetWidth || w.t.length * 7), bh = 16;
         const r = { l: s.x - bw / 2 - 3, r: s.x + bw / 2 + 3, t: s.y - bh, b: s.y + 4 };
         if (placed.some(o => r.l < o.r && r.r > o.l && r.t < o.b && r.b > o.t)) continue;
@@ -705,11 +709,11 @@
     };
     // keep the names glued to the map while it moves: same-frame reposition with an up-to-date camera matrix
     const glue = () => { if (!shown.length) return; try { world.camera().updateMatrixWorld(); } catch (e) {}
-      for (const s of shown) { const p = world.getScreenCoords(s.lat, s.lng, 0.001); if (p) s.e.style.transform = `translate(${p.x}px,${p.y}px)`; } };
+      for (const s of shown) { const p = world.getScreenCoords(s.lat, s.lng, inGame() ? 0 : 0.001); if (p) s.e.style.transform = `translate(${p.x}px,${p.y}px)`; } };
     let lastDraw = 0;
     const ask = () => { glue(); if (q) return; const wait = Math.max(0, 140 - (performance.now() - lastDraw));
       q = setTimeout(() => requestAnimationFrame(() => { lastDraw = performance.now(); draw(); }), wait); };
-    world.controls().addEventListener('change', ask); setInterval(ask, 600); ask();
+    world.controls().addEventListener('change', ask); setInterval(ask, 600); ask(); mapAsk = ask;
   }
 
   // ── Take flight (worm hunt, 2026-11-25): a shared mini-game when zoomed in close. A "Take flight" pill appears; in the game your
@@ -850,6 +854,16 @@
     }
     function setBal(n) { const el = $('huntN'); if (balance != null && n > balance) { el.parentElement.classList.remove('bump'); void el.offsetWidth; el.parentElement.classList.add('bump'); } balance = n; el.textContent = n; }
 
+    // the spot on the ground under a point on the screen. (The library's toGlobeCoords hits the first thing in the scene,
+    // and the night layer floats ~10 km up, which at hunting height pulled every tap about two-thirds of the way in
+    // toward the bird.) This finds where the line from the camera through the tap meets the ground itself.
+    function groundAt(x, y, r) {
+      const cam = world.camera(), V = cam.position.constructor, rad = world.getGlobeRadius();
+      const o = cam.position.clone(), d = new V(x / r.width * 2 - 1, -(y / r.height) * 2 + 1, 0.5).unproject(cam).sub(o).normalize();
+      const b = o.dot(d), c = o.dot(o) - rad * rad, disc = b * b - c; if (disc < 0) return null;
+      const t = -b - Math.sqrt(disc), q = o.add(d.multiplyScalar(t)), gc = world.toGeoCoords({ x: q.x, y: q.y, z: q.z });
+      return gc && isFinite(gc.lat) ? { lat: gc.lat, lng: gc.lng } : null;
+    }
     // tap the map to fly there (drags still move the map; a pinch doesn't count as a tap)
     let down = null;
     const can = world.renderer().domElement;
@@ -858,7 +872,7 @@
       if (!on || !down || !e.isPrimary) return; const d = down; down = null;
       if (d.n > 1 || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 10 || Date.now() - d.t > 400 || !me) return;
       // tap anywhere: the bird turns and flies that way (and keeps going)
-      const r = can.getBoundingClientRect(), g = world.toGlobeCoords(e.clientX - r.left, e.clientY - r.top); if (!g) return;
+      const r = can.getBoundingClientRect(), g = groundAt(e.clientX - r.left, e.clientY - r.top, r); if (!g) return;
       // a tap right on the bird (within 14 px on screen) has no direction to give, so it's skipped
       const p = posAt(me, srv()), bs = sc(p[0], p[1]); if (bs && Math.hypot(e.clientX - r.left - bs.x, e.clientY - r.top - bs.y) < 14) return;
       flyDir(bearing(p, [g.lat, g.lng])); target = { lat: g.lat, lng: g.lng, t0: performance.now() };
@@ -935,6 +949,7 @@
       // keep flying: a little before the far-ahead point is reached, carry on the same way
       if (p && me.b1 != null && me.arrive - now < 12000 && performance.now() > extAt) { extAt = performance.now() + 5000; flyDir(headAt(me, now)); }
       try { world.camera().updateMatrixWorld(); } catch (e) {}
+      if (mapAsk) mapAsk();   // map names follow the moving view every frame
       const c = cx, t = performance.now() / 1000, mine = myName();
       c.setTransform(DPR, 0, 0, DPR, 0, 0); c.clearRect(0, 0, W, H);
       const v = world.pointOfView(), cosCap = Math.cos(Math.acos(1 / (1 + v.altitude)) * 0.95);
