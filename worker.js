@@ -2,6 +2,18 @@ import { stripMedia, stripIsoBmffStream } from "./media-strip.js";
 import { linkPreview } from "./link-preview.js";
 import NEST_WORDS from "./birds/lists.json";
 import { buildTrending } from "./trending.js";
+import LAND_MASK from "./land-mask.js";
+
+// Is this spot land? (worm hunt) Reads one row of the land map (decoded once per row and kept while the worker lives).
+let LAND_ROWS = null; const LAND_ROW = new Map();
+function isLand(lat, lng) {
+  if (!LAND_ROWS) LAND_ROWS = LAND_MASK.split(";");
+  const H = LAND_ROWS.length, W = 8192, y = Math.min(H - 1, Math.max(0, Math.floor((90 - lat) / 180 * H))), x = Math.min(W - 1, Math.max(0, Math.floor((((lng + 180) % 360 + 360) % 360) / 360 * W)));
+  let ends = LAND_ROW.get(y);
+  if (!ends) { ends = []; let at = 0; for (const r of LAND_ROWS[y].split(".")) { at += parseInt(r, 36); ends.push(at); } LAND_ROW.set(y, ends); }
+  let i = 0; while (i < ends.length && ends[i] <= x) i++;
+  return i % 2 === 1;   // runs alternate sea, land, sea… so odd runs are land
+}
 
 // Sign-up nests: 5 usernames (eggs) per device, a fresh set only every 15 minutes, and only names never offered to
 // that device before. Clearing the browser makes a new device, so each network (keyed IP hash) gets at most
@@ -2377,7 +2389,6 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   if (url.pathname.startsWith("/hunt/") && request.method === "POST") {
     if (!username || isBot) return signInRequired();
     const HS = env.HUNT_FAST ? 1 : 0;                       // local testing only: worms appear quickly
-    const SPEED = 4.5;                                    // km per second (crosses a phone screen at hunt zoom in ~12 s)
     const REACH = 2.2;                                    // km — a worm this close to your flight path is caught
     const LIFE = 40000, GOLD_LIFE = 30000, NEAR = 100;     // worm life (ms); what you can see around you (km)
     // a worm comes up, crawls a little, goes back under, and comes up again a few km away (same code on the globe page)
@@ -2394,22 +2405,26 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const l = segs[segs.length - 1], ll = l ? toLL(wormOff(l, (l.b - l.a) / 1000)) : [w.lat, w.lng]; return { up: false, lat: ll[0], lng: ll[1], toUp: Infinity }; };
     const R = Math.PI / 180, now = Date.now();
     const km = (a, b) => { const d = Math.sin((b[0] - a[0]) * R / 2) ** 2 + Math.cos(a[0] * R) * Math.cos(b[0] * R) * Math.sin((b[1] - a[1]) * R / 2) ** 2; return 12742 * Math.asin(Math.min(1, Math.sqrt(d))); };
-    // a flight: from a point, turn like a bird (at TURN rad/s) from heading b0 to b1, then fly straight on b1 at SPEED
-    // (bearings clockwise from north; flat-map maths over these short distances — the same code runs on the globe page)
-    const TURN = 120 * Math.PI / 180;
-    const fTurn = f => { if (f._T == null) { let d = ((f.b1 - f.b0) % 6.283185307) + 6.283185307; d = (d % 6.283185307); if (d > Math.PI) d -= 6.283185307; f._s = d < 0 ? -1 : 1; f._T = Math.abs(d) / TURN; } return f; };
-    const fOff = (f, u) => { fTurn(f); const T = f._T, s = f._s, ut = Math.min(u, T), bt = f.b0 + s * TURN * ut; let x = 0, y = 0;
-      if (T > 0) { const k = SPEED / (s * TURN); x = k * (Math.cos(f.b0) - Math.cos(bt)); y = k * (Math.sin(bt) - Math.sin(f.b0)); }
-      if (u > T) { x += SPEED * (u - T) * Math.sin(f.b1); y += SPEED * (u - T) * Math.cos(f.b1); }
-      return [x, y, u < T ? bt : f.b1]; };
-    const flyAt = (f, t) => { if (!f) return null; if (f.b0 == null || f.b1 == null) return f.to || f.from;
-      const o = fOff(f, Math.max(0, Math.min(t, f.arrive) - f.depart) / 1000), la = Math.max(-84, Math.min(84, f.from[0] + o[1] / 111.2));
+    // a flight starts at each tap (one wing beat): the bird gets a push (BOOST km/s, up to VMAX) and then slows on its own
+    // (speed halves about every TAU·0.69 s) until it stops, so you have to keep flapping. It turns on a circle of R_TURN km
+    // from heading b0 to b1, then carries straight on. All in distance terms, so it's exact: the same code runs on the page.
+    const R_TURN = 2, TAU = 1.6, VMAX = 6, BOOST = 1.6, VSTOP = 0.05, LAUNCH = 4.5;
+    const fTurn = f => { if (f._A == null) { let d = ((f.b1 - f.b0) % 6.283185307) + 6.283185307; d = d % 6.283185307; if (d > Math.PI) d -= 6.283185307; f._s = d < 0 ? -1 : 1; f._A = Math.abs(d); f._St = R_TURN * f._A; } return f; };
+    const fDist = (f, u) => (f.v0 || 0) * TAU * (1 - Math.exp(-u / TAU));
+    const fOff = (f, u) => { fTurn(f); const sT = fDist(f, u), st = Math.min(sT, f._St), s = f._s, bt = f.b0 + s * st / R_TURN; let x = 0, y = 0;
+      if (st > 0) { const k = R_TURN * s; x = k * (Math.cos(f.b0) - Math.cos(bt)); y = k * (Math.sin(bt) - Math.sin(f.b0)); }
+      if (sT > f._St) { x += (sT - f._St) * Math.sin(f.b1); y += (sT - f._St) * Math.cos(f.b1); }
+      return [x, y, sT < f._St ? bt : f.b1]; };
+    const fU = (f, t) => Math.max(0, t - f.depart) / 1000;
+    const flyAt = (f, t) => { if (!f) return null; if (f.b0 == null || f.b1 == null || !f.v0) return f.from;
+      const o = fOff(f, fU(f, t)), la = Math.max(-84, Math.min(84, f.from[0] + o[1] / 111.2));
       return [la, ((f.from[1] + o[0] / (111.2 * Math.cos(f.from[0] * Math.PI / 180)) + 540) % 360) - 180]; };
-    const headAt = (f, t) => f && f.b0 != null && f.b1 != null ? fOff(f, Math.max(0, Math.min(t, f.arrive) - f.depart) / 1000)[2] : null;
-    const flyFor = T => (T + 150 / SPEED) * 1000;   // a flight lasts its turn plus 150 km straight on (the page carries on before then)
+    const headAt = (f, t) => f && f.b0 != null && f.b1 != null ? fOff(f, fU(f, t))[2] : null;
+    const speedAt = (f, t) => f && f.v0 ? f.v0 * Math.exp(-fU(f, t) / TAU) : 0;
+    const stopAt = f => f.depart + (f.v0 > VSTOP ? TAU * Math.log(f.v0 / VSTOP) * 1000 : 0);
     const posAt = (b, t) => b ? flyAt(flight(b), t) : null;
     const okLL = (la, lo) => Number.isFinite(la) && Number.isFinite(lo) && Math.abs(la) <= 85 && Math.abs(lo) <= 180;
-    const flight = b => b && { from: [b.from_lat, b.from_lng], to: [b.to_lat, b.to_lng], b0: b.brg0 ?? null, b1: b.brg1 ?? null, depart: b.depart_at, arrive: b.arrive_at };
+    const flight = b => b && { from: [b.from_lat, b.from_lng], to: [b.to_lat, b.to_lng], b0: b.brg0 ?? null, b1: b.brg1 ?? null, v0: b.v0 ?? 0, depart: b.depart_at, arrive: b.arrive_at };
     try {
       let me = await env.DB.prepare(`SELECT * FROM hunt_birds WHERE username = ?`).bind(username).first();
       if (url.pathname === "/hunt/state") {
@@ -2417,7 +2432,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         // (it can't be seen or catch anything while away, so moving it then gains nothing)
         if (!me || (body.start && me.seen_at < now - 45000 && okLL(+body.lat, +body.lng))) {
           const la = +body.lat, lo = +body.lng; if (!okLL(la, lo)) return json({ error: "Where are you?" }, 400);
-          await env.DB.prepare(`INSERT OR REPLACE INTO hunt_birds (username, from_lat, from_lng, to_lat, to_lng, depart_at, arrive_at, seen_at, spawn_at, brg0, brg1) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`)
+          await env.DB.prepare(`INSERT OR REPLACE INTO hunt_birds (username, from_lat, from_lng, to_lat, to_lng, depart_at, arrive_at, seen_at, spawn_at, brg0, brg1, v0) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0)`)
             .bind(username, la, lo, la, lo, now, now, now, now).run();
           me = { username, from_lat: la, from_lng: lo, to_lat: la, to_lng: lo, depart_at: now, arrive_at: now, seen_at: now, spawn_at: now };
         }
@@ -2440,11 +2455,14 @@ async function handleRequest(request, env, ctx, corsHeaders) {
           if (Math.random() < dt / mean) {
             let base = p, r0 = 8, r1 = 35;
             if (story && Math.random() < 0.5) { base = story; r0 = 2; r1 = 15; }
-            const brg = Math.random() * 2 * Math.PI, dist = (r0 + Math.random() * (r1 - r0)) / 6371;
-            const la1 = Math.asin(Math.sin(base[0] * R) * Math.cos(dist) + Math.cos(base[0] * R) * Math.sin(dist) * Math.cos(brg));
-            const lo1 = base[1] * R + Math.atan2(Math.sin(brg) * Math.sin(dist) * Math.cos(base[0] * R), Math.cos(dist) - Math.sin(base[0] * R) * Math.sin(la1));
-            const gold = Math.random() < 0.06, w = { id: crypto.randomUUID(), lat: la1 / R, lng: ((lo1 / R + 540) % 360) - 180, value: gold ? 5 : 1, born_at: now, gone_at: now + (gold ? GOLD_LIFE : LIFE) };
-            if (Math.abs(w.lat) < 84) { await env.DB.prepare(`INSERT INTO hunt_worms (id, lat, lng, value, born_at, gone_at) VALUES (?, ?, ?, ?, ?, ?)`).bind(w.id, w.lat, w.lng, w.value, w.born_at, w.gone_at).run(); live.push(w); spawned = w.id; }
+            // worms only come up on land, a few km in from any shore (they crawl a little); over open sea, none come
+            const ring = (c, b, d) => { const la = Math.asin(Math.sin(c[0] * R) * Math.cos(d) + Math.cos(c[0] * R) * Math.sin(d) * Math.cos(b));
+              return [la / R, (((c[1] * R + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(c[0] * R), Math.cos(d) - Math.sin(c[0] * R) * Math.sin(la))) / R + 540) % 360) - 180]; };
+            let spot = null;
+            for (let k = 0; k < 10 && !spot; k++) { const q = ring(base, Math.random() * 2 * Math.PI, (r0 + Math.random() * (r1 - r0)) / 6371);
+              if (Math.abs(q[0]) < 84 && isLand(q[0], q[1]) && [0, 1, 2, 3, 4, 5].every(i => { const e = ring(q, i * Math.PI / 3, 3 / 6371); return isLand(e[0], e[1]); })) spot = q; }
+            const gold = Math.random() < 0.06, w = spot && { id: crypto.randomUUID(), lat: spot[0], lng: spot[1], value: gold ? 5 : 1, born_at: now, gone_at: now + (gold ? GOLD_LIFE : LIFE) };
+            if (w) { await env.DB.prepare(`INSERT INTO hunt_worms (id, lat, lng, value, born_at, gone_at) VALUES (?, ?, ?, ?, ?, ?)`).bind(w.id, w.lat, w.lng, w.value, w.born_at, w.gone_at).run(); live.push(w); spawned = w.id; }
           }
         }
         await env.DB.prepare(`UPDATE hunt_birds SET seen_at = ?, spawn_at = ? WHERE username = ?`).bind(now, now, username).run();
@@ -2456,13 +2474,15 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       }
       if (!me) return json({ error: "Start the hunt first" }, 400);
       if (url.pathname === "/hunt/fly") {
-        // a new heading: the bird turns from the way it's going now (gliding round), then flies straight on
+        // a tap = one wing beat: a push forward (taps closer than 0.15 s apart don't add speed) and a new heading;
+        // it turns from the way it's going now. "launch" (starting the hunt) sets a stopped bird off at cruising speed.
         const brg = +body.brg; if (!Number.isFinite(brg) || Math.abs(brg) > 100) return json({ error: "Bad heading" }, 400);
-        const f0 = flight(me), p = posAt(me, now), h = now < me.arrive_at ? headAt(f0, now) : null;
-        const f = fTurn({ from: p, to: p, b0: h == null ? brg : h, b1: brg, depart: now }); f.arrive = now + Math.round(flyFor(f._T));
-        await env.DB.prepare(`UPDATE hunt_birds SET from_lat = ?, from_lng = ?, to_lat = ?, to_lng = ?, brg0 = ?, brg1 = ?, depart_at = ?, arrive_at = ?, seen_at = ? WHERE username = ?`)
-          .bind(p[0], p[1], p[0], p[1], f.b0, f.b1, now, f.arrive, now, username).run();
-        return json({ now, me: { from: p, to: p, b0: f.b0, b1: f.b1, depart: now, arrive: f.arrive } });
+        const f0 = flight(me), p = posAt(me, now), v = speedAt(f0, now), moving = v > 0.3, h = moving ? headAt(f0, now) : null;
+        const v0 = body.launch && v < 0.3 ? LAUNCH : Math.min(VMAX, v + (now - me.depart_at >= 150 ? BOOST : 0));
+        const f = fTurn({ from: p, to: p, b0: h == null ? brg : h, b1: brg, v0, depart: now }); f.arrive = Math.round(stopAt(f));
+        await env.DB.prepare(`UPDATE hunt_birds SET from_lat = ?, from_lng = ?, to_lat = ?, to_lng = ?, brg0 = ?, brg1 = ?, v0 = ?, depart_at = ?, arrive_at = ?, seen_at = ? WHERE username = ?`)
+          .bind(p[0], p[1], p[0], p[1], f.b0, f.b1, v0, now, f.arrive, now, username).run();
+        return json({ now, me: { from: p, to: p, b0: f.b0, b1: f.b1, v0, depart: now, arrive: f.arrive } });
       }
       if (url.pathname === "/hunt/catch") {
         const w = await env.DB.prepare(`SELECT * FROM hunt_worms WHERE id = ?`).bind(String(body.id || "")).first();
