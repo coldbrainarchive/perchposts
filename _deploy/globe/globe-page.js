@@ -592,27 +592,41 @@
       img.onload = () => {
         const lights = new Tex(img); lights.needsUpdate = true; try { lights.colorSpace = g.material.map.colorSpace; } catch (e) {}
         const mat = new Shader({ transparent: true, depthWrite: false,
-          uniforms: { sLat: { value: 0 }, sLng: { value: 0 }, lights: { value: lights } },
+          uniforms: { sLat: { value: 0 }, sLng: { value: 0 }, fade: { value: 1 }, lights: { value: lights } },
           vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-          fragmentShader: 'uniform float sLat; uniform float sLng; uniform sampler2D lights; varying vec2 vUv; void main(){ float lat = (vUv.y - 0.5) * 3.14159265; float lng = (vUv.x - 0.5) * 6.2831853; float d = sin(lat) * sin(sLat) + cos(lat) * cos(sLat) * cos(lng - sLng); float night = smoothstep(0.08, -0.16, d); vec3 L = texture2D(lights, vUv).rgb; float lum = dot(L, vec3(0.3,0.59,0.11)); lum = smoothstep(0.02, 0.24, lum); float a = night * max(0.7, lum); vec3 c = mix(vec3(0.01, 0.016, 0.05), vec3(1.0, 0.86, 0.58), lum); gl_FragColor = vec4(c, a); }' });
+          fragmentShader: 'uniform float sLat; uniform float sLng; uniform float fade; uniform sampler2D lights; varying vec2 vUv; void main(){ float lat = (vUv.y - 0.5) * 3.14159265; float lng = (vUv.x - 0.5) * 6.2831853; float d = sin(lat) * sin(sLat) + cos(lat) * cos(sLat) * cos(lng - sLng); float night = smoothstep(0.08, -0.16, d); vec3 L = texture2D(lights, vUv).rgb; float lum = dot(L, vec3(0.3,0.59,0.11)); lum = smoothstep(0.02, 0.24, lum); float a = night * max(0.7, lum) * fade; vec3 c = mix(vec3(0.01, 0.016, 0.05), vec3(1.0, 0.86, 0.58), lum); gl_FragColor = vec4(c, a); }' });
         const sh = new Mesh(new Geo(R0 * 1.0016, 128, 64), mat); sh.rotation.copy(g.rotation); sh.renderOrder = 2;
         g.parent.add(sh);
         const upd = () => { const s = subsolar(); mat.uniforms.sLat.value = s.lat * Math.PI / 180; mat.uniforms.sLng.value = s.lng * Math.PI / 180; };
         upd(); setInterval(upd, 60000);
+        // zoomed in close the night fades to a faint tint (altitude 0.55 → 0.2), so the detail you zoomed in for shows
+        const fd = () => { const a = world.pointOfView().altitude; mat.uniforms.fade.value = a >= 0.55 ? 1 : a <= 0.2 ? 0.22 : 0.22 + 0.78 * (a - 0.2) / 0.35; };
+        world.controls().addEventListener('change', fd); fd(); setInterval(fd, 400);
       };
       img.src = '/globe/earth-night.jpg';
     }, 200);
   }
-  // Header clock: UTC (sun / moon by whether it's day at the point under the clock — Greenwich) + world clocks row
+  // Header clock: UTC with a sun / moon for Greenwich. Tapping it drops down world times (east → west), each with
+  // a sun / moon for whether it's day there and its offset from UTC; tapping a city spins the globe there.
   (function clocks() {
     const SUN = document.querySelector('.utc .ic-sun')?.outerHTML || '', MOON = document.querySelector('.utc .ic-moon')?.outerHTML || '';
-    const CITIES = [['London', 51.5, -0.1, 'Europe/London'], ['New York', 40.7, -74, 'America/New_York'], ['Los Angeles', 34.05, -118.2, 'America/Los_Angeles'], ['São Paulo', -23.5, -46.6, 'America/Sao_Paulo'], ['Lagos', 6.5, 3.4, 'Africa/Lagos'], ['Dubai', 25.2, 55.3, 'Asia/Dubai'], ['Mumbai', 19.1, 72.9, 'Asia/Kolkata'], ['Tokyo', 35.7, 139.7, 'Asia/Tokyo'], ['Sydney', -33.9, 151.2, 'Australia/Sydney']];
-    const fmt = tz => { try { return new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz }).format(new Date()); } catch (e) { return ''; } };
-    if (/[?&]clocks=1/.test(location.search)) document.body.classList.add('wclocks');
-    const tick = () => { const d = new Date(), s = subsolar(d), hh = String(d.getUTCHours()).padStart(2, '0'), mm = String(d.getUTCMinutes()).padStart(2, '0');
-      const tEl = $('utcT'); if (tEl) tEl.innerHTML = `${hh}<span class="col">:</span>${mm}`;
-      const u = $('utc'); u && u.classList.toggle('night', !isDay(51.48, 0, s));
-      const w = $('wclk'); if (w && document.body.classList.contains('wclocks')) w.innerHTML = CITIES.map(([n, la, lo, tz]) => `<span>${isDay(la, lo, s) ? SUN : MOON}<em>${n}</em>${fmt(tz)}</span>`).join(''); };
+    const CITIES = [['Auckland', -36.85, 174.76, 'Pacific/Auckland'], ['Sydney', -33.87, 151.21, 'Australia/Sydney'], ['Tokyo', 35.68, 139.69, 'Asia/Tokyo'], ['Beijing', 39.9, 116.4, 'Asia/Shanghai'], ['Singapore', 1.35, 103.82, 'Asia/Singapore'], ['Mumbai', 19.08, 72.88, 'Asia/Kolkata'], ['Dubai', 25.2, 55.27, 'Asia/Dubai'], ['Moscow', 55.76, 37.62, 'Europe/Moscow'], ['Nairobi', -1.29, 36.82, 'Africa/Nairobi'], ['Cairo', 30.04, 31.24, 'Africa/Cairo'], ['Paris', 48.86, 2.35, 'Europe/Paris'], ['Lagos', 6.52, 3.38, 'Africa/Lagos'], ['London', 51.51, -0.13, 'Europe/London'], ['São Paulo', -23.55, -46.63, 'America/Sao_Paulo'], ['New York', 40.71, -74.01, 'America/New_York'], ['Chicago', 41.88, -87.63, 'America/Chicago'], ['Mexico City', 19.43, -99.13, 'America/Mexico_City'], ['Los Angeles', 34.05, -118.24, 'America/Los_Angeles'], ['Honolulu', 21.31, -157.86, 'Pacific/Honolulu']];
+    const time = tz => { try { return new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz }).format(new Date()); } catch (e) { return ''; } };
+    const offset = tz => { try { const d = new Date(), f = new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', hour12: false }).formatToParts(d), g = k => +f.find(x => x.type === k).value;
+      const loc = Date.UTC(g('year'), g('month') - 1, g('day'), g('hour') % 24, g('minute')); return Math.round((loc - d.getTime()) / 6e4 / 15) * 15; } catch (e) { return 0; } };
+    const offTxt = m => { if (!m) return '±0'; const s = m > 0 ? '+' : '−', a = Math.abs(m), h = Math.floor(a / 60), mm = a % 60; return s + h + (mm ? ':' + String(mm).padStart(2, '0') : ''); };
+    const btn = $('utc'); const panel = document.createElement('div'); panel.className = 'wcp'; panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', 'World times'); document.body.appendChild(panel);
+    const draw = () => { const s = subsolar(); const rows = CITIES.map(([n, la, lo, tz]) => ({ n, la, lo, t: time(tz), o: offset(tz), day: isDay(la, lo, s) })).sort((x, y) => y.o - x.o);
+      panel.innerHTML = `<div class="wcp-h"><span>WORLD TIME</span><span>UTC</span></div>` + rows.map(r => `<button type="button" class="${r.day ? 'day' : 'night'}" data-la="${r.la}" data-lo="${r.lo}"><span class="ci">${r.day ? SUN : MOON}</span><span class="cn">${r.n}</span><span class="ct">${r.t}</span><span class="co">${offTxt(r.o)}</span></button>`).join(''); };
+    const open = on => { panel.classList.toggle('in', on); btn.setAttribute('aria-expanded', on ? 'true' : 'false'); if (on) draw(); };
+    btn.addEventListener('click', ev => { ev.stopPropagation(); open(!panel.classList.contains('in')); });
+    panel.addEventListener('pointerdown', ev => ev.stopPropagation());
+    panel.addEventListener('click', ev => { ev.stopPropagation(); const b = ev.target.closest('button[data-la]'); if (!b) return; open(false);
+      if (world) { world.controls().autoRotate = false; world.pointOfView({ lat: +b.dataset.la, lng: +b.dataset.lo, altitude: innerWidth < 600 ? 1.6 : 1.3 }, 1400); } });
+    document.addEventListener('pointerdown', ev => { if (panel.classList.contains('in') && !panel.contains(ev.target) && !btn.contains(ev.target)) open(false); }, true);
+    addEventListener('keydown', ev => { if (ev.key === 'Escape') open(false); });
+    const tick = () => { const d = new Date(), s = subsolar(d); const tEl = $('utcT'); if (tEl) tEl.textContent = String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0');
+      btn.classList.toggle('night', !isDay(51.48, 0, s)); if (panel.classList.contains('in')) draw(); };
     tick(); setInterval(tick, 15000);
   })();
   function hiRes() {
