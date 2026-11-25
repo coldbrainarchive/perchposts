@@ -717,27 +717,23 @@
   // follows it. Worms pop out of the ground now and then (more at night, near trending stories; gold ones are worth 5)
   // and go to the first bird to reach them. The server keeps every flight and checks every catch (worker /hunt/*).
   function hunt() {
-    const CATCH_KM = 1.8, PILL_ALT = 0.04, GAME_ALT = innerWidth < 600 ? 0.02 : 0.017, EXIT_ALT = 0.07;
+    const SPEED = 4.5, CATCH_KM = 1.8, PILL_ALT = 0.04, GAME_ALT = innerWidth < 600 ? 0.02 : 0.017, EXIT_ALT = 0.07;
     const R = Math.PI / 180, WORM_D = 'M5.3 2.4C3.9 4.5 4 7.6 6.6 7.8C9.4 8 12.6 4.3 16.3 3.9C19.3 3.6 20.6 6.7 18.3 8.7C15.9 10.6 10.6 10.9 8.1 13.2C5.9 15.4 7.4 19.3 11 19.4C14.5 19.5 18 17.6 20.7 15.8';
     const WORM_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${WORM_D}"/></svg>`;
     const km = (a, b) => { const d = Math.sin((b[0] - a[0]) * R / 2) ** 2 + Math.cos(a[0] * R) * Math.cos(b[0] * R) * Math.sin((b[1] - a[1]) * R / 2) ** 2; return 12742 * Math.asin(Math.min(1, Math.sqrt(d))); };
-    // a flight starts at each tap (one wing beat): the bird gets a push (BOOST km/s, up to VMAX) and then slows on its own
-    // (speed halves about every TAU·0.69 s) until it stops, so you have to keep flapping. It turns on a circle of R_TURN km
-    // from heading b0 to b1, then carries straight on. All in distance terms, so it's exact: the same code runs on the page.
-    const R_TURN = 2, TAU = 1.6, VMAX = 6, BOOST = 1.6, VSTOP = 0.05, LAUNCH = 4.5;
-    const fTurn = f => { if (f._A == null) { let d = ((f.b1 - f.b0) % 6.283185307) + 6.283185307; d = d % 6.283185307; if (d > Math.PI) d -= 6.283185307; f._s = d < 0 ? -1 : 1; f._A = Math.abs(d); f._St = R_TURN * f._A; } return f; };
-    const fDist = (f, u) => (f.v0 || 0) * TAU * (1 - Math.exp(-u / TAU));
-    const fOff = (f, u) => { fTurn(f); const sT = fDist(f, u), st = Math.min(sT, f._St), s = f._s, bt = f.b0 + s * st / R_TURN; let x = 0, y = 0;
-      if (st > 0) { const k = R_TURN * s; x = k * (Math.cos(f.b0) - Math.cos(bt)); y = k * (Math.sin(bt) - Math.sin(f.b0)); }
-      if (sT > f._St) { x += (sT - f._St) * Math.sin(f.b1); y += (sT - f._St) * Math.cos(f.b1); }
-      return [x, y, sT < f._St ? bt : f.b1]; };
-    const fU = (f, t) => Math.max(0, t - f.depart) / 1000;
-    const flyAt = (f, t) => { if (!f) return null; if (f.b0 == null || f.b1 == null || !f.v0) return f.from;
-      const o = fOff(f, fU(f, t)), la = Math.max(-84, Math.min(84, f.from[0] + o[1] / 111.2));
+    // a flight: from a point, turn like a bird (at TURN rad/s) from heading b0 to b1, then fly straight on b1 at SPEED
+    // (bearings clockwise from north; flat-map maths over these short distances — the same code runs on the globe page)
+    const TURN = 120 * Math.PI / 180;
+    const fTurn = f => { if (f._T == null) { let d = ((f.b1 - f.b0) % 6.283185307) + 6.283185307; d = (d % 6.283185307); if (d > Math.PI) d -= 6.283185307; f._s = d < 0 ? -1 : 1; f._T = Math.abs(d) / TURN; } return f; };
+    const fOff = (f, u) => { fTurn(f); const T = f._T, s = f._s, ut = Math.min(u, T), bt = f.b0 + s * TURN * ut; let x = 0, y = 0;
+      if (T > 0) { const k = SPEED / (s * TURN); x = k * (Math.cos(f.b0) - Math.cos(bt)); y = k * (Math.sin(bt) - Math.sin(f.b0)); }
+      if (u > T) { x += SPEED * (u - T) * Math.sin(f.b1); y += SPEED * (u - T) * Math.cos(f.b1); }
+      return [x, y, u < T ? bt : f.b1]; };
+    const flyAt = (f, t) => { if (!f) return null; if (f.b0 == null || f.b1 == null) return f.to || f.from;
+      const o = fOff(f, Math.max(0, Math.min(t, f.arrive) - f.depart) / 1000), la = Math.max(-84, Math.min(84, f.from[0] + o[1] / 111.2));
       return [la, ((f.from[1] + o[0] / (111.2 * Math.cos(f.from[0] * Math.PI / 180)) + 540) % 360) - 180]; };
-    const headAt = (f, t) => f && f.b0 != null && f.b1 != null ? fOff(f, fU(f, t))[2] : null;
-    const speedAt = (f, t) => f && f.v0 ? f.v0 * Math.exp(-fU(f, t) / TAU) : 0;
-    const stopAt = f => f.depart + (f.v0 > VSTOP ? TAU * Math.log(f.v0 / VSTOP) * 1000 : 0);
+    const headAt = (f, t) => f && f.b0 != null && f.b1 != null ? fOff(f, Math.max(0, Math.min(t, f.arrive) - f.depart) / 1000)[2] : null;
+    const flyFor = T => (T + 150 / SPEED) * 1000;   // a flight lasts its turn plus 150 km straight on (the page carries on before then)
     const posAt = flyAt;
     // where a worm is: up for a few seconds crawling a little, then under, then up again a few km away (same code as the worker)
     const wormPlan = w => { let h = 2166136261; for (const ch of String(w.id)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
@@ -751,15 +747,13 @@
       for (const s of segs) { if (t >= s.a && t < s.b) { const ll = toLL(wormOff(s, (t - s.a) / 1000)); return { up: true, lat: ll[0], lng: ll[1], fromUp: t - s.a, toDown: s.b - t }; }
         if (t < s.a) { const ll = toLL([s.x, s.y]); return { up: false, lat: ll[0], lng: ll[1], toUp: s.a - t }; } }
       const l = segs[segs.length - 1], ll = l ? toLL(wormOff(l, (l.b - l.a) / 1000)) : [w.lat, w.lng]; return { up: false, lat: ll[0], lng: ll[1], toUp: Infinity }; };
-    // every tap is a wing beat: a push forward and a new heading (it glides round to it like a bird). Stop tapping and
-    // it glides on, slowing, and comes to a stop
+    // the bird always flies: a tap sets a new heading; it glides round to it like a bird, then flies straight on
     const bearing = (a, b) => { const y = Math.sin((b[1] - a[1]) * R) * Math.cos(b[0] * R), x = Math.cos(a[0] * R) * Math.sin(b[0] * R) - Math.sin(a[0] * R) * Math.cos(b[0] * R) * Math.cos((b[1] - a[1]) * R); return Math.atan2(y, x); };
-    function flyDir(brg, launch) {
-      const t = srv(), p = posAt(me, t), v = speedAt(me, t), h = v > 0.3 ? headAt(me, t) : null;
-      const v0 = launch && v < 0.3 ? LAUNCH : Math.min(VMAX, v + (me && t - me.depart >= 150 ? BOOST : 0));
-      const f = fTurn({ from: p, to: p, b0: h == null ? brg : h, b1: brg, v0, depart: t }); f.arrive = stopAt(f); me = f; flySent = Date.now(); flyWait++; flaps++;
+    function flyDir(brg) {
+      const t = srv(), p = posAt(me, t), h = me && t < me.arrive ? headAt(me, t) : null;
+      const f = fTurn({ from: p, to: p, b0: h == null ? brg : h, b1: brg, depart: t }); f.arrive = t + flyFor(f._T); me = f; flySent = Date.now(); flyWait++;
       try { localStorage.setItem('pp_hunt_brg', String(brg)); } catch (e) {}
-      api('/hunt/fly', { brg, ...(launch ? { launch: 1 } : {}) }).then(x => { flyWait = Math.max(0, flyWait - 1); if (x.s === 200 && x.j.me && on && flyWait === 0) setMe(x.j.me); });
+      api('/hunt/fly', { brg }).then(x => { flyWait = Math.max(0, flyWait - 1); if (x.s === 200 && x.j.me && on && flyWait === 0) setMe(x.j.me); });
     }
     // the server's copy of a flight starts a moment later than the one the page drew, so swapping to it would make the
     // bird hop a few pixels: the difference is blended away over a third of a second instead
@@ -770,25 +764,25 @@
     }
     const corrNow = () => { if (!corr) return [0, 0]; const k = 1 - (performance.now() - corr.t0) / 350; if (k <= 0) { corr = null; return [0, 0]; } const e = k * k * (3 - 2 * k); return [corr.la * e, corr.lo * e]; };
     // how far the bird is leaning into a turn (−1 left … 1 right): it tips in as the turn starts and levels out after
-    const bankAt = (f, t) => { if (!f || f.b0 == null || f.b1 == null || !f.v0) return 0; fTurn(f);
-      return f._A < 0.05 || t < f.depart || fDist(f, fU(f, t)) >= f._St || speedAt(f, t) < 0.2 ? 0 : f._s * Math.min(1, f._A / 0.9); };
-    // each bird's wings: one full beat (down and back up, ~0.3 s) for every tap — quick taps queue up to two more; between
-    // beats the wings are held out in a glide, folding in a little as the bird slows to a stop. It only leans into a
-    // turn once a beat has finished, and eases in and out of the lean.
+    const bankAt = (f, t) => { if (!f || f.b0 == null || f.b1 == null) return 0; fTurn(f); const u = (t - f.depart) / 1000, T = f._T;
+      return T < 0.05 || u < 0 || u > T ? 0 : f._s * Math.min(1, T * TURN / 0.9); };
+    // each bird's wings: flapping keeps its own rhythm; when a turn starts it finishes the beat it's in (until the wings
+    // are fully out), then holds them out and leans into the turn smoothly, and picks the beat back up after
     const poses = new Map();
-    function pose(id, speed, want, dt, flapN) {
-      let P = poses.get(id); if (!P) { P = { b: null, q: 0, n: flapN, bk: 0, rest: 1 }; poses.set(id, P); }
-      if (flapN !== P.n) { P.q = Math.min(2, P.q + Math.max(0, flapN - P.n)); P.n = flapN; }
-      if (P.b == null && P.q > 0) { P.b = 0; P.q--; }
-      if (P.b != null) { P.b += dt / 0.3; if (P.b >= 1) P.b = null; }
-      P.rest += ((0.62 + 0.38 * Math.min(1, speed / 0.8)) - P.rest) * (1 - Math.exp(-dt / 0.25));
-      P.bk += ((P.b == null ? want : 0) - P.bk) * (1 - Math.exp(-dt / 0.14));
-      return { span: P.rest * (P.b == null ? 1 : 0.775 + 0.225 * Math.cos(P.b * 6.2832)), bk: P.bk };
+    function pose(id, moving, want, dt) {
+      let P = poses.get(id); if (!P) { P = { ph: Math.random() * 6.283, hold: false, bk: 0 }; poses.set(id, P); }
+      const rate = moving ? 13 : 4, top = Math.PI / 2, turning = Math.abs(want) > 0.02;
+      if (!P.hold) { const before = P.ph; P.ph += dt * rate;
+        if (turning && Math.floor((before - top) / 6.2832) !== Math.floor((P.ph - top) / 6.2832)) { P.ph = top + 6.2832 * Math.floor((P.ph - top) / 6.2832); P.hold = true; } }
+      else if (!turning && Math.abs(P.bk) < 0.15) P.hold = false;
+      P.bk += ((P.hold && turning ? want : 0) - P.bk) * (1 - Math.exp(-dt / 0.14));
+      const f = Math.sin(P.ph), span = moving ? 0.55 + 0.45 * (0.5 + 0.5 * f) : 0.9 + 0.1 * (0.5 + 0.5 * f);
+      return { span: P.hold ? (moving ? 1 : 1) : span, bk: P.bk };
     }
     // headings on screen ease toward where the bird is going, so nothing snaps
     const ease = (cur, want, dt) => { if (cur == null) return want; let d = want - cur; d = Math.atan2(Math.sin(d), Math.cos(d)); return cur + d * (1 - Math.exp(-dt / 0.07)); };
     const myName = () => { try { return localStorage.getItem('_myUsername') || ''; } catch (e) { return ''; } };
-    let on = false, me = null, birds = [], worms = new Map(), off = 0, balance = null, fx = [], target = null, raf = 0, pollT = 0, flySent = 0, flyWait = 0, flaps = 0, birdFlaps = new Map(), corr = null, lastF = 0, zoomIn = null, extAt = 0, ang = -Math.PI / 2, angs = new Map(), asking = new Set(), seenTaken = new Set(), hintUntil = 0;
+    let on = false, me = null, birds = [], worms = new Map(), off = 0, balance = null, fx = [], target = null, raf = 0, pollT = 0, flySent = 0, flyWait = 0, corr = null, lastF = 0, zoomIn = null, extAt = 0, ang = -Math.PI / 2, angs = new Map(), asking = new Set(), seenTaken = new Set(), hintUntil = 0;
     const srv = () => Date.now() + off;
     const api = (path, body) => fetch(API + path, { method: 'POST', headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify(body || {}) }).then(async r => ({ s: r.status, j: await r.json().catch(() => ({})) })).catch(() => ({ s: 0, j: {} }));
 
@@ -800,7 +794,7 @@
     size(); addEventListener('resize', size);
     const pill = document.createElement('button'); pill.type = 'button'; pill.className = 'hunt-pill'; pill.innerHTML = `<span class="hf"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12.0,5.91Q10.32,6.75 10.11,9.27Q3.6,10.95 0.66,14.31Q6.96,13.47 10.32,14.31L9.48,18.09L12.0,16.83L14.52,18.09L13.68,14.31Q17.04,13.47 23.34,14.31Q20.4,10.95 13.89,9.27Q13.68,6.75 12.0,5.91Z"/></svg></span>Take flight`; document.body.appendChild(pill);
     const bar = document.createElement('div'); bar.className = 'hunt-bar';
-    bar.innerHTML = `<span class="hb-n"><span class="hw">${WORM_SVG}</span><b id="huntN">–</b></span><span class="hb-t" id="huntT">Tap to flap</span><button type="button" class="hb-x" aria-label="Land (leave Take flight)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>`;
+    bar.innerHTML = `<span class="hb-n"><span class="hw">${WORM_SVG}</span><b id="huntN">–</b></span><span class="hb-t" id="huntT">Tap to fly</span><button type="button" class="hb-x" aria-label="Land (leave Take flight)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>`;
     document.body.appendChild(bar);
     for (const el of [pill, bar]) { el.addEventListener('pointerdown', ev => ev.stopPropagation()); }
     pill.addEventListener('click', () => { if (!tok()) { toast('Sign in to take flight', true); return; } enter(); });
@@ -823,7 +817,7 @@
       // the screen stays on your bird, so the map can't be dragged during the hunt (pinch zoom still works)
       const c = world.controls(); c.autoRotate = false; c.enableRotate = false;
       const v = world.pointOfView();
-      $('huntN').textContent = balance == null ? '–' : balance; hintUntil = Date.now() + 6000;
+      $('huntN').textContent = balance == null ? '–' : balance; hintUntil = Date.now() + 4000;
       poll(true, [v.lat, v.lng]); loop();
     }
     function leave() {
@@ -849,7 +843,7 @@
         // starting: if your bird is still out somewhere else (you were hunting a moment ago), go to it
         // starting: your bird is already in the air — still flying from a moment ago, or it takes off on its last heading
         if (start && me) {
-          if (speedAt(me, now) < 0.3) { let b0 = NaN; try { b0 = parseFloat(localStorage.getItem('pp_hunt_brg')); } catch (e) {} flyDir(isFinite(b0) ? b0 : Math.random() * 6.2832, true); }
+          if (me.arrive <= now || me.b1 == null) { let b0 = NaN; try { b0 = parseFloat(localStorage.getItem('pp_hunt_brg')); } catch (e) {} flyDir(isFinite(b0) ? b0 : Math.random() * 6.2832); }
           const v0 = world.pointOfView(); zoomIn = { la: v0.lat, lo: v0.lng, a: v0.altitude, t0: performance.now() }; }
       }
       pollT = setTimeout(() => poll(), 2000);
@@ -865,9 +859,8 @@
       if (d.n > 1 || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 10 || Date.now() - d.t > 400 || !me) return;
       // tap anywhere: the bird turns and flies that way (and keeps going)
       const r = can.getBoundingClientRect(), g = world.toGlobeCoords(e.clientX - r.left, e.clientY - r.top); if (!g) return;
-      // tapping right on the bird flaps without turning
-      const t = srv(), p = posAt(me, t), h = headAt(me, t);
-      flyDir(km(p, [g.lat, g.lng]) < 2 && h != null ? h : bearing(p, [g.lat, g.lng])); target = { lat: g.lat, lng: g.lng, t0: performance.now() };
+      const p = posAt(me, srv()); if (km(p, [g.lat, g.lng]) < 2) return;
+      flyDir(bearing(p, [g.lat, g.lng])); target = { lat: g.lat, lng: g.lng, t0: performance.now() };
     });
 
     async function tryCatch(w) {
@@ -938,6 +931,7 @@
           la = zoomIn.la + (la - zoomIn.la) * e; lo = zoomIn.lo + dl * e; al = zoomIn.a + (GAME_ALT - zoomIn.a) * e; if (k >= 1) zoomIn = null; }
         world.pointOfView(al == null ? { lat: la, lng: lo } : { lat: la, lng: lo, altitude: al }, 0); }
       // keep flying: a little before the far-ahead point is reached, carry on the same way
+      if (p && me.b1 != null && me.arrive - now < 12000 && performance.now() > extAt) { extAt = performance.now() + 5000; flyDir(headAt(me, now)); }
       try { world.camera().updateMatrixWorld(); } catch (e) {}
       const c = cx, t = performance.now() / 1000, mine = myName();
       c.setTransform(DPR, 0, 0, DPR, 0, 0); c.clearRect(0, 0, W, H);
@@ -963,11 +957,9 @@
       }
       // other birds
       for (const b of birds) { const q = posAt(b, now); if (!q || !front(q[0], q[1])) continue; const s = sc(q[0], q[1]); if (!inView(s)) continue;
-        const sp = speedAt(b, now), moving = sp > 0.05, ahead = posAt(b, now + 250), s2 = ahead && sc(ahead[0], ahead[1]);
-        // another bird's taps show up as new flights: one wing beat for each
-        const bf = birdFlaps.get(b.u) || { d: b.depart, n: 0 }; if (bf.d !== b.depart) { bf.d = b.depart; bf.n++; } birdFlaps.set(b.u, bf);
+        const moving = now < b.arrive, ahead = posAt(b, now + 250), s2 = ahead && sc(ahead[0], ahead[1]);
         let a = angs.get(b.u) ?? -Math.PI / 2; if (moving && s2 && Math.hypot(s2.x - s.x, s2.y - s.y) > 0.5) a = ease(a, Math.atan2(s2.y - s.y, s2.x - s.x), dt); angs.set(b.u, a);
-        drawBird(s.x, s.y, a, b.u, 0.8, 0.92, 0, pose(b.u, sp, bankAt(b, now), dt, bf.n));
+        drawBird(s.x, s.y, a, b.u, 0.8, 0.92, 0, pose(b.u, moving, bankAt(b, now), dt));
         c.save(); c.font = '600 9.5px -apple-system,system-ui,sans-serif'; c.textAlign = 'center'; c.fillStyle = 'rgba(255,255,255,.75)'; c.shadowColor = 'rgba(0,0,0,.9)'; c.shadowBlur = 3; c.fillText(b.u, s.x, s.y + 26); c.restore(); }
       // effects: catches (your bird dives, the worm is pulled up, +1 / +5 rises) and worms another bird took
       let swoop = 0;
@@ -985,13 +977,13 @@
         return false; });
       // your bird, on top of everything
       if (p) { const s = sc(pv[0], pv[1]);
-        if (s) { const sp = speedAt(me, now), moving = sp > 0.05, ah = posAt(me, now + 250), s2 = ah && sc(ah[0] + cc[0], ah[1] + cc[1]);
+        if (s) { const moving = now < me.arrive, ah = posAt(me, now + 250), s2 = ah && sc(ah[0] + cc[0], ah[1] + cc[1]);
           if (moving && s2 && Math.hypot(s2.x - s.x, s2.y - s.y) > 0.5) ang = ease(ang, Math.atan2(s2.y - s.y, s2.x - s.x), dt);
           else if (!moving) { // sitting still: the beak slowly turns toward the nearest worm
             let best = null, bd = 1e9; for (const w of worms.values()) { if (!w.at) continue; const d = km(p, w.at); if (d < bd) { bd = d; best = w; } }
             const ws = best && sc(best.at[0], best.at[1]);
             if (ws) { const want = Math.atan2(ws.y - s.y, ws.x - s.x); let d = want - ang; d = Math.atan2(Math.sin(d), Math.cos(d)); ang += d * 0.06; } }
-          drawBird(s.x, s.y, ang, mine, 1, 1, swoop, pose('@me', sp, bankAt(me, now), dt, flaps)); } }
+          drawBird(s.x, s.y, ang, mine, 1, 1, swoop, pose('@me', moving, bankAt(me, now), dt)); } }
       // the line under your worm count: day or night where your bird is
       const tEl = $('huntT'); if (tEl) { const hint = Date.now() < hintUntil; if (tEl.classList.contains('on') !== hint) tEl.classList.toggle('on', hint); }
     }
