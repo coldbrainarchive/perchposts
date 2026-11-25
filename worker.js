@@ -2389,8 +2389,8 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   if (url.pathname.startsWith("/hunt/") && request.method === "POST") {
     if (!username || isBot) return signInRequired();
     const HS = env.HUNT_FAST ? 1 : 0;                       // local testing only: worms appear quickly
-    const SPEED = 1;                                      // km per second (Ireland in ~5 min; a phone screen at hunt zoom in ~12 s)
-    const REACH = 0.5;                                    // km — a worm this close to your flight path is caught
+    const SPEED = 1;                                      // km per second (Ireland in ~5 min; a phone screen at hunt zoom in ~6 s)
+    const REACH = 0.3;                                    // km — a worm this close to your flight path is caught
     const LIFE = 40000, GOLD_LIFE = 30000, NEAR = 25;     // worm life (ms); what you can see around you (km)
     // a worm comes up, crawls a little, goes back under, and comes up again a few km away (same code on the globe page)
     const wormPlan = w => { let h = 2166136261; for (const ch of String(w.id)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
@@ -2435,9 +2435,9 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         }
         const p = posAt(me, now);
         // occasionally a worm pops up near you: about one every ~90 s of hunting at night, ~3 min by day, a bit more
-        // near trending stories; never more than 2 around you at once (within 12 km)
+        // near trending stories; never more than 2 around you at once (within 6 km)
         const { results: live = [] } = await env.DB.prepare(`SELECT id, lat, lng, value, born_at, gone_at FROM hunt_worms WHERE gone_at > ? AND caught_by IS NULL`).bind(now).all();
-        const around = live.filter(w => km(p, [w.lat, w.lng]) < 12).length;
+        const around = live.filter(w => km(p, [w.lat, w.lng]) < 6).length;
         const dt = Math.min(10000, Math.max(0, now - (me.spawn_at || now)));
         let spawned = null;
         if (around < 2 && live.length < 300 && dt > 0) {
@@ -2447,11 +2447,11 @@ async function handleRequest(request, env, ctx, corsHeaders) {
           const night = Math.sin(p[0] * R) * Math.sin(decl) + Math.cos(p[0] * R) * Math.cos(decl) * Math.cos((p[1] - sLng) * R) < 0;
           let story = null;
           try { const gc = await env.DB.prepare(`SELECT v FROM globe_cache WHERE k = 'trending'`).first(); const st = gc ? (JSON.parse(gc.v).stories || []) : [];
-            for (const s of st) { const o = s.origin || s; const ll = [o.lat ?? s.lat, o.lng ?? s.lng]; if (okLL(+ll[0], +ll[1]) && km(p, ll) < 12) { story = ll; break; } } } catch (e) {}
+            for (const s of st) { const o = s.origin || s; const ll = [o.lat ?? s.lat, o.lng ?? s.lng]; if (okLL(+ll[0], +ll[1]) && km(p, ll) < 6) { story = ll; break; } } } catch (e) {}
           const mean = (HS ? 5000 : (night ? 90000 : 180000)) * (story ? 0.7 : 1);
           if (Math.random() < dt / mean) {
-            let base = p, r0 = 2, r1 = 8;
-            if (story && Math.random() < 0.5) { base = story; r0 = 0.5; r1 = 3.5; }
+            let base = p, r0 = 1, r1 = 4;
+            if (story && Math.random() < 0.5) { base = story; r0 = 0.25; r1 = 1.75; }
             // worms only come up on land, at least 0.7 km in from any shore (they crawl a little); over open sea, none come
             const ring = (c, b, d) => { const la = Math.asin(Math.sin(c[0] * R) * Math.cos(d) + Math.cos(c[0] * R) * Math.sin(d) * Math.cos(b));
               return [la / R, (((c[1] * R + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(c[0] * R), Math.cos(d) - Math.sin(c[0] * R) * Math.sin(la))) / R + 540) % 360) - 180]; };

@@ -717,7 +717,7 @@
   // follows it. Worms pop out of the ground now and then (more at night, near trending stories; gold ones are worth 5)
   // and go to the first bird to reach them. The server keeps every flight and checks every catch (worker /hunt/*).
   function hunt() {
-    const SPEED = 1, CATCH_KM = 0.4, PILL_ALT = 0.009, GAME_ALT = innerWidth < 600 ? 0.0045 : 0.0038, EXIT_ALT = 0.05;
+    const SPEED = 1, CATCH_KM = 0.25, PILL_ALT = 0.0045, GAME_ALT = innerWidth < 600 ? 0.00225 : 0.0019, EXIT_ALT = 0.05;
     const R = Math.PI / 180, WORM_D = 'M5.3 2.4C3.9 4.5 4 7.6 6.6 7.8C9.4 8 12.6 4.3 16.3 3.9C19.3 3.6 20.6 6.7 18.3 8.7C15.9 10.6 10.6 10.9 8.1 13.2C5.9 15.4 7.4 19.3 11 19.4C14.5 19.5 18 17.6 20.7 15.8';
     const WORM_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${WORM_D}"/></svg>`;
     const km = (a, b) => { const d = Math.sin((b[0] - a[0]) * R / 2) ** 2 + Math.cos(a[0] * R) * Math.cos(b[0] * R) * Math.sin((b[1] - a[1]) * R / 2) ** 2; return 12742 * Math.asin(Math.min(1, Math.sqrt(d))); };
