@@ -505,6 +505,7 @@
         if ($('sheet').classList.contains('in')) { closeSheet(); return; }
         focusPin(null);
       });
+    if (location.hash === '#dbg') window._gw = world;   // test hook: lets an automated check move the camera (only with #dbg)
     const c = world.controls(); c.autoRotate = true; c.autoRotateSpeed = 0.45; c.enableDamping = true;
     // Pins only show on the side of the Earth facing you (with a margin, so none float past the edge)
     const R = Math.PI / 180;
