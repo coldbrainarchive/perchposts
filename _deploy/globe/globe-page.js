@@ -488,9 +488,11 @@
 
   function start() {
     if (typeof Globe !== 'function') { $('empty').textContent = 'The globe couldn’t load on this device.'; return; }
-    world = new Globe($('globe'), { animateIn: true })
+    world = window._gw = new Globe($('globe'), { animateIn: true })
       .backgroundColor('rgba(0,0,0,0)')
       .globeImageUrl('/globe/earth-blue-marble.jpg')
+      // sharper imagery as you zoom: Sentinel-2 cloudless map tiles (EOX, CC BY-NC-SA), only the tiles in view load
+      .globeTileEngineUrl((x, y, l) => `https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2023_3857/default/g/${l}/${y}/${x}.jpg`).globeTileEngineMaxLevel(14)
       .showAtmosphere(true).atmosphereColor('#8ab4ff').atmosphereAltitude(0.18)
       .htmlElementsData(marks).htmlLat('lat').htmlLng('lng').htmlAltitude(0.01).htmlElement(pinEl).htmlTransitionDuration(0)
       .htmlElementVisibilityModifier(() => {})
@@ -535,10 +537,61 @@
         down = null;
       });
     })();
+    mapOverlay();
     const fit = () => { world.width(innerWidth).height(innerHeight); };
     fit(); addEventListener('resize', fit);
     world.pointOfView({ lat: 22, lng: 20, altitude: innerWidth < 600 ? 2.9 : 2.2 });
   }
+  // Map overlay (only when zoomed in close): Natural Earth borders on the globe + country / city names that fade in
+  // as you get closer. Data (~190 KB gzipped) loads the first time you zoom in that far.
+  function mapOverlay() {
+    const R = Math.PI / 180; let data = null, loading = false, band = -1, q = 0;
+    const host = world.renderer().domElement.parentElement;
+    const layer = document.createElement('div'); layer.className = 'map-lbl'; host.insertBefore(layer, world.renderer().domElement.nextSibling);
+    const credit = document.createElement('div'); credit.className = 'map-credit'; credit.textContent = 'Imagery: Sentinel-2 cloudless by EOX (Copernicus Sentinel data 2023) · Map: Natural Earth'; document.body.appendChild(credit);
+    const els = new Map();
+    const mk = (key, txt, cls) => { let e = els.get(key); if (!e) { e = document.createElement('div'); e.className = cls; e.textContent = txt; layer.appendChild(e); els.set(key, e); } return e; };
+    // altitude bands → what shows
+    const bandOf = a => a > 1.25 ? 0 : a > 0.9 ? 1 : a > 0.6 ? 2 : a > 0.38 ? 3 : a > 0.24 ? 4 : 5;
+    const paths = () => {
+      const b = bandOf(world.pointOfView().altitude); if (b === band) return; band = b;
+      if (!data || b === 0) { world.pathsData([]); return; }
+      const ln = data.b.map(p => ({ p, k: 'b' })).concat(b >= 3 ? data.s.map(p => ({ p, k: 's' })) : []);
+      world.pathsData(ln).pathPoints('p').pathPointLat(p => p[1]).pathPointLng(p => p[0]).pathPointAlt(0.0012)
+        .pathColor(d => d.k === 'b' ? `rgba(255,255,255,${[0, .35, .5, .55, .6, .6][b]})` : 'rgba(255,255,255,.28)')
+        .pathStroke(d => d.k === 'b' ? (b >= 4 ? 1.1 : 0.7) : 0.5).pathDashLength(d => d.k === 's' ? 0.6 : 1).pathDashGap(d => d.k === 's' ? 0.4 : 0).pathTransitionDuration(0);
+    };
+    const draw = () => {
+      q = 0; const pov = world.pointOfView(), a = pov.altitude, b = bandOf(a);
+      layer.classList.toggle('on', !!data && b > 0); credit.classList.toggle('on', a < 1.25);
+      if (!data) { if (b > 0 && !loading) { loading = true; fetch('/globe/map-data.json').then(r => r.json()).then(d => { data = d; band = -1; paths(); draw(); }).catch(() => { loading = false; }); } return; }
+      paths(); if (b === 0) return;
+      const la0 = pov.lat * R, lo0 = pov.lng * R, cap = Math.cos(Math.min(1.2, Math.acos(1 / (1 + a)) * 0.92));
+      const want = [];
+      const cRank = [0, 2, 4, 6, 9, 9][b], tRank = [-1, -1, 1, 3, 5, 6][b];
+      for (const c of data.c) if (c[3] <= cRank) want.push({ k: 'c:' + c[0], t: c[0], lat: c[1], lng: c[2], cls: 'ml-c', pr: c[3] });
+      for (const t of data.t) if (t[3] <= tRank) want.push({ k: 't:' + t[0] + t[1], t: t[0], lat: t[1], lng: t[2], cls: 'ml-t', pr: t[3] + 0.5 });
+      want.sort((x, y) => x.pr - y.pr);
+      const placed = [], seen = new Set(), W = innerWidth, H = innerHeight, top = (document.querySelector('.top')?.getBoundingClientRect().bottom || 0);
+      // story pins and previews win: map names never sit under them
+      for (const pe of document.querySelectorAll('.pin:not(.back), .ev:not(.back), .pin .pv, .ev .mini')) { const q = pe.getBoundingClientRect(); if (q.width && q.height) placed.push({ l: q.left - 2, r: q.right + 2, t: q.top - 2, b: q.bottom + 2 }); }
+      const pinCount = placed.length;
+      for (const w of want) {
+        const la = w.lat * R, d = Math.sin(la0) * Math.sin(la) + Math.cos(la0) * Math.cos(la) * Math.cos(w.lng * R - lo0);
+        if (d < cap) continue;
+        const s = world.getScreenCoords(w.lat, w.lng, 0.001); if (!s || s.x < 4 || s.x > W - 4 || s.y < top + 6 || s.y > H - 10) continue;
+        const e = mk(w.k, w.t, w.cls); const bw = e._w || (e._w = e.offsetWidth || w.t.length * 7), bh = 16;
+        const r = { l: s.x - bw / 2 - 3, r: s.x + bw / 2 + 3, t: s.y - bh, b: s.y + 4 };
+        if (placed.some(o => r.l < o.r && r.r > o.l && r.t < o.b && r.b > o.t)) continue;
+        if (placed.length - pinCount > 70) break;
+        placed.push(r); seen.add(w.k); e.style.transform = `translate(${s.x}px,${s.y}px)`; e.classList.add('on');
+      }
+      for (const [k, e] of els) if (!seen.has(k)) e.classList.remove('on');
+    };
+    const ask = () => { if (!q) q = requestAnimationFrame(draw); };
+    world.controls().addEventListener('change', ask); setInterval(ask, 600); ask();
+  }
+
   // Outlet labels: hide any that would overlap one already shown (checked a few times a second)
   function declutter() {
     const shown = [];
