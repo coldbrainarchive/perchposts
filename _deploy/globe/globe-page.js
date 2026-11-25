@@ -717,7 +717,7 @@
   // follows it. Worms pop out of the ground now and then (more at night, near trending stories; gold ones are worth 5)
   // and go to the first bird to reach them. The server keeps every flight and checks every catch (worker /hunt/*).
   function hunt() {
-    const SPEED = 4.5, CATCH_KM = 1.8, PILL_ALT = 0.04, GAME_ALT = innerWidth < 600 ? 0.02 : 0.017, EXIT_ALT = 0.07;
+    const SPEED = 1, CATCH_KM = 0.4, PILL_ALT = 0.009, GAME_ALT = innerWidth < 600 ? 0.0045 : 0.0038, EXIT_ALT = 0.05;
     const R = Math.PI / 180, WORM_D = 'M5.3 2.4C3.9 4.5 4 7.6 6.6 7.8C9.4 8 12.6 4.3 16.3 3.9C19.3 3.6 20.6 6.7 18.3 8.7C15.9 10.6 10.6 10.9 8.1 13.2C5.9 15.4 7.4 19.3 11 19.4C14.5 19.5 18 17.6 20.7 15.8';
     const WORM_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${WORM_D}"/></svg>`;
     const km = (a, b) => { const d = Math.sin((b[0] - a[0]) * R / 2) ** 2 + Math.cos(a[0] * R) * Math.cos(b[0] * R) * Math.sin((b[1] - a[1]) * R / 2) ** 2; return 12742 * Math.asin(Math.min(1, Math.sqrt(d))); };
@@ -733,16 +733,16 @@
       const o = fOff(f, Math.max(0, Math.min(t, f.arrive) - f.depart) / 1000), la = Math.max(-84, Math.min(84, f.from[0] + o[1] / 111.2));
       return [la, ((f.from[1] + o[0] / (111.2 * Math.cos(f.from[0] * Math.PI / 180)) + 540) % 360) - 180]; };
     const headAt = (f, t) => f && f.b0 != null && f.b1 != null ? fOff(f, Math.max(0, Math.min(t, f.arrive) - f.depart) / 1000)[2] : null;
-    const flyFor = T => (T + 150 / SPEED) * 1000;   // a flight lasts its turn plus 150 km straight on (the page carries on before then)
+    const flyFor = T => (T + 40 / SPEED) * 1000;    // a flight lasts its turn plus 40 km straight on (the page carries on before then)
     const posAt = flyAt;
     // where a worm is: up for a few seconds crawling a little, then under, then up again a few km away (same code as the worker)
     const wormPlan = w => { let h = 2166136261; for (const ch of String(w.id)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
       let a = h >>> 0; const rnd = () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
       const segs = []; let t = w.born, x = 0, y = 0;
       while (t < w.gone) { const up = 4500 + rnd() * 3500, s = { a: t, b: Math.min(w.gone, t + up), x, y, hd: rnd() * 6.2832, ph: rnd() * 6.2832 }; segs.push(s);
-        const e = wormOff(s, (s.b - s.a) / 1000), jd = rnd() * 6.2832, j = 0.6 + rnd() * 1.2; x = e[0] + Math.cos(jd) * j; y = e[1] + Math.sin(jd) * j; t += up + 2500 + rnd() * 3000; }
+        const e = wormOff(s, (s.b - s.a) / 1000), jd = rnd() * 6.2832, j = 0.13 + rnd() * 0.27; x = e[0] + Math.cos(jd) * j; y = e[1] + Math.sin(jd) * j; t += up + 2500 + rnd() * 3000; }
       return segs; };
-    const wormOff = (s, u) => { const wob = 0.35 * Math.sin(u * 1.3 + s.ph); return [s.x + 0.25 * u * Math.cos(s.hd) - wob * Math.sin(s.hd), s.y + 0.25 * u * Math.sin(s.hd) + wob * Math.cos(s.hd)]; };
+    const wormOff = (s, u) => { const wob = 0.08 * Math.sin(u * 1.3 + s.ph); return [s.x + 0.055 * u * Math.cos(s.hd) - wob * Math.sin(s.hd), s.y + 0.055 * u * Math.sin(s.hd) + wob * Math.cos(s.hd)]; };
     const wormAt = (w, t) => { const segs = w._p || (w._p = wormPlan(w)), toLL = o => [w.lat + o[1] / 111.2, w.lng + o[0] / (111.2 * Math.cos(w.lat * Math.PI / 180))];
       for (const s of segs) { if (t >= s.a && t < s.b) { const ll = toLL(wormOff(s, (t - s.a) / 1000)); return { up: true, lat: ll[0], lng: ll[1], fromUp: t - s.a, toDown: s.b - t }; }
         if (t < s.a) { const ll = toLL([s.x, s.y]); return { up: false, lat: ll[0], lng: ll[1], toUp: s.a - t }; } }
@@ -814,14 +814,14 @@
       if (on) return; on = true; loadKit(() => {});
       document.body.classList.add('hunting'); pill.classList.remove('in'); bar.classList.add('in');
       try { closeSheet(); focusPin(null); } catch (e) {}
-      // the screen stays on your bird, so the map can't be dragged during the hunt (pinch zoom still works)
-      const c = world.controls(); c.autoRotate = false; c.enableRotate = false;
+      // the screen stays on your bird, so the map can't be dragged or pinch-zoomed during the hunt (leave with the ×)
+      const c = world.controls(); c.autoRotate = false; c.enableRotate = false; c.enableZoom = false;
       const v = world.pointOfView();
       $('huntN').textContent = balance == null ? '–' : balance; hintUntil = Date.now() + 4000;
       poll(true, [v.lat, v.lng]); loop();
     }
     function leave() {
-      if (!on) return; on = false; document.body.classList.remove('hunting'); bar.classList.remove('in'); world.controls().enableRotate = true;
+      if (!on) return; on = false; document.body.classList.remove('hunting'); bar.classList.remove('in'); world.controls().enableRotate = true; world.controls().enableZoom = true;
       cancelAnimationFrame(raf); clearTimeout(pollT); cx.clearRect(0, 0, cv.width, cv.height); target = null; fx = []; pillCheck();
     }
     async function poll(start, at) {
