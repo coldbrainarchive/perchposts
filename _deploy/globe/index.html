@@ -163,20 +163,10 @@ body .ps-ov .ps-sheet{position:fixed;left:0;right:0;bottom:0;margin:0 auto}
 .utc{margin-left:auto;flex-shrink:0;display:flex;align-items:center;gap:5px;height:36px;box-sizing:border-box;padding:0 8px 0 10px;border-radius:999px;border:1px solid var(--line);background:#15171d;color:var(--ink);font:inherit;font-variant-numeric:tabular-nums;cursor:pointer;-webkit-tap-highlight-color:transparent}
 .utc:active{background:#1d2029}
 .utc b{display:inline-flex;font-size:16px;font-weight:800;letter-spacing:-.01em;color:#c084fc;text-shadow:0 0 3px rgba(192,132,252,.55),0 0 10px rgba(192,132,252,.28);line-height:1}
-/* split-flap digits like the site's header clock; halves are cropped with overflow boxes (clip-path + glow left a
-   dark box over the globe's canvas) */
 .utc b .q{position:relative;display:inline-block;text-align:center;line-height:20px;height:20px}
-.utc b .q.s{font-size:12.5px;color:#a98be0;align-self:flex-end;line-height:17px;height:17px}.utc b .q.s>.h>s{height:17px;line-height:17px}.utc b .q.s>.h.bot>s{top:-8.5px}
 .utc b .q>i{font-style:normal;display:block;font-variant-numeric:tabular-nums}
-.utc b .q>.h{position:absolute;left:-4px;right:-4px;height:50%;overflow:hidden;display:none}
-.utc b .q>.h.top{top:0;transform-origin:50% 100%}.utc b .q>.h.bot{top:50%;transform-origin:50% 0}
-.utc b .q>.h>s{position:absolute;left:0;right:0;height:20px;line-height:20px;text-decoration:none;text-align:center;font-variant-numeric:tabular-nums}
-.utc b .q>.h.top>s{top:0}.utc b .q>.h.bot>s{top:-10px}
-.utc b .q.go>i{visibility:hidden}.utc b .q.go>.h{display:block}
-.utc b .q.go>.ot{animation:gq5T var(--fd,.13s) ease-in forwards}
-.utc b .q.go>.nb{transform:scaleY(0);animation:gq5B var(--fd,.13s) ease-out var(--fd,.13s) forwards}
-.utc b .q.go>.nt{z-index:0}.utc b .q.go>.ot{z-index:1}.utc b .q.go>.ob{z-index:0}.utc b .q.go>.nb{z-index:1}
-@keyframes gq5T{from{transform:scaleY(1)}to{transform:scaleY(0)}}@keyframes gq5B{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+.utc b .q.tk>i{animation:gqTick .26s cubic-bezier(.2,.8,.3,1)}
+@keyframes gqTick{from{opacity:.15;translate:0 -5px}to{opacity:1;translate:0 0}}
 .utc>i{font-style:normal;font-size:9px;font-weight:700;letter-spacing:.08em;color:#8b97ab;margin-left:-1px}
 .utc-i{display:inline-flex;width:14px;height:14px;color:#fcd34d}.utc-i svg{width:14px;height:14px}.utc-i .ic-moon{display:none;color:#c4b5fd}
 .utc.night .utc-i .ic-sun{display:none}.utc.night .utc-i .ic-moon{display:block}

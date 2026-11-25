@@ -631,16 +631,15 @@
     addEventListener('keydown', ev => { if (ev.key === 'Escape') open(false); });
     // split-flap digits like the site's header clock: the old top half folds down, the new bottom half swings in
     const tEl = $('utcT'); let qs = [];
-    if (tEl) { tEl.textContent = ''; qs = [...'00:00:00'].map((ch, i) => { const q = document.createElement('span'); q.className = 'q' + (i >= 5 ? ' s' : ''); q.innerHTML = '<i></i><span class="h top nt"><s></s></span><span class="h bot ob"><s></s></span><span class="h top ot"><s></s></span><span class="h bot nb"><s></s></span>'; q._ch = ''; tEl.appendChild(q); return q; }); }
+    if (tEl) { tEl.textContent = ''; qs = [...'00:00:00'].map((ch, i) => { const q = document.createElement('span'); q.className = 'q'; q.innerHTML = '<i></i>'; q._ch = ''; tEl.appendChild(q); return q; }); }
     const still = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const flip = (q, ch, d) => new Promise(res => { if (q._ch === ch) return res(); const old = q._ch; q._ch = ch;
-      if (!old || still()) { q.querySelector('i').textContent = ch; return res(); }
-      const S = k => q.querySelector('.' + k + '>s'); S('ot').textContent = old; S('ob').textContent = old; S('nt').textContent = ch; S('nb').textContent = ch;
-      q.style.setProperty('--fd', d + 'ms'); q.classList.remove('go'); void q.offsetWidth; q.classList.add('go');
-      setTimeout(() => { q.querySelector('i').textContent = ch; q.classList.remove('go'); res(); }, d * 2 + 20); });
+    // each changed digit drops in with a quick fade (a split-flap made of moving pieces made iOS skip painting the
+    // pill behind them — a dark box over the globe)
+    const flip = (q, ch) => { if (q._ch === ch) return; q._ch = ch; const i = q.querySelector('i'); i.textContent = ch;
+      if (still()) return; q.classList.remove('tk'); void q.offsetWidth; q.classList.add('tk'); };
     // the digits (with seconds) flip every second; the sun / moon and the open panel only update on the minute
     const digits = () => { const d = new Date(), p2 = n => String(n).padStart(2, '0'), str = p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds());  // the viewer's own local time
-      [...str].forEach((ch, i) => { const q = qs[i]; if (!q || q._ch === ch) return; setTimeout(() => flip(q, ch, 110), i >= 6 ? (i - 6) * 40 : i * 45); }); };
+      [...str].forEach((ch, i) => { const q = qs[i]; if (!q || q._ch === ch) return; setTimeout(() => flip(q, ch), i >= 6 ? (i - 6) * 40 : i * 45); }); };
     const tick = () => { const d = new Date(), s = subsolar(d);
       { const h = d.getHours(); btn.classList.toggle('night', h < 6 || h >= 18); }
       try { const z = new Intl.DateTimeFormat('en-US', { timeZoneName: 'short' }).formatToParts(d).find(x => x.type === 'timeZoneName'); const zEl = $('utcZ'); if (zEl) zEl.textContent = z && z.value.length <= 7 ? z.value.replace(/^GMT\+0$/, 'GMT') : 'LOCAL'; } catch (e) {} if (panel.classList.contains('in')) draw(); };
@@ -746,7 +745,7 @@
       A.lat -= dy * push; B.lat += dy * push; A.lng -= dx * push / cl; B.lng += dx * push / cl;
     }
     marks = [...pins, ...events];
-    if (d.built_at) $('sub').textContent = `${stories.length} stories · updated ${ago(d.built_at)}`;
+    if (d.built_at) $('sub').textContent = `${stories.length} stories · ${ago(d.built_at)}`;
     $('empty').remove();
     if (!stories.length) { $('sub').textContent = 'No trending stories yet — check back soon'; }
     strip(); start();
