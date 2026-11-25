@@ -69,8 +69,21 @@ patch("body .lb-ic{",
  "body .ch-dock.ch-dock-h{border-top:0;padding-top:4px}"
  "body .lb-ic{", 'css')
 
+
+# huddles: the panel IS the members list (no in-between card, no second tap)
+patch("_cf&&_chx&&(0,L.jsx)(_ChXP,{close:()=>_setChx(!1),slot:(0,L.jsx)(`div`,{className:`chp chp-full`,ref:_setChSlot},`chp`),",
+      "_cf&&_chx&&(0,L.jsx)(_ChXP,{close:()=>_setChx(!1),slot:c.is_huddle?(0,L.jsx)(`div`,{className:`chp chp-full chp-hx`,children:(0,L.jsx)(_HxSheetBody,{post:c,members:_chHudObj(c),close:()=>_setChx(!1),inline:!0})},`chp`):(0,L.jsx)(`div`,{className:`chp chp-full`,ref:_setChSlot},`chp`),", 'huddle panel = members')
+patch("function _HxSheetBody({post,members,close}){", "function _HxSheetBody({post,members,close,inline}){", 'inline prop')
+patch("return(0,L.jsx)(`div`,{className:`hx-back`,onClick:close,children:(0,L.jsxs)(`div`,{className:`hx-sheet`,onClick:ev=>ev.stopPropagation(),children:[(0,L.jsx)(`div`,{className:`bc-grab`}),",
+      "return(0,L.jsx)(`div`,{className:inline?`hx-inl`:`hx-back`,onClick:inline?void 0:close,children:(0,L.jsxs)(`div`,{className:inline?`hx-sheet hx-sheet-in`:`hx-sheet`,onClick:ev=>ev.stopPropagation(),children:[inline?null:(0,L.jsx)(`div`,{className:`bc-grab`}),", 'inline layout')
+patch("body .lb-ic{",
+ "body .hx-inl .hx-sheet.hx-sheet-in{position:static;transform:none!important;max-height:none;overflow:visible;border-radius:0;box-shadow:none!important;background:none;padding:2px 0 4px;max-width:none;width:auto;transition:none}"
+ "body .chp.chp-full.chp-hx{padding:14px 14px 6px}"
+ "body .lb-ic{", 'inline css')
+
 c += r"""
-function _chHudM(p){try{const ms=JSON.parse(p.huddle_members||`[]`).map(x=>String(x).split(`:`)[0]).filter(Boolean);return[...new Set([p.username,...ms].filter(Boolean))]}catch(e){return p.username?[p.username]:[]}}
+function _chHudObj(p){try{return JSON.parse(p.huddle_members||`[]`).filter(Boolean).map(x=>{if(typeof x!==`string`)return{username:x.u||String(x),browser_id:x.b||null,role:x.r||null};const i=x.lastIndexOf(`:`);if(i>0){const r=x.slice(i+1);if(r===`admin`||r===`mod`)return{username:x.slice(0,i),browser_id:null,role:r}}return{username:x,browser_id:null,role:null}})}catch(e){return[]}}
+function _chHudM(p){try{const ms=_chHudObj(p).map(x=>x.username).filter(Boolean);return[...new Set([p.username,...ms].filter(Boolean))]}catch(e){return p.username?[p.username]:[]}}
 function _ChHudAv({post}){const me=(localStorage.getItem(`_myUsername`)||``).toLowerCase(),o=_chHudM(post).filter(n=>n.toLowerCase()!==me).slice(0,2);
  return(0,L.jsx)(`span`,{className:`ch-th ch-hx`,children:o.length===2?[(0,L.jsx)(`span`,{className:`b b1`,children:_ppFace(o[0],21)},`a`),(0,L.jsx)(`span`,{className:`b b2`,children:_ppFace(o[1],21)},`b`)]:o.length===1?(0,L.jsx)(`span`,{className:`solo`,children:_ppFace(o[0],28)}):(0,L.jsx)(`span`,{className:`hi`,dangerouslySetInnerHTML:{__html:_ppIco(`HUDDLE`)}})})}
 """
