@@ -3087,7 +3087,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     try {
       const up = await fetch(`https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2023_3857/default/g/${z}/${y}/${x}.jpg`, { cf: { cacheTtl: 2592000, cacheEverything: true } });
       if (!up.ok) return new Response("Tile unavailable", { status: up.status === 404 ? 404 : 502, headers: corsHeaders });
-      const res = new Response(up.body, { headers: { ...corsHeaders, "Access-Control-Allow-Origin": "*", "Content-Type": "image/jpeg", "Cache-Control": "public, max-age=2592000, immutable" } });
+      const res = new Response(up.body, { headers: { ...corsHeaders, "Access-Control-Allow-Origin": "*", "Content-Type": up.headers.get("content-type") || "image/jpeg", "Cache-Control": "public, max-age=2592000, immutable" } }); // EOX sends plain-colour PNGs for all-sea/ice tiles
       ctx.waitUntil(caches.default.put(key, res.clone()));
       return res;
     } catch (err) {

@@ -490,10 +490,9 @@
     if (typeof Globe !== 'function') { $('empty').textContent = 'The globe couldn’t load on this device.'; return; }
     world = new Globe($('globe'), { animateIn: true })
       .backgroundColor('rgba(0,0,0,0)')
-      .globeImageUrl('/globe/earth-blue-marble.jpg')
-      // sharper imagery as you zoom: Sentinel-2 cloudless map tiles (EOX, CC BY-NC-SA), only the tiles in view load;
-      // they come through our worker (cached there) so visitors' phones never contact EOX
-      .globeTileEngineUrl((x, y, l) => `${API}/globe-tile/${l}/${y}/${x}.jpg`).globeTileEngineMaxLevel(14)
+      .globeImageUrl('/globe/earth-s2-4k.jpg')
+      .onGlobeReady(() => { const l = $('glLoad'); l && l.classList.add('gone'); setTimeout(() => l && l.remove(), 400); hiRes(); })
+      .globeTileEngineMaxLevel(14)
       .showAtmosphere(true).atmosphereColor('#8ab4ff').atmosphereAltitude(0.18)
       .htmlElementsData(marks).htmlLat('lat').htmlLng('lng').htmlAltitude(0.01).htmlElement(pinEl).htmlTransitionDuration(0)
       .htmlElementVisibilityModifier(() => {})
@@ -538,10 +537,38 @@
         down = null;
       });
     })();
+    // Imagery is Sentinel-2 cloudless (EOX, CC BY-NC-SA) at every zoom, so nothing changes colour as you zoom:
+    // a whole-Earth image (4K; computers swap to 8K once it has loaded in the background), then map tiles through
+    // our worker (cached there; phones never contact EOX) once you zoom in past what the whole-Earth image can show.
+    // Tiles are one level finer than the engine's default and only the ones in view load; a small bird shows while
+    // they arrive. Switches with a little gap so it doesn't flicker.
+    const BIG = matchMedia('(pointer: fine)').matches && innerWidth >= 900;
+    const ON = BIG ? 0.5 : 0.85, OFF = ON + 0.15;
+    let pend = 0, sbT = 0;
+    const small = $('glLoadS');
+    const busy = () => { clearTimeout(sbT); if (pend > 0) sbT = setTimeout(() => small && small.classList.toggle('on', pend > 0), 350); else small && small.classList.remove('on'); };
+    const TILE = (x, y, l) => { pend++; busy(); return `${API}/globe-tile/${l}/${y}/${x}.jpg`; };
+    try { new PerformanceObserver(list => { for (const e of list.getEntries()) if (e.name.includes('/globe-tile/')) pend = Math.max(0, pend - 1); busy(); }).observe({ type: 'resource', buffered: false }); } catch (e) {}
+    let tilesOn = false, tuned = false, te = null, lastA = 9, outT = 0;
+    const imagery = () => { const a = world.pointOfView().altitude;
+      // zooming OUT: stop asking for new tiles (the ones already there stay; the whole-Earth image underneath has the
+      // same colours) and resume once the zoom settles — otherwise every in-between level gets fetched and thrown away
+      if (te && tilesOn) { if (a > lastA * 1.004) { te.tileUrl = null; clearTimeout(outT); outT = setTimeout(() => { if (tilesOn) { te.tileUrl = TILE; const v = world.pointOfView(); world.pointOfView({ ...v, altitude: v.altitude + 1e-5 }); } }, 250); } }
+      lastA = a;
+      if (!tilesOn && a < ON) { tilesOn = true; world.globeTileEngineUrl(TILE);
+        if (!tuned) { try { world.scene().traverse(o => { if (!tuned && o && Array.isArray(o.thresholds) && 'tileUrl' in o) { o.thresholds = o.thresholds.map((v, i) => 8 / Math.pow(2, i - 1)); tuned = true; te = o; } }); } catch (e) {} } }
+      else if (tilesOn && a > OFF) { tilesOn = false; clearTimeout(outT); world.globeTileEngineUrl(null); try { world.globeTileEngineClearCache(); } catch (e) {} pend = 0; busy(); } };
+    world.controls().addEventListener('change', imagery); setInterval(imagery, 500);
+    try { world.onZoom(() => { imagery(); }); } catch (e) {}  // also during animated flights (double-tap, story picks)
     mapOverlay();
     const fit = () => { world.width(innerWidth).height(innerHeight); };
     fit(); addEventListener('resize', fit);
     world.pointOfView({ lat: 22, lng: 20, altitude: innerWidth < 600 ? 2.9 : 2.2 });
+  }
+  function hiRes() {
+    if (!(matchMedia('(pointer: fine)').matches && innerWidth >= 900)) return;
+    const im = new Image(); im.onload = () => { try { world.globeImageUrl('/globe/earth-s2-8k.jpg'); } catch (e) {} };
+    setTimeout(() => { im.src = '/globe/earth-s2-8k.jpg'; }, 1500);
   }
   // Map overlay (only when zoomed in close): Natural Earth borders on the globe + country / city names that fade in
   // as you get closer. Data (~190 KB gzipped) loads the first time you zoom in that far.
@@ -550,7 +577,7 @@
     const host = world.renderer().domElement.parentElement;
     const layer = document.createElement('div'); layer.className = 'map-lbl'; host.insertBefore(layer, world.renderer().domElement.nextSibling);
     const credit = document.createElement('div'); credit.className = 'map-credit'; credit.textContent = 'Imagery: Sentinel-2 cloudless by EOX (Copernicus Sentinel data 2023) · Map: Natural Earth'; document.body.appendChild(credit);
-    const els = new Map();
+    const els = new Map(); let shown = [];
     const mk = (key, txt, cls) => { let e = els.get(key); if (!e) { e = document.createElement('div'); e.className = cls; e.textContent = txt; layer.appendChild(e); els.set(key, e); } return e; };
     // altitude bands → what shows
     const bandOf = a => a > 1.25 ? 0 : a > 0.9 ? 1 : a > 0.6 ? 2 : a > 0.38 ? 3 : a > 0.24 ? 4 : 5;
@@ -567,14 +594,15 @@
       layer.classList.toggle('on', !!data && b > 0); credit.classList.toggle('on', a < 1.25);
       { const st = document.getElementById('strip'), r = st && st.getBoundingClientRect(); credit.style.bottom = (r && r.height ? Math.max(4, innerHeight - r.top + 4) : 4) + 'px'; }
       if (!data) { if (b > 0 && !loading) { loading = true; fetch('/globe/map-data.json').then(r => r.json()).then(d => { data = d; band = -1; paths(); draw(); }).catch(() => { loading = false; }); } return; }
-      paths(); if (b === 0) return;
+      paths(); if (b === 0) { shown = []; return; }
+      try { world.camera().updateMatrixWorld(); } catch (e) {}
       const la0 = pov.lat * R, lo0 = pov.lng * R, cap = Math.cos(Math.min(1.2, Math.acos(1 / (1 + a)) * 0.92));
       const want = [];
       const cRank = [0, 2, 4, 6, 9, 9][b], tRank = [-1, -1, 1, 3, 5, 6][b];
       for (const c of data.c) if (c[3] <= cRank) want.push({ k: 'c:' + c[0], t: c[0], lat: c[1], lng: c[2], cls: 'ml-c', pr: c[3] });
       for (const t of data.t) if (t[3] <= tRank) want.push({ k: 't:' + t[0] + t[1], t: t[0], lat: t[1], lng: t[2], cls: 'ml-t', pr: t[3] + 0.5 });
       want.sort((x, y) => x.pr - y.pr);
-      const placed = [], seen = new Set(), W = innerWidth, H = innerHeight, top = (document.querySelector('.top')?.getBoundingClientRect().bottom || 0);
+      const now = [], placed = [], seen = new Set(), W = innerWidth, H = innerHeight, top = (document.querySelector('.top')?.getBoundingClientRect().bottom || 0);
       // story pins and previews win: map names never sit under them
       for (const pe of document.querySelectorAll('.pin:not(.back), .ev:not(.back), .pin .pv, .ev .mini')) { const q = pe.getBoundingClientRect(); if (q.width && q.height) placed.push({ l: q.left - 2, r: q.right + 2, t: q.top - 2, b: q.bottom + 2 }); }
       const pinCount = placed.length;
@@ -586,11 +614,17 @@
         const r = { l: s.x - bw / 2 - 3, r: s.x + bw / 2 + 3, t: s.y - bh, b: s.y + 4 };
         if (placed.some(o => r.l < o.r && r.r > o.l && r.t < o.b && r.b > o.t)) continue;
         if (placed.length - pinCount > 70) break;
-        placed.push(r); seen.add(w.k); e.style.transform = `translate(${s.x}px,${s.y}px)`; e.classList.add('on');
+        placed.push(r); seen.add(w.k); now.push({ e, lat: w.lat, lng: w.lng }); e.style.transform = `translate(${s.x}px,${s.y}px)`; e.classList.add('on');
       }
+      shown = now;
       for (const [k, e] of els) if (!seen.has(k)) e.classList.remove('on');
     };
-    const ask = () => { if (!q) q = requestAnimationFrame(draw); };
+    // keep the names glued to the map while it moves: same-frame reposition with an up-to-date camera matrix
+    const glue = () => { if (!shown.length) return; try { world.camera().updateMatrixWorld(); } catch (e) {}
+      for (const s of shown) { const p = world.getScreenCoords(s.lat, s.lng, 0.001); if (p) s.e.style.transform = `translate(${p.x}px,${p.y}px)`; } };
+    let lastDraw = 0;
+    const ask = () => { glue(); if (q) return; const wait = Math.max(0, 140 - (performance.now() - lastDraw));
+      q = setTimeout(() => requestAnimationFrame(() => { lastDraw = performance.now(); draw(); }), wait); };
     world.controls().addEventListener('change', ask); setInterval(ask, 600); ask();
   }
 
