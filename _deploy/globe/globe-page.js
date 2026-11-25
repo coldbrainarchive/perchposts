@@ -556,7 +556,7 @@
     try { new PerformanceObserver(list => { for (const e of list.getEntries()) if (e.name.includes('/globe-tile/')) pend = Math.max(0, pend - 1); busy(); }).observe({ type: 'resource', buffered: false }); } catch (e) {}
     // the library hides the whole-Earth image as soon as tiles switch on, which flashed black until they arrived:
     // keep it always showing underneath (a hair smaller, so tiles sit cleanly on top) — same imagery, so no seam
-    const keepBase = () => { try { world.scene().traverse(o => { if (o && o.__globeObjType === 'globe' && o.children) { const g = o.children.find(m => m.isMesh); if (g && !g._kept) { g._kept = true; g.scale.setScalar(0.9992); Object.defineProperty(g, 'visible', { get: () => true, set: () => {}, configurable: true }); } } }); } catch (e) {} };
+    const keepBase = () => { try { world.scene().traverse(o => { if (o && o.__globeObjType === 'globe' && o.children) { const g = o.children.find(m => m.isMesh); if (g && !g._kept) { g._kept = true; g.scale.setScalar(0.9992); g.renderOrder = -200; Object.defineProperty(g, 'visible', { get: () => true, set: () => {}, configurable: true }); } } }); } catch (e) {} };
     keepBase();
     let tilesOn = false, tuned = false, te = null, lastA = 9, outT = 0;
     const imagery = () => { const a = world.pointOfView().altitude;
@@ -565,7 +565,7 @@
       if (te && tilesOn) { if (a > lastA * 1.004) { te.tileUrl = null; clearTimeout(outT); outT = setTimeout(() => { if (tilesOn) { te.tileUrl = TILE; const v = world.pointOfView(); world.pointOfView({ ...v, altitude: v.altitude + 1e-5 }); } }, 250); } }
       lastA = a;
       if (!tilesOn && a < ON) { tilesOn = true; keepBase(); world.globeTileEngineUrl(TILE);
-        if (!tuned) { try { world.scene().traverse(o => { if (!tuned && o && Array.isArray(o.thresholds) && 'tileUrl' in o) { o.thresholds = o.thresholds.map((v, i) => 8 / Math.pow(2, i - 1)); tuned = true; te = o; tileEng = o; if (hdOn) tuneHd(o); } }); } catch (e) {} } }
+        if (!tuned) { try { world.scene().traverse(o => { if (!tuned && o && Array.isArray(o.thresholds) && 'tileUrl' in o) { o.thresholds = o.thresholds.map((v, i) => 8 / Math.pow(2, i - 1)); tuned = true; te = o; tileEng = o; tileHooks(o); if (hdOn) tuneHd(o); } }); } catch (e) {} } }
       else if (tilesOn && a > OFF) { tilesOn = false; clearTimeout(outT); world.globeTileEngineUrl(null); try { world.globeTileEngineClearCache(); } catch (e) {} pend = 0; busy(); } };
     world.controls().addEventListener('change', imagery); setInterval(imagery, 500);
     try { world.onZoom(() => { imagery(); }); } catch (e) {}  // also during animated flights (double-tap, story picks)
@@ -591,6 +591,20 @@
   const HD_FROM = 13, HD_MAX = 15; let hdOn = false, tileEng = null, tileSrc = null;
   function tuneHd(o) { const t = o.thresholds.slice(); while (t.length < 16) t.push(8 / Math.pow(2, t.length - 1));
     t[14] = 0.0018; t[15] = 0.0015; o.thresholds = t.slice(0, 16); }
+  // Smoother map tiles (2026-11-25):
+  // - the finer tiles always draw on top of the coarser ones the library keeps underneath while they load (same
+  //   height, so on some phones' graphics chips the two would otherwise fight and flicker between sharp and blurry);
+  // - in the game the camera moves every frame, and the library re-checks ~1,900 candidate tiles each time it moves:
+  //   deciding what to load ~8 times a second is plenty. (Tiles far behind you are released by the patched library.)
+  function tileHooks(o) {
+    if (o._pp) return; o._pp = true;
+    const lv = m => { const ph = m && m.geometry && m.geometry.parameters && m.geometry.parameters.phiLength; return ph ? Math.round(Math.log2(2 * Math.PI / ph)) : 0; };
+    const add0 = o.add.bind(o); o.add = (...objs) => { for (const m of objs) if (m && m.isMesh) m.renderOrder = -100 + lv(m); return add0(...objs); };
+    o.children.forEach(m => { if (m.isMesh) m.renderOrder = -100 + lv(m); });
+    const up0 = o.updatePov.bind(o); let last = 0, tmr = 0;
+    o.updatePov = cam => { if (!inGame()) return up0(cam); const now = performance.now(); clearTimeout(tmr);
+      if (now - last >= 120) { last = now; return up0(cam); } tmr = setTimeout(() => { last = performance.now(); up0(cam); }, 120 - (now - last)); };
+  }
   // Night side: a see-through shell just above the map (so it also darkens the zoomed-in tiles) with a soft dusk band
   // and NASA Black Marble city lights (public domain). Built from the globe's own three.js classes; sun updates each minute.
   function dayNight() {
@@ -803,7 +817,7 @@
     function preload(now) {
       if (!tileEng || !tileSrc || !me || zoomIn) return; const L = tileEng.level, h = headAt(me, now), p = posAt(me, now); if (!L || h == null || !p) return;
       const Z = 2 ** L, kx = 111.2 * Math.cos(p[0] * R);
-      for (const d of [4, 6]) for (const s0 of [-1.8, 0, 1.8]) {
+      for (const d of [4, 5.5]) for (const s0 of [-2, -0.7, 0.7, 2]) {
         const la = p[0] + (d * Math.cos(h) - s0 * Math.sin(h)) / 111.2, lo = p[1] + (d * Math.sin(h) + s0 * Math.cos(h)) / kx;
         const x = Math.floor((lo + 180) / 360 * Z), y = Math.floor((1 - Math.log(Math.tan(la * R) + 1 / Math.cos(la * R)) / Math.PI) / 2 * Z), url = tileSrc(x, y, L);
         if (pre.has(url)) continue;
