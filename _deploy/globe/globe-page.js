@@ -326,7 +326,7 @@
     if (!keep) requestAnimationFrame(() => toggleUI(near, false));
     ol.style.setProperty('--c', COLORS[sel % COLORS.length]);
     ol.classList.add('on'); if (!keep) ol.classList.remove('open');
-    $('olT').innerHTML = `See all ${sp.length} outlet${sp.length === 1 ? '' : 's'} <i>▴</i>`;
+    $('olT').innerHTML = `See all ${sp.length} outlet${sp.length === 1 ? '' : 's'}`;
     // the list lives inside the selected story's card (the card grows up from the bottom)
     const slot = document.querySelectorAll('.sc')[sel]; slot && slot.querySelector('.sc-slot').appendChild(ol);
     $('olL').innerHTML = '';

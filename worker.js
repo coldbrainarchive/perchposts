@@ -3311,7 +3311,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   if (url.pathname === "/share-card") {
     try {
       const id = String(url.searchParams.get("id") || "").slice(0, 80);
-      const p = id && await env.DB.prepare(`SELECT id, title, content, username, is_huddle, deleted, archived, board, community_id FROM posts WHERE id = ?`).bind(id).first();
+      const p = id && await env.DB.prepare(`SELECT id, title, content, username, is_huddle, deleted, archived, board, community_id, share_count FROM posts WHERE id = ?`).bind(id).first();
       if (!p || p.is_huddle || p.deleted || (p.archived && !isModerator)) return json({ gone: true });
       const [f, c] = await env.DB.batch([
         env.DB.prepare(`SELECT COUNT(DISTINCT COALESCE(username, 'b:' || browser_id)) AS n FROM post_votes WHERE post_id = ? AND value > 0`).bind(id),
@@ -3324,7 +3324,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       let lt = "";
       if (m) { try { const a = JSON.parse(m[1]); const one = Array.isArray(a) ? a[0] : a; image = one?.image || (one?.type === "image" ? one.url : null) || null; if (one?.url && one.type === "link") { site = new URL(one.url).hostname.replace(/^www\./, ""); lt = one.title || ""; if (!text) text = String(one.description || "").slice(0, 160); } } catch {} }
       const names = await extinctNames();
-      return json({ id, title: p.title || lt || "", text, image, site, by: names.has(p.username) ? EXTINCT_NAME : (p.username || null), board: p.board || p.community_id || null, flaps: f.results?.[0]?.n || 0, chirps: c.results?.[0]?.n || 0 });
+      return json({ id, title: p.title || lt || "", text, image, site, by: names.has(p.username) ? EXTINCT_NAME : (p.username || null), board: p.board || p.community_id || null, flaps: f.results?.[0]?.n || 0, chirps: c.results?.[0]?.n || 0, shares: p.share_count || 0 });
     } catch (err) {
       return serverError(err);
     }
