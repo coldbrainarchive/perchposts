@@ -549,13 +549,17 @@
     const busy = () => { clearTimeout(sbT); if (pend > 0) sbT = setTimeout(() => small && small.classList.toggle('on', pend > 0), 350); else small && small.classList.remove('on'); };
     const TILE = (x, y, l) => { pend++; busy(); return `${API}/globe-tile/${l}/${y}/${x}.jpg`; };
     try { new PerformanceObserver(list => { for (const e of list.getEntries()) if (e.name.includes('/globe-tile/')) pend = Math.max(0, pend - 1); busy(); }).observe({ type: 'resource', buffered: false }); } catch (e) {}
+    // the library hides the whole-Earth image as soon as tiles switch on, which flashed black until they arrived:
+    // keep it always showing underneath (a hair smaller, so tiles sit cleanly on top) — same imagery, so no seam
+    const keepBase = () => { try { world.scene().traverse(o => { if (o && o.__globeObjType === 'globe' && o.children) { const g = o.children.find(m => m.isMesh); if (g && !g._kept) { g._kept = true; g.scale.setScalar(0.9992); Object.defineProperty(g, 'visible', { get: () => true, set: () => {}, configurable: true }); } } }); } catch (e) {} };
+    keepBase();
     let tilesOn = false, tuned = false, te = null, lastA = 9, outT = 0;
     const imagery = () => { const a = world.pointOfView().altitude;
       // zooming OUT: stop asking for new tiles (the ones already there stay; the whole-Earth image underneath has the
       // same colours) and resume once the zoom settles — otherwise every in-between level gets fetched and thrown away
       if (te && tilesOn) { if (a > lastA * 1.004) { te.tileUrl = null; clearTimeout(outT); outT = setTimeout(() => { if (tilesOn) { te.tileUrl = TILE; const v = world.pointOfView(); world.pointOfView({ ...v, altitude: v.altitude + 1e-5 }); } }, 250); } }
       lastA = a;
-      if (!tilesOn && a < ON) { tilesOn = true; world.globeTileEngineUrl(TILE);
+      if (!tilesOn && a < ON) { tilesOn = true; keepBase(); world.globeTileEngineUrl(TILE);
         if (!tuned) { try { world.scene().traverse(o => { if (!tuned && o && Array.isArray(o.thresholds) && 'tileUrl' in o) { o.thresholds = o.thresholds.map((v, i) => 8 / Math.pow(2, i - 1)); tuned = true; te = o; } }); } catch (e) {} } }
       else if (tilesOn && a > OFF) { tilesOn = false; clearTimeout(outT); world.globeTileEngineUrl(null); try { world.globeTileEngineClearCache(); } catch (e) {} pend = 0; busy(); } };
     world.controls().addEventListener('change', imagery); setInterval(imagery, 500);
