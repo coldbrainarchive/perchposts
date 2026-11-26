@@ -937,7 +937,7 @@
       const cx2 = Math.min(499, Math.floor((x0 - tx * 5) * 100)), cy2 = Math.min(499, Math.floor((y0 - ty * 5) * 100));
       return !t[cy2 * 500 + cx2];
     }
-    let wet = false, drowning = null, noWater = 0;
+    let wet = false, drowning = null, noWater = 0, overW = false, overWAt = 0;
     let enKm = EN_MAX, enAt = Date.now(), enTired = false, eating = false;
     try { const o = JSON.parse(localStorage.getItem('pp_energy') || 'null'); if (o && isFinite(o.km)) { wet = !!o.wet; const away = Math.max(0, Date.now() - o.at); enKm = Math.max(0, Math.min(EN_MAX, o.km + (wet ? -away * SWIM : away * EN_REST))); } } catch (e) {}
     const enSave = () => { try { localStorage.setItem('pp_energy', JSON.stringify({ km: enKm, at: Date.now(), wet })); } catch (e) {} };
@@ -1003,7 +1003,8 @@
       // energy: flying drains it, standing still refills it slowly
       { const t = Date.now(), dms = Math.max(0, t - enAt); enAt = t;
         const flying = me && now < me.arrive && me.b1 != null && !landed, w = p ? isWater(p[0], p[1]) : null;   // (also fetches the map around you)
-        if (!flying && w != null && w !== wet && !(w && Date.now() < noWater)) { wet = w; if (wet && enKm > 0 && !drowning) ghEvent('Treading water', 'uses stamina · tap to fly', '#60a5fa'); enSave(); }
+        if (!flying && w != null && w !== wet && !(w && Date.now() < noWater)) { wet = w; if (wet && enKm > 0 && !drowning) ghEvent('Treading water', 'uses stamina', '#60a5fa'); enSave(); }
+        if (flying && w != null) { if (w && !overW && Date.now() > overWAt) { overWAt = Date.now() + 60000; ghEvent('Over water', 'run out of stamina here and you fall in · no worms left and you drown', '#60a5fa'); } overW = w; }   // flying out over water: a short warning (at most once a minute, so coastlines don't spam it)
         if (flying) { if (wet) { wet = false; } enAdd(-SPEED * Math.min(5000, dms) / 1000); }
         else if (wet) enAdd(-SWIM * Math.min(5000, dms)); else enAdd(dms * EN_REST);   // (rest counts all the time you were away)
         if (flying && enKm <= 0 && !enTired) { if (w === true) { landNow(true); wet = true; ghEvent('Splash', 'out of stamina over water', '#60a5fa'); } else eatStop(); }   // over water: falls in (then eats, below); over land: lands, eats, flies on
