@@ -2387,19 +2387,21 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   // near birds that are hunting (more at night and near trending stories), last ~30 s and go to the first bird that
   // reaches them. A catch only counts if the bird's own flight passes within reach of the worm — scripts can't
   // teleport. Caught worms land in the normal worm balance (a worms row from '__hunt__', no post).
-  // ── /hunt/dots ── every bird on the globe, for the tiny dots anyone sees on the zoomed-out globe: just where each
-  // flight goes (no names). Cached at the edge for 5 s.
+  // ── /hunt/dots ── every bird on the globe, for the birds and dots on the globe outside the game. Signed-out visitors
+  // get colours only (no names, so nobody can see roughly where a player lives); signed-in players also get each bird's
+  // name and role, so the globe can draw everyone's own logo bird asleep in its nest. Cached at the edge for 5 s.
   if (url.pathname === "/hunt/dots" && request.method === "GET") {
-    const key = new Request("https://perchposts-hunt.cache/dots");
-    const hit = await caches.default.match(key); if (hit) return hit;
+    const named = !!(username && !isBot), key = new Request(`https://perchposts-hunt.cache/dots${named ? "-n" : ""}`);
+    const hit = await caches.default.match(key);
+    if (hit) return named ? new Response(hit.body, { headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "private, max-age=5" } }) : hit;
     try {
-      // each bird's colour (the one its own page saved) but never its name
-      const { results = [] } = await env.DB.prepare(`SELECT h.from_lat, h.from_lng, h.brg0, h.brg1, h.depart_at, h.arrive_at, h.col, (SELECT m.role FROM mod_users m WHERE LOWER(m.username) = LOWER(h.username) AND m.deleted_at IS NULL LIMIT 1) AS role FROM hunt_birds h LIMIT 5000`).all();
+      const { results = [] } = await env.DB.prepare(`SELECT h.username, h.from_lat, h.from_lng, h.brg0, h.brg1, h.depart_at, h.arrive_at, h.col, (SELECT m.role FROM mod_users m WHERE LOWER(m.username) = LOWER(h.username) AND m.deleted_at IS NULL LIMIT 1) AS role FROM hunt_birds h LIMIT 5000`).all();
       const r4 = x => x == null ? null : Math.round(x * 1e4) / 1e4;
       const colOf = b => b.role === "admin" ? "155,184,185" : (b.col || null);   // every bird its real colour; admins' logo is the blue-grey admin bird
-      const res = new Response(JSON.stringify({ now: Date.now(), b: results.map(b => [r4(b.from_lat), r4(b.from_lng), r4(b.brg0), r4(b.brg1), b.depart_at, b.arrive_at, colOf(b)]) }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "public, max-age=5" } });
-      ctx.waitUntil(caches.default.put(key, res.clone()));
+      const body = JSON.stringify({ now: Date.now(), b: results.map(b => [r4(b.from_lat), r4(b.from_lng), r4(b.brg0), r4(b.brg1), b.depart_at, b.arrive_at, colOf(b),
+        ...(named ? [b.username, b.role === "admin" || b.role === "mod" ? b.role : null] : [])]) });
+      const res = new Response(body, { headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": `${named ? "private" : "public"}, max-age=5` } });
+      ctx.waitUntil(caches.default.put(key, new Response(body, { headers: { "Content-Type": "application/json", "Cache-Control": "public, max-age=5" } })));
       return res;
     } catch (err) { return serverError(err); }
   }

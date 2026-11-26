@@ -1042,8 +1042,10 @@
         const mn = myName(); if (mn) { if (r.j.role) roles.set(mn, r.j.role); else roles.delete(mn); }
         if (!window._ppKit) loadKit(() => { if (r.j.me) api('/hunt/me', { tz: TZ, col: kitCol() }); }); }); };
     const parseCol = c => { const v = typeof c === 'string' ? c.split(',').map(Number) : null; return v && v.length === 3 && v.every(x => x >= 0 && x <= 255) ? v : [214, 218, 226]; };
-    const loadDots = () => fetch(API + '/hunt/dots').then(r => r.json()).then(j => { if (!j || !Array.isArray(j.b)) return; dotsOff = j.now - Date.now();
-      dotsAt = j.now; dots = j.b.map((d, i) => ({ i, from: [d[0], d[1]], to: [d[0], d[1]], b0: d[2], b1: d[3], depart: d[4], arrive: d[5], col: parseCol(d[6]) })); }).catch(() => {});
+    // (signed in, the list also has each bird's name and role, so sleeping birds show their owner's own logo bird)
+    const loadDots = () => fetch(API + '/hunt/dots', { headers: hdr() }).then(r => r.json()).then(j => { if (!j || !Array.isArray(j.b)) return; dotsOff = j.now - Date.now();
+      dotsAt = j.now; dots = j.b.map((d, i) => ({ i, from: [d[0], d[1]], to: [d[0], d[1]], b0: d[2], b1: d[3], depart: d[4], arrive: d[5], col: parseCol(d[6]), u: d[7] || null }));
+      for (const d of j.b) if (d[7]) { if (d[8]) roles.set(d[7], d[8]); else if (d[7] !== myName()) roles.delete(d[7]); } }).catch(() => {});
     // (a bird can be paused on someone else's phone at any moment: the dots are fetched every 8 s and a moving one is only
     // carried on for up to 8 s past the latest news of it, so a stopped bird's dot doesn't keep drifting away)
     loadMine(); loadDots(); setInterval(() => { if (!document.hidden) loadDots(); }, 8000); setInterval(() => { if (!document.hidden && !on) loadMine(); }, 30000);
@@ -1074,7 +1076,7 @@
     function sleepyLogo(n) {
       const adm = roles.get(n) === 'admin', key = (adm ? 'A:' : '') + n, v = sleepy.get(key);
       if (v !== undefined) return v instanceof HTMLCanvasElement ? v : null;
-      const K = window._ppKit; if (!K || !K.eye) return null; sleepy.set(key, 'wait');
+      const K = window._ppKit; if (!K || !K.eye || !kitReady) return null; sleepy.set(key, 'wait');
       (async () => {
         let src, e;
         if (adm) { const im = new Image(); im.src = '/admin-bird.png'; await im.decode(); const W = Math.max(im.width, im.height), sx = W / ADMIN_EYE.h;
@@ -1135,12 +1137,12 @@
       const mn = myName(), mp = mine && (mine.me ? flyAt(mine.me, tn) : mine.home);
       // everyone else
       for (const d of dots) { const tq = Math.min(tn, dotsAt + 8000), q = flyAt(d, tq); if (!q) continue;
-        if (isMine(d) || (mp && km(mp, q) < 0.05)) continue;   // that's you
+        if (isMine(d) || (d.u && d.u === mn) || (mp && km(mp, q) < 0.05)) continue;   // that's you
         const s = scr(q[0], q[1]); if (!onScr(s)) continue;
         if (!close) { c.beginPath(); c.arc(s.x, s.y, 2.5, 0, 7); c.fillStyle = 'rgba(0,0,0,.3)'; c.fill();
           c.beginPath(); c.arc(s.x, s.y, 1.9, 0, 7); c.fillStyle = `rgba(${d.col[0]},${d.col[1]},${d.col[2]},.72)`; c.fill(); continue; }
         const flying = tq < d.arrive, hd = headAt(d, tq), a0 = hd != null ? hd - Math.PI / 2 : -Math.PI / 2;
-        if (!flying) { drawNest(s.x, s.y, 0.8 * km2); drawSleeper(s.x, s.y, a0, d.col, 0.8 * km2, t, d.i * 0.77, true); continue; }
+        if (!flying) { drawNest(s.x, s.y, 0.8 * km2); drawSleeper(s.x, s.y, a0, d.col, 0.8 * km2, t, d.i * 0.77, true, null, d.u); continue; }
         let a = idleAng.get(d.i) ?? a0; a = ease(a, a0, dt, 'dot' + d.i); idleAng.set(d.i, a);
         drawBird(s.x, s.y, a, '', 0.8 * km2, 0.92, 0, pose('dot' + d.i, true, bankAt(d, tq), dt), d.col); }
       // you
@@ -1168,9 +1170,16 @@
     // their name in their tag colour (admins white, mods purple, like everywhere else on the site). Drawn once into a
     // small image (redrawn when the tag bird arrives) and moved as a picture, so it glides with the map.
     const names = new Map(), faceWait = new Set();
+    // (the bird kit must have finished starting up before it's asked for a bird: the admin bird asked for too early came
+    // out blank and stayed blank, which is why borbie's pill had an empty space)
+    let kitReady = false; const kitWatch = setInterval(() => { const K = window._ppKit; if (K && K.ready) { clearInterval(kitWatch); Promise.resolve(K.ready).then(() => { kitReady = true; names.clear(); }).catch(() => {}); } }, 200);
     const clanOf = n => { let h = 0; for (let i = 0; i < n.length; i++) h = n.charCodeAt(i) + ((h << 5) - h); return ['🐤', '🐦', '🐧'][Math.abs(h) % 3]; };
     const tagColOf = n => { const r = roles.get(n); if (r === 'admin') return '#ffffff'; if (r === 'mod') return '#c084fc'; try { return window._ppKit ? window._ppKit.tagCol(n) : '#dbe4ee'; } catch (e) { return '#dbe4ee'; } };
-    function tagFace(n) { const K = window._ppKit; if (!K) return null; const adm = roles.get(n) === 'admin', nm = adm ? 'admin' : n, em = adm ? 'A' : clanOf(n);
+    const adminFace = { g: 0, _im: null };
+    function tagFace(n) {
+      if (roles.get(n) === 'admin') { if (!adminFace._im) { adminFace._im = new Image(); adminFace._im.onload = () => names.clear(); adminFace._im.src = '/admin-bird.png'; }
+        return adminFace._im.complete && adminFace._im.naturalWidth ? adminFace : null; }   // admins: the admin bird picture itself
+      const K = window._ppKit; if (!K || !kitReady) return null; const adm = false, nm = n, em = clanOf(n);
       const r = K.get(nm, em, 't'); if (r && !r.fail && r.t) { if (!r._im) { r._im = new Image(); r._im.onload = () => names.delete(n); r._im.src = r.t; } return r._im.complete && r._im.naturalWidth ? r : null; }
       if (!r && !faceWait.has(nm)) { faceWait.add(nm); K.sub(nm, em, () => names.delete(n), 't'); } return null; }
     function nameImg(n) { let im = names.get(n); if (im && im._col === tagColOf(n)) return im;
@@ -1180,7 +1189,8 @@
       const g = im.getContext('2d'); g.scale(k, k); const x0 = 1, y0 = 1, ph = 16, r = 8;
       g.beginPath(); g.moveTo(x0 + r, y0); g.arcTo(x0 + pw, y0, x0 + pw, y0 + ph, r); g.arcTo(x0 + pw, y0 + ph, x0, y0 + ph, r); g.arcTo(x0, y0 + ph, x0, y0, r); g.arcTo(x0, y0, x0 + pw, y0, r); g.closePath();
       g.fillStyle = 'rgba(22,25,32,.88)'; g.fill();
-      if (face) { const z = 12, w2 = z * (1 + 2 * (face.g || 0)); g.drawImage(face._im, x0 + 5 - (w2 - z) / 2, y0 + 2 - (w2 - z) / 2, w2, w2); }
+      if (face) { const z = 12, w2 = z * (1 + 2 * (face.g || 0)), iw = face._im.naturalWidth, ih = face._im.naturalHeight, sc2 = w2 / Math.max(iw, ih);
+        g.drawImage(face._im, x0 + 5 - (w2 - z) / 2 + (w2 - iw * sc2) / 2, y0 + 2 - (w2 - z) / 2 + (w2 - ih * sc2) / 2, iw * sc2, ih * sc2); }
       g.font = f; g.fillStyle = tc; g.textBaseline = 'middle'; g.fillText(n, x0 + (face ? 5 + fw + 3 : 6), y0 + ph / 2 + 0.5);
       names.set(n, im); return im; }
     // in the game: other players within 100 km who are off the screen get an arrow at the edge with how far away they are
@@ -1241,7 +1251,7 @@
       // until the game's first answer arrives (with names), the nests the globe already knew about stay on the screen
       if (!birdsIn) { const tq = Math.min(Date.now() + dotsOff, dotsAt + 8000);
         for (const d of dots) { if (tq < d.arrive || isMine(d)) continue; const q = flyAt(d, tq); if (!q || (p && km(p, q) < 0.05) || !front(q[0], q[1])) continue;
-          const s = sc(q[0], q[1]); if (!inView(s)) continue; const hd = headAt(d, tq); drawNest(s.x, s.y, 0.8); drawSleeper(s.x, s.y, hd != null ? hd - Math.PI / 2 : 0, d.col, 0.8, t, d.i * 0.77, true); } }
+          const s = sc(q[0], q[1]); if (!inView(s)) continue; const hd = headAt(d, tq); drawNest(s.x, s.y, 0.8); drawSleeper(s.x, s.y, hd != null ? hd - Math.PI / 2 : 0, d.col, 0.8, t, d.i * 0.77, true, null, d.u); } }
       // effects: catches (your bird dives, the worm is pulled up, +1 / +5 rises) and worms another bird took
       let swoop = 0;
       fx = fx.filter(f => { const age = (performance.now() - f.t0) / 1000, s = sc(f.lat, f.lng); if (!s) return age < 1.4;
