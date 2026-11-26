@@ -1014,7 +1014,7 @@
       const so = (8 - 7 * sw) * s * (1 + 0.12 * (ps.lift || 0));   // the shadow bobs a little with each beat
       c.save(); c.translate(x + so * 0.4, y + so); c.rotate(a); c.scale(k, k); c.fillStyle = 'rgba(0,0,0,.22)'; shape(); c.fill(); c.restore();
       c.save(); c.translate(x, y); c.rotate(a); c.scale(k, k);
-      shape(); c.fillStyle = cl; c.fill();
+      shape(); c.fillStyle = cl; c.fill(); c.lineJoin = 'round'; c.lineWidth = 1.15 / k; c.strokeStyle = 'rgba(8,10,14,.6)'; c.stroke();   // a thin dark outline, so the bird stands out on busy maps
       // the lowered wing is a little in shadow
       if (ab > 0.05) { c.save(); c.beginPath(); c.rect(-30, bk > 0 ? roll + 5 : -45, 42, 40 + roll * 0); c.clip(); shape(); c.fillStyle = `rgba(0,0,0,${0.12 * ab})`; c.fill(); c.restore(); }
       c.beginPath(); c.moveTo(12, -1.8 + roll); c.lineTo(17, roll); c.lineTo(12, 1.8 + roll); c.closePath(); c.fillStyle = dk; c.fill();   // beak
