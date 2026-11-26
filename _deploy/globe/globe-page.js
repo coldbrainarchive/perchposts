@@ -551,8 +551,7 @@
     // the closest levels (13+, Take flight height) use the sharp Esri imagery when the server has it switched on
     tileSrc = (x, y, l) => hdOn && l >= HD_FROM ? `${API}/globe-hd/${l}/${y}/${x}.jpg` : `${API}/globe-tile/${l}/${y}/${x}.jpg`;
     const TILE = (x, y, l) => { pend++; busy(); return tileSrc(x, y, l); };
-    fetch(API + '/globe-hd/status').then(r => r.json()).then(j => { if (!j || !j.on) return; hdOn = true; world.globeTileEngineMaxLevel(Math.min(HD_MAX, j.maxLevel || HD_MAX));
-      if (te) tuneHd(te); }).catch(() => {});
+    // Esri close-up imagery switched off 2026-11-26 (too much data off Wi-Fi): EOX tiles only.
     try { new PerformanceObserver(list => { for (const e of list.getEntries()) if (e.name.includes('/globe-tile/')) pend = Math.max(0, pend - 1); busy(); }).observe({ type: 'resource', buffered: false }); } catch (e) {}
     // the library hides the whole-Earth image as soon as tiles switch on, which flashed black until they arrived:
     // keep it always showing underneath (a hair smaller, so tiles sit cleanly on top) — same imagery, so no seam
