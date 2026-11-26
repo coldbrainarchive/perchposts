@@ -968,7 +968,7 @@
       const c = world.controls(); c.autoRotate = false; c.enableRotate = false; c.enableZoom = false; c.enableDamping = false;   // no leftover drift from a swipe or pinch
       const v = world.pointOfView();
       $('huntN').textContent = balance == null ? '–' : balance; hintUntil = Date.now() + 4000;
-      ghLog.innerHTML = ''; ghTown = ''; met = new Set(); ghNext = 0; ghEvent('Tap', 'anywhere to fly that way', '#c084fc');
+      ghLog.innerHTML = ''; ghTown = ''; met = new Set(); ghNext = 0;
       // (your bird's spot is already known from the globe, so the dive down to it starts at once, not after the server answers)
       if (mine && mine.me) { me = { ...mine.me }; zoomIn = { la: v.lat, lo: v.lng, a: v.altitude, t0: performance.now() }; }
       poll(true, [v.lat, v.lng]); loop();
@@ -1044,9 +1044,12 @@
       if (d.n > 1 || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 10 || Date.now() - d.t > 400 || !me) return;
       // tap anywhere: the bird turns and flies that way (and keeps going)
       const r = can.getBoundingClientRect(), g = groundAt(e.clientX - r.left, e.clientY - r.top, r); if (!g) return;
-      // a tap on your own bird lands it right where it is (wings folded, standing on the ground); tap anywhere else to
-      // take off that way
-      const p = posAt(me, srv()), bs = sc(p[0], p[1]); if (bs && Math.hypot(e.clientX - r.left - bs.x, e.clientY - r.top - bs.y) < 26) { if (!landed) landNow(); return; }
+      // a tap on your own bird lands it right where it is (wings folded, standing on the ground); tap it again to take off
+      // the way it's facing, or tap anywhere else to take off that way
+      const p = posAt(me, srv()), bs = sc(p[0], p[1]);
+      if (bs && Math.hypot(e.clientX - r.left - bs.x, e.clientY - r.top - bs.y) < 26) {
+        if (!landed) landNow(); else { landed = false; const h = headAt(me, srv()); flyDir(h != null ? h : (me.b1 ?? 0)); }
+        return; }
       landed = false;
       flyDir(bearing(p, [g.lat, g.lng])); target = { lat: g.lat, lng: g.lng, t0: performance.now() };
     });
