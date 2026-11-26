@@ -2611,7 +2611,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
             await env.DB.prepare(`UPDATE hunt_birds SET wet_note_at = ? WHERE username = ?`).bind(now, username).run();
             await env.DB.prepare(`INSERT INTO system_notifications (id, user_id, message) VALUES (?, ?, ?)`).bind(crypto.randomUUID(), username,
               JSON.stringify({ text: `Your bird is still in the water, treading water. It has about ${mins} min of stamina left. Fly it to land in Take flight, or it drowns and washes up at home with no worms.`, icon: "GLOBE" })).run(); } }
-        huntHub(env, ctx, { t: "b", u: username, la: p[0], lo: p[1], b0: h, b1: h, dep: now, arr: now, seen: body.leaving ? now - 60000 : now, wet: wet || 0 });
+        huntHub(env, ctx, { t: "b", u: username, la: p[0], lo: p[1], b0: h, b1: h, dep: at, arr: at, seen: body.leaving ? now - 60000 : now, wet: wet || 0 });   // (stamped with the tap time, like turns, so the order check holds)
         return json({ now, me: { from: p, to: p, b0: h, b1: h, depart: now, arrive: now }, st: stats(), ...(wet ? { wet } : {}) });
       }
       if (url.pathname === "/hunt/fly") {
@@ -4504,6 +4504,7 @@ export class HuntHub {
     }
     if (m.t === "pos") { att.game = !!m.game; att.la = Number.isFinite(+m.la) ? +m.la : null; att.lo = Number.isFinite(+m.lo) ? +m.lo : null; ws.serializeAttachment(att); return; }
     if (m.t === "ping") ws.send(JSON.stringify({ t: "pong", now: Date.now() }));
+    if (m.t === "resync") ws.send(await this.snap(!!att.u));   // the page asks now and then, so anything it missed heals itself
   }
   webSocketClose(ws, code) { try { ws.close(code, "bye"); } catch (e) {} }
   webSocketError() {}
@@ -4514,7 +4515,12 @@ export class HuntHub {
     if (ev.t === "b" && ev.u) {   // a bird changed: merge it in and send it on
       const cur = this.birds.get(ev.u) || { u: ev.u, la: 0, lo: 0, b0: null, b1: null, dep: now, arr: now, col: null, r: null, wet: 0, seen: 0 };
       if (ev.seenOnly) { const was = cur.seen; cur.seen = ev.seen; this.birds.set(ev.u, cur); if (now - was < 20000) return; }   // "still playing": only told every 20 s
-      else { for (const k of ["la", "lo", "b0", "b1", "dep", "arr", "col", "r", "wet", "seen"]) if (k in ev) cur[k] = ev[k]; this.birds.set(ev.u, cur); }
+      else {
+        // changes can reach the hub out of order (each is sent on its own): a flight that starts before the one we already
+        // have is old news, so its path is ignored (otherwise the bird would show on its old, finished path - "landed")
+        const stale = "dep" in ev && cur.dep && ev.dep < cur.dep;
+        for (const k of ["la", "lo", "b0", "b1", "dep", "arr", "col", "r", "wet", "seen"]) if (k in ev && !(stale && ["la", "lo", "b0", "b1", "dep", "arr", "seen"].includes(k))) cur[k] = ev[k];
+        this.birds.set(ev.u, cur); if (stale) return; }
       const named = JSON.stringify({ t: "b", now, b: await this.out(cur, true) }), anon = JSON.stringify({ t: "b", now, b: await this.out(cur, false) });
       for (const ws of socks) { try { ws.send((ws.deserializeAttachment() || {}).u ? named : anon); } catch (e) {} }
       return;

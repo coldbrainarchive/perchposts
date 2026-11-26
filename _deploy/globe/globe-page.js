@@ -1329,6 +1329,7 @@
     }
     // timestamps age (playing = seen in the last 45 s, water clocks run out): refresh now and then
     setInterval(() => { if (HUB.on) { hubDots(); if (on) hubBirds(); } }, 3000);
+    setInterval(() => { const w = HUB.ws; if (w && w.readyState === 1 && !document.hidden) try { w.send(JSON.stringify({ t: 'resync' })); } catch (e) {} }, 30000);   // a fresh full picture every 30 s (from the hub's memory), in case anything was missed
     hubConnect();
     loadMine(); loadDots(); setInterval(() => { if (!document.hidden && !HUB.on) loadDots(); }, 8000); setInterval(() => { if (!document.hidden && !on) loadMine(); }, 30000);
     // a stopped bird sleeps in a little woven nest: twigs all round the rim and down into the bowl, with the rim's shadow
