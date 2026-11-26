@@ -2463,10 +2463,11 @@ async function handleRequest(request, env, ctx, corsHeaders) {
           }
         }
         await env.DB.prepare(`UPDATE hunt_birds SET seen_at = ?, spawn_at = ? WHERE username = ?`).bind(now, now, username).run();
-        const { results: birds = [] } = await env.DB.prepare(`SELECT * FROM hunt_birds WHERE seen_at > ? AND username != ?`).bind(now - 45000, username).all();
+        const { results: birds = [] } = await env.DB.prepare(`SELECT h.*, (SELECT m.role FROM mod_users m WHERE LOWER(m.username) = LOWER(h.username) AND m.deleted_at IS NULL LIMIT 1) AS role FROM hunt_birds h WHERE h.seen_at > ? AND h.username != ?`).bind(now - 45000, username).all();
         if (Math.random() < 0.02) ctx.waitUntil(env.DB.prepare(`DELETE FROM hunt_worms WHERE gone_at < ?`).bind(now - 3600e3).run().catch(() => {}));
         return json({ now, me: flight(me), balance: await wormBalance(username),
-          birds: birds.filter(b => km(p, posAt(b, now)) < 50).slice(0, 30).map(b => ({ u: b.username, ...flight(b) })),
+          birds: birds.filter(b => km(p, posAt(b, now)) < 50).slice(0, 30).map(b => ({ u: b.username, ...(b.role === 'admin' || b.role === 'mod' ? { r: b.role } : {}), ...flight(b) })),
+          role: await accountRole(username),
           worms: live.filter(w => km(p, [w.lat, w.lng]) < NEAR).map(w => ({ id: w.id, lat: w.lat, lng: w.lng, v: w.value, born: w.born_at, gone: w.gone_at })), spawned });
       }
       if (!me) return json({ error: "Start the hunt first" }, 400);

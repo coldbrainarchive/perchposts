@@ -231,7 +231,7 @@
   function loadKit(cb) {
     if (window._ppKit) return;
     if (kitCbs) { kitCbs.push(cb); return; }
-    kitCbs = [cb]; const s = document.createElement('script'); s.src = '/globe/birdkit.js?v=1377';
+    kitCbs = [cb]; const s = document.createElement('script'); s.src = '/globe/birdkit.js?v=1401';
     s.onload = () => { const l = kitCbs; kitCbs = []; l.forEach(f => f()); }; document.head.appendChild(s);
   }
   const admins = (() => { try { return new Set(JSON.parse(localStorage.getItem('_au') || '[]')); } catch (e) { return new Set(); } })();
@@ -873,8 +873,14 @@
       if (on && a > EXIT_ALT) leave(); };
     world.controls().addEventListener('change', pillCheck); setInterval(pillCheck, 500);
 
-    const col = name => { try { return window._ppKit ? window._ppKit.tagCol(name) : 'hsl(275, 72%, 68%)'; } catch (e) { return 'hsl(275, 72%, 68%)'; } };
-    const shade = c => c.replace(/hsl\((\d+),\s*\d+%,\s*\d+%\)/, 'hsl($1, 48%, 42%)');
+    // a bird's colour in the game: admins white, mods the site purple, everyone else their bird's own body colour
+    // (from the same recipe as their logo bird). The beak is a darker shade of it.
+    const roles = new Map(), cols = new Map();
+    const col = name => { const r = roles.get(name); if (r === 'admin') return [244, 244, 245]; if (r === 'mod') return [192, 132, 252];
+      let v = cols.get(name); if (v) return v;
+      try { if (window._ppKit && window._ppKit.bodyCol) { v = window._ppKit.bodyCol(name); cols.set(name, v); return v; } } catch (e) {}
+      return [94, 234, 212]; };
+    const css = c => `rgb(${c[0]},${c[1]},${c[2]})`, shade = c => c[0] + c[1] + c[2] > 600 ? [150, 150, 158] : c.map(x => Math.round(x * 0.55));
 
     function enter() {
       if (on) return; on = true; loadKit(() => {});
@@ -901,7 +907,8 @@
         const t1 = Date.now(); clockSample(r.j.now - (t0 + t1) / 2, t1 - t0);
         if (sent > flySent && !flyWait && r.j.me && (!me || r.j.me.depart >= me.depart - 50)) setMe(r.j.me);   // a flight you just set wins over an older answer
         if (r.j.balance != null) setBal(r.j.balance);
-        birds = r.j.birds || [];
+        birds = r.j.birds || []; for (const b of birds) { if (b.r) roles.set(b.u, b.r); else roles.delete(b.u); }
+        { const mn = myName(); if (mn) { if (r.j.role) roles.set(mn, r.j.role); else roles.delete(mn); } }
         const now = srv(), ids = new Set((r.j.worms || []).map(w => w.id));
         // a worm that vanished early went to another bird: a little puff where it was
         for (const [id, w] of worms) if (!ids.has(id) && w.gone > now + 800 && !w.mine && w.at) fx.push({ k: 'poof', lat: w.at[0], lng: w.at[1], t0: performance.now(), gold: w.v > 1 });
@@ -954,7 +961,7 @@
     const sc = (la, lo) => world.getScreenCoords(la, lo, 0);
     // a simple bird seen from above in the bird's colour; the beak points where it's going
     function drawBird(x, y, a, name, s, alpha, swoop, ps) {
-      const c = cx, cl = col(name), dk = shade(cl), sw = swoop || 0, k = s * 0.8 * (1 - 0.2 * sw), bk = ps.bk, ab = Math.abs(bk), span = ps.span;
+      const c = cx, c0 = col(name), cl = css(c0), dk = css(shade(c0)), sw = swoop || 0, k = s * 0.8 * (1 - 0.2 * sw), bk = ps.bk, ab = Math.abs(bk), span = ps.span;
       // in a turn it glides with its wings out; seen from above, the wing it leans toward looks shorter
       const qL = span * (bk < 0 ? 1 - 0.4 * ab : 1 - 0.05 * ab), qR = span * (bk > 0 ? 1 - 0.4 * ab : 1 - 0.05 * ab), roll = bk * 2;
       const shape = () => { c.beginPath();
