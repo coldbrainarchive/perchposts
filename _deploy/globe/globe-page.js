@@ -1070,12 +1070,12 @@
     const wetHere = () => { const q = me && posAt(me, srv()); if (q && !drowning && isWater(q[0], q[1]) === true && !(Date.now() < noWater)) wet = true; };
     const pauseNow = keep => (wetHere(), fetch(API + '/hunt/pause', { method: 'POST', keepalive: !!keep, headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ col: kitCol(), leaving: 1, wet: wet && !drowning, en: enKm / EN_MAX, t: srv() }) })
       .then(r => r.json()).then(j => { if (j && j.me) { myDeps.add(j.me.depart); mine = { me: j.me, home: null, wet: j.wet || 0 }; if (on && document.hidden) me = j.me; } }).catch(() => {}));
-    function leave() {
+    function leave(keep) {
       if (!on) return; on = false; if (ghOpen) openPanel(ghOpen); document.body.classList.remove('hunting'); bar.classList.remove('in'); world.controls().enableRotate = true; world.controls().enableZoom = true; world.controls().enableDamping = true; try { paint(); } catch (e) {}
       cancelAnimationFrame(raf); clearTimeout(pollT); cx.clearRect(0, 0, cv.width, cv.height); target = null; fx = [];
       wetHere(); if (me) mine = { me: { ...me, from: posAt(me, srv()), to: posAt(me, srv()), b0: headAt(me, srv()) ?? me.b1, b1: headAt(me, srv()) ?? me.b1, depart: srv(), arrive: srv() }, home: null,
         wet: wet && !drowning ? Date.now() + dotsOff + enKm / SWIM : 0 };   // in the water: drowning on the globe straight away (the server's answer confirms it a moment later)
-      pauseNow(); enSave(); idleRaf = requestAnimationFrame(idle);
+      pauseNow(keep); enSave(); idleRaf = requestAnimationFrame(idle);
     }
     function landNow(quiet) {
       const t = srv(), p = posAt(me, t), h = headAt(me, t) ?? me.b1 ?? 0; landed = true;
@@ -1084,11 +1084,12 @@
         .then(j => { flyWait = Math.max(0, flyWait - 1); if (j && j.me && on && landed) { setMe(j.me); if (j.st) { gSt = j.st; gStAt = j.now; } } }).catch(() => { flyWait = Math.max(0, flyWait - 1); });
       if (!quiet) ghEvent('Landed', ghTown || 'here', '#fcd34d');
     }
-    addEventListener('pagehide', () => { try { if (on) pauseNow(true); } catch (e) {} });
+    // the screen locks, you switch apps or close the page: you leave the game like tapping the × (your bird goes to
+    // sleep in its nest, or is left in the water); when you come back you're on the globe with it
+    addEventListener('pagehide', () => { try { if (on) leave(true); } catch (e) {} });
     document.addEventListener('visibilitychange', () => {
-      if (!on) { if (!document.hidden) { loadMine(); loadDots(); } return; }
-      if (document.hidden) pauseNow(true);
-      else if (me && !landed) { const h = headAt(me, srv()); flyDir(h != null ? h : (me.b1 ?? 0)); }
+      if (document.hidden) { try { if (on) leave(true); } catch (e) {} return; }
+      if (!on) { loadMine(); loadDots(); }
     });
     async function poll(start, at) {
       clearTimeout(pollT); if (!on) return;
