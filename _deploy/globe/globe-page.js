@@ -802,7 +802,7 @@
     const corrNow = () => { if (!corr) return [0, 0]; const k = 1 - (performance.now() - corr.t0) / 350; if (k <= 0) { corr = null; return [0, 0]; } const e = k * k * (3 - 2 * k); return [corr.la * e, corr.lo * e]; };
     // how far the bird is leaning into a turn (−1 left … 1 right): it tips in as the turn starts and levels out after
     const bankAt = (f, t) => { if (!f || f.b0 == null || f.b1 == null) return 0; fTurn(f); const u = (t - f.depart) / 1000, T = f._T;
-      return T < 0.05 || u < 0 || u > T ? 0 : f._s * Math.min(1, T * TURN / 0.9); };
+      return T < 0.05 || u < 0 || u > T ? 0 : f._s * Math.min(1, T * TURN / (Math.PI / 2)); };   // 1 = a turn of 90° or more
     // each bird's wings, made to look like a real bird: nothing switches on or off. The flapping has a strength (1 = full
     // beats, 0 = gliding) that eases up and down, so on a turn the beats fade out and slow while the wings float out
     // to a glide, and the lean grows as the flapping fades (a spring, so it tips in and levels out softly). Flying
@@ -810,16 +810,19 @@
     const poses = new Map();
     function pose(id, moving, want, dt) {
       let P = poses.get(id); if (!P) { P = { ph: Math.random() * 6.283, A: 1, bk: 0, bv: 0, beats: 0, nb: 4 + Math.random() * 4, glide: 0 }; poses.set(id, P); }
-      const turning = Math.abs(want) > 0.02;
+      // how big the turn is decides how much it glides: small corrections (under ~25°) keep flapping, just a touch
+      // softer, with a slight tilt; from there the glide blends in, and turns of 90° or more glide all the way round
+      const turning = Math.abs(want) > 0.02, size = Math.abs(want), u0 = Math.max(0, Math.min(1, (size - 0.28) / 0.72)), g = turning ? u0 * u0 * (3 - 2 * u0) : 0;
       if (P.glide > 0) P.glide -= dt;
-      const tA = turning || P.glide > 0 ? 0 : 1;
+      const tA = P.glide > 0 ? 0 : turning ? Math.min(1 - 0.15 * Math.min(1, size / 0.28), 1 - g) : 1;
       P.A += (tA - P.A) * (1 - Math.exp(-dt / (tA < P.A ? 0.11 : 0.2)));
       const before = P.ph; P.ph += dt * (moving ? 13 : 4) * (0.45 + 0.55 * P.A);
       if (Math.floor(before / 6.2832) !== Math.floor(P.ph / 6.2832)) { P.beats++;
         if (moving && !turning && P.beats >= P.nb) { P.beats = 0; P.nb = 4 + Math.random() * 4; P.glide = 0.45 + Math.random() * 0.5; } }
       if (turning) P.beats = 0;
-      // the lean follows a soft spring toward (turn amount x how far the flapping has faded)
-      const tb = turning ? want * (1 - P.A) : 0, w = 10;
+      // the lean follows a soft spring: a slight tilt straight away for any turn, and for gliding turns more lean
+      // as the flapping fades
+      const tb = turning ? Math.sign(want) * (0.3 * Math.min(1, size / 0.28) + 0.7 * g * Math.max(0, Math.min(1, (1 - P.A) / Math.max(g, 0.01)))) : 0, w = 10;
       for (let left = dt; left > 1e-4; left -= 0.01) { const h = Math.min(0.01, left); P.bv += ((tb - P.bk) * w * w - 2 * w * P.bv) * h; P.bk += P.bv * h; }
       const f = 0.5 + 0.5 * Math.sin(P.ph), flapSpan = moving ? 0.55 + 0.45 * f : 0.9 + 0.1 * f;
       return { span: 0.97 + (flapSpan - 0.97) * P.A, bk: Math.max(-1, Math.min(1, P.bk)), lift: P.A * (f - 0.5) };
