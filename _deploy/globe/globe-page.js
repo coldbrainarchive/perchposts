@@ -918,9 +918,38 @@
     // worms left it lands and can't take off until it has a worm (or has rested). The bar itself is kept on this
     // device for now; the worm it eats is spent on the server (/hunt/eat). Starving comes later. ──
     const EN_MAX = 150, EN_REST = EN_MAX / 4 / 864e5;   // km of flying when full; km per ms of rest (a quarter of the bar a day)
+    // ── water (2026-11-26): landing on water means treading water: the bird can't move and it uses stamina at 3/4 of
+    // the flying rate, even while you're away. Run out in the water (or over it) and the bird drowns and comes back
+    // at its home spot. Land vs water comes from /globe/water/: the world in 5° squares at 0.01° (~1 km), made from
+    // Natural Earth's land, minor islands and lakes; index.json says which squares are all land (L), all water (W)
+    // or mixed (M, a 1-bit picture: white = land). Only the squares around your bird are fetched. ──
+    const SWIM = 0.75 * SPEED / 1000;   // km of stamina per ms while treading water
+    const WATER = { idx: null, busy: false, tiles: new Map() };
+    function isWater(lat, lng) {   // true / false, or null while that bit of the map is still loading
+      if (!WATER.idx) { if (!WATER.busy) { WATER.busy = true; fetch('/globe/water/index.json').then(r => r.json()).then(j => { WATER.idx = j; }).catch(() => {}).finally(() => { WATER.busy = false; }); } return null; }
+      const x0 = (((lng + 180) % 360) + 360) % 360, y0 = Math.min(179.999, Math.max(0, 90 - lat)), ty = Math.floor(y0 / 5), tx = Math.min(71, Math.floor(x0 / 5)), kind = WATER.idx.m[ty * 72 + tx];
+      if (kind === 'W') return true; if (kind === 'L') return false;
+      const key = ty + '_' + tx; let t = WATER.tiles.get(key);
+      if (!t) { WATER.tiles.set(key, 'wait'); const im = new Image(); im.onload = () => { const c = document.createElement('canvas'); c.width = c.height = 500; const x = c.getContext('2d'); x.drawImage(im, 0, 0);
+          const d = x.getImageData(0, 0, 500, 500).data, a = new Uint8Array(250000); for (let i = 0; i < 250000; i++) a[i] = d[i * 4] > 127 ? 1 : 0; WATER.tiles.set(key, a); };
+        im.onerror = () => WATER.tiles.delete(key); im.src = '/globe/water/' + key + '.png'; return null; }
+      if (t === 'wait') return null;
+      const cx2 = Math.min(499, Math.floor((x0 - tx * 5) * 100)), cy2 = Math.min(499, Math.floor((y0 - ty * 5) * 100));
+      return !t[cy2 * 500 + cx2];
+    }
+    let wet = false, drowning = null, noWater = 0;
     let enKm = EN_MAX, enAt = Date.now(), enTired = false, eating = false;
-    try { const o = JSON.parse(localStorage.getItem('pp_energy') || 'null'); if (o && isFinite(o.km)) { enKm = Math.min(EN_MAX, o.km + Math.max(0, Date.now() - o.at) * EN_REST); } } catch (e) {}
-    const enSave = () => { try { localStorage.setItem('pp_energy', JSON.stringify({ km: enKm, at: Date.now() })); } catch (e) {} };
+    try { const o = JSON.parse(localStorage.getItem('pp_energy') || 'null'); if (o && isFinite(o.km)) { wet = !!o.wet; const away = Math.max(0, Date.now() - o.at); enKm = Math.max(0, Math.min(EN_MAX, o.km + (wet ? -away * SWIM : away * EN_REST))); } } catch (e) {}
+    const enSave = () => { try { localStorage.setItem('pp_energy', JSON.stringify({ km: enKm, at: Date.now(), wet })); } catch (e) {} };
+    // the bird drowns: it sinks (ripples, fading), then the server puts it back at its home spot
+    function drown() {
+      if (drowning) return; drowning = { t0: performance.now() }; peck = null;
+      ghEvent('Drowned', 'out of stamina in the water · back home', '#60a5fa');
+      setTimeout(() => { api('/hunt/drown').then(r => { const ok = r.s === 200 && r.j.me;
+        if (ok) { setMe(r.j.me); if (r.j.st) { gSt = r.j.st; gStAt = r.j.now; } wet = false; landed = true; enSave(); ghEvent('Home', 'your bird made it back to its nest', '#fcd34d'); }
+        else { wet = false; noWater = Date.now() + 120000; }   // the server's coarser map says land here (a small lake): count it as land
+        drowning = null; }); }, 1700);
+    }
     const enAdd = km => { enKm = Math.max(0, Math.min(EN_MAX, enKm + km)); };
     // dinner from the server (/hunt/me or /hunt/state): a full bar, told in the log (now, or as soon as you're playing)
     let mealNote = null;
@@ -973,9 +1002,12 @@
         $('ghArrow').style.transform = `rotate(${bearing(p, gSt.home) * 180 / Math.PI}deg)`; $('ghArrow').style.visibility = d < 0.1 ? 'hidden' : ''; }
       // energy: flying drains it, standing still refills it slowly
       { const t = Date.now(), dms = Math.max(0, t - enAt); enAt = t;
-        const flying = me && now < me.arrive && me.b1 != null && !landed;
-        if (flying) enAdd(-SPEED * Math.min(5000, dms) / 1000); else enAdd(dms * EN_REST);   // (rest counts all the time you were away)
-        if (flying && enKm <= 0 && !enTired) eatStop();   // lands, eats, flies on (or just lands if there's no worm)
+        const flying = me && now < me.arrive && me.b1 != null && !landed, w = p ? isWater(p[0], p[1]) : null;   // (also fetches the map around you)
+        if (!flying && w != null && w !== wet && !(w && Date.now() < noWater)) { wet = w; if (wet && enKm > 0 && !drowning) ghEvent('Treading water', 'uses stamina · tap to fly', '#60a5fa'); enSave(); }
+        if (flying) { if (wet) { wet = false; } enAdd(-SPEED * Math.min(5000, dms) / 1000); }
+        else if (wet) enAdd(-SWIM * Math.min(5000, dms)); else enAdd(dms * EN_REST);   // (rest counts all the time you were away)
+        if (flying && enKm <= 0 && !enTired) { if (w === true) { landNow(true); wet = true; drown(); } else eatStop(); }   // over water: falls in; over land: lands, eats, flies on
+        else if (!flying && wet && enKm <= 0) drown();
         if (enKm > 3) enTired = false;
         const pc = enKm / EN_MAX, el = $('ghEn'); el.style.width = (pc * 100).toFixed(1) + '%';
         el.style.background = pc > .5 ? '#4ade80' : pc > .2 ? '#facc15' : '#f87171'; $('ghEnT').textContent = Math.ceil(pc * 100) + '%';
@@ -1023,7 +1055,7 @@
       const c = world.controls(); c.autoRotate = false; c.enableRotate = false; c.enableZoom = false; c.enableDamping = false;   // no leftover drift from a swipe or pinch
       const v = world.pointOfView();
       $('huntN').textContent = balance == null ? '–' : balance; hintUntil = Date.now() + 4000;
-      ghLog.innerHTML = ''; ghTown = ''; met = new Set(); ghNext = 0; enAdd(Math.max(0, Date.now() - enAt) * EN_REST); enAt = Date.now(); if (mealNote) { const n = mealNote; mealNote = null; setTimeout(() => ghEvent(...n), 600); }   // rested while you were away
+      ghLog.innerHTML = ''; ghTown = ''; met = new Set(); ghNext = 0; { const away = Math.max(0, Date.now() - enAt); enAdd(wet ? -away * SWIM : away * EN_REST); } enAt = Date.now(); if (mealNote) { const n = mealNote; mealNote = null; setTimeout(() => ghEvent(...n), 600); }   // rested while you were away
       // (your bird's spot is already known from the globe, so the dive down to it starts at once, not after the server answers)
       if (mine && mine.me) { me = { ...mine.me }; zoomIn = { la: v.lat, lo: v.lng, a: v.altitude, t0: performance.now() }; }
       poll(true, [v.lat, v.lng]); loop();
@@ -1095,7 +1127,7 @@
     const can = world.renderer().domElement;
     can.addEventListener('pointerdown', e => { if (!on) return; down = e.isPrimary ? { x: e.clientX, y: e.clientY, t: Date.now(), n: 1 } : (down && (down.n = 2), down); });
     can.addEventListener('pointerup', e => {
-      if (!on || !down || !e.isPrimary) return; const d = down; down = null;
+      if (!on || !down || !e.isPrimary) return; const d = down; down = null; if (drowning) return;
       if (d.n > 1 || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 10 || Date.now() - d.t > 400 || !me) return;
       // tap anywhere: the bird turns and flies that way (and keeps going)
       const r = can.getBoundingClientRect(), g = groundAt(e.clientX - r.left, e.clientY - r.top, r); if (!g) return;
@@ -1492,7 +1524,16 @@
             let best = null, bd = 1e9; for (const w of worms.values()) { if (!w.at) continue; const d = km(p, w.at); if (d < bd) { bd = d; best = w; } }
             const ws = best && sc(best.at[0], best.at[1]);
             if (ws) { const want = Math.atan2(ws.y - s.y, ws.x - s.x); let d = want - ang; d = Math.atan2(Math.sin(d), Math.cos(d)); ang += d * 0.06; } }
-          if (landed && !moving && !swoop) { let dip = 0;
+          if (!moving && !swoop && (wet || drowning)) {   // treading water: ripples spreading out, bobbing and rocking, sitting low; drowning: sinks and fades
+            const u = drowning ? Math.min(1, (performance.now() - drowning.t0) / 1600) : 0, c = cx;
+            for (let i = 0; i < 3; i++) { const ph = (t * (drowning ? 1.4 : 0.55) + i / 3) % 1;
+              c.beginPath(); c.ellipse(s.x, s.y, 8 + ph * 24, (8 + ph * 24) * 0.8, 0, 0, 7); c.strokeStyle = `rgba(220,236,255,${(1 - ph) * 0.42})`; c.lineWidth = 1.3; c.stroke(); }
+            const bob = Math.sin(t * 2.4) * 0.7, rock = Math.sin(t * 1.7) * 0.07, k2 = 1.1 * (1 - 0.5 * u);
+            drawBird(s.x, s.y + bob, ang + rock, mine, k2, 1 - 0.95 * u, 1, { span: 0.32, bk: 0, lift: 0 });
+            c.save(); c.translate(s.x, s.y + bob); c.rotate(ang + rock);   // the back half under the surface
+            const g2 = c.createRadialGradient(-10 * k2, 0, 1, -10 * k2, 0, 9 * k2); g2.addColorStop(0, `rgba(30,62,92,${0.42 + 0.4 * u})`); g2.addColorStop(1, 'rgba(30,62,92,0)');
+            c.beginPath(); c.ellipse(-10 * k2, 0, 9 * k2, 6 * k2, 0, 0, 7); c.fillStyle = g2; c.fill(); c.restore(); }
+          else if (landed && !moving && !swoop) { let dip = 0;
             if (peck) { const u = Math.min(1, (performance.now() - peck.t0) / PECK_MS);   // a big peck, then a little one
               dip = u < .5 ? Math.sin(Math.PI * u / .5) : u < .85 ? .55 * Math.sin(Math.PI * (u - .5) / .35) : 0;
               if (u < .42) { const e = u < .15 ? 1 : 1 - (u - .15) / .27, wx = s.x + Math.cos(ang) * 22, wy = s.y + Math.sin(ang) * 22;   // the worm lying out in front of the beak, slurped up from the end nearest it

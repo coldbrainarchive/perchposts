@@ -2514,7 +2514,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
           let story = null;
           try { const gc = await env.DB.prepare(`SELECT v FROM globe_cache WHERE k = 'trending'`).first(); const st = gc ? (JSON.parse(gc.v).stories || []) : [];
             for (const s of st) { const o = s.origin || s; const ll = [o.lat ?? s.lat, o.lng ?? s.lng]; if (okLL(+ll[0], +ll[1]) && km(p, ll) < 4.3) { story = ll; break; } } } catch (e) {}
-          const mean = (HS ? 5000 : (night ? 90000 : 180000)) * (story ? 0.7 : 1);
+          const mean = (HS ? 5000 : (night ? 180000 : 360000)) * (story ? 0.7 : 1);   // rarer (2026-11-26): ~3 min at night, ~6 min by day
           if (Math.random() < dt / mean) {
             let base = p, r0 = 0.7, r1 = 2.8;
             if (story && Math.random() < 0.5) { base = story; r0 = 0.18; r1 = 1.25; }
@@ -2558,6 +2558,19 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         await env.DB.prepare(`UPDATE hunt_birds SET from_lat = ?, from_lng = ?, to_lat = ?, to_lng = ?, brg0 = ?, brg1 = ?, depart_at = ?, arrive_at = ?, seen_at = ?, flown = COALESCE(flown, 0) + ? WHERE username = ?`)
           .bind(p[0], p[1], p[0], p[1], f.b0, f.b1, now, f.arrive, now, segKm(me), username).run();
         return json({ now, me: { from: p, to: p, b0: f.b0, b1: f.b1, depart: now, arrive: f.arrive } });
+      }
+      if (url.pathname === "/hunt/drown") {
+        // out of stamina in the water: the bird is put back at its home spot (the page drains stamina; here we only check
+        // it really is stopped on or right by water, so this can't be used as a free trip home from anywhere)
+        const p = posAt(me, now);
+        if (now < me.arrive_at) return json({ error: "Still flying" }, 400);
+        const ring = d => [0, 1, 2, 3, 4, 5].map(i => [p[0] + d * Math.cos(i * Math.PI / 3) / 111.2, p[1] + d * Math.sin(i * Math.PI / 3) / (111.2 * Math.cos(p[0] * R))]);
+        if (isLand(p[0], p[1]) && ring(4).every(q => isLand(q[0], q[1]))) return json({ error: "Not in water" }, 400);
+        const hm = me.home_lat != null ? [me.home_lat, me.home_lng] : homeFor(), h = await clearPerch(hm, 1.1), b = me.brg1 ?? 0;
+        await env.DB.prepare(`UPDATE hunt_birds SET from_lat = ?, from_lng = ?, to_lat = ?, to_lng = ?, brg0 = ?, brg1 = ?, depart_at = ?, arrive_at = ?, flown = COALESCE(flown, 0) + ? WHERE username = ?`)
+          .bind(h[0], h[1], h[0], h[1], b, b, now, now, segKm(me), username).run();
+        me.flown = (me.flown || 0) + segKm(me); me.from_lat = me.to_lat = h[0]; me.from_lng = me.to_lng = h[1]; me.brg0 = me.brg1 = b; me.depart_at = me.arrive_at = now;
+        return json({ now, me: flight(me), st: stats() });
       }
       if (url.pathname === "/hunt/eat") {
         // your bird ran out of stamina and eats one worm from your real balance. Spent like a worm given to the game
