@@ -1129,11 +1129,24 @@
     idleRaf = requestAnimationFrame(idle);
     // a player's name under their bird: drawn once into a little image and then moved as a picture, so it glides with
     // the map (text redrawn at a slightly different fraction of a pixel every frame shimmered)
-    const names = new Map();
-    function nameImg(n) { let im = names.get(n); if (im) return im;
-      im = document.createElement('canvas'); const f = '600 9.5px -apple-system,system-ui,sans-serif', m = document.createElement('canvas').getContext('2d'); m.font = f;
-      const w = Math.ceil(m.measureText(n).width) + 10, h = 18, k = Math.min(3, Math.max(2, devicePixelRatio || 1)); im.width = w * k; im.height = h * k; im._w = w; im._h = h;
-      const g = im.getContext('2d'); g.scale(k, k); g.font = f; g.textAlign = 'center'; g.fillStyle = 'rgba(255,255,255,.75)'; g.shadowColor = 'rgba(0,0,0,.9)'; g.shadowBlur = 3; g.fillText(n, w / 2, 12.5);
+    // other players' names as the site's user pills ("N1", the user's pick): a dark pill with their little tag bird and
+    // their name in their tag colour (admins white, mods purple, like everywhere else on the site). Drawn once into a
+    // small image (redrawn when the tag bird arrives) and moved as a picture, so it glides with the map.
+    const names = new Map(), faceWait = new Set();
+    const clanOf = n => { let h = 0; for (let i = 0; i < n.length; i++) h = n.charCodeAt(i) + ((h << 5) - h); return ['🐤', '🐦', '🐧'][Math.abs(h) % 3]; };
+    const tagColOf = n => { const r = roles.get(n); if (r === 'admin') return '#ffffff'; if (r === 'mod') return '#c084fc'; try { return window._ppKit ? window._ppKit.tagCol(n) : '#dbe4ee'; } catch (e) { return '#dbe4ee'; } };
+    function tagFace(n) { const K = window._ppKit; if (!K) return null; const adm = roles.get(n) === 'admin', nm = adm ? 'admin' : n, em = adm ? 'A' : clanOf(n);
+      const r = K.get(nm, em, 't'); if (r && !r.fail && r.t) { if (!r._im) { r._im = new Image(); r._im.onload = () => names.delete(n); r._im.src = r.t; } return r._im.complete && r._im.naturalWidth ? r : null; }
+      if (!r && !faceWait.has(nm)) { faceWait.add(nm); K.sub(nm, em, () => names.delete(n), 't'); } return null; }
+    function nameImg(n) { let im = names.get(n); if (im && im._col === tagColOf(n)) return im;
+      im = document.createElement('canvas'); const f = '700 9.5px -apple-system,system-ui,sans-serif', m = document.createElement('canvas').getContext('2d'); m.font = f;
+      const face = tagFace(n), tc = tagColOf(n), tw = Math.ceil(m.measureText(n).width), fw = face ? 12 : 0, pw = tw + fw + (face ? 14 : 12), w = pw + 2, h = 18, k = Math.min(3, Math.max(2, devicePixelRatio || 1));
+      im.width = w * k; im.height = h * k; im._w = w; im._h = h; im._col = tc;
+      const g = im.getContext('2d'); g.scale(k, k); const x0 = 1, y0 = 1, ph = 16, r = 8;
+      g.beginPath(); g.moveTo(x0 + r, y0); g.arcTo(x0 + pw, y0, x0 + pw, y0 + ph, r); g.arcTo(x0 + pw, y0 + ph, x0, y0 + ph, r); g.arcTo(x0, y0 + ph, x0, y0, r); g.arcTo(x0, y0, x0 + pw, y0, r); g.closePath();
+      g.fillStyle = 'rgba(22,25,32,.88)'; g.fill();
+      if (face) { const z = 12, w2 = z * (1 + 2 * (face.g || 0)); g.drawImage(face._im, x0 + 5 - (w2 - z) / 2, y0 + 2 - (w2 - z) / 2, w2, w2); }
+      g.font = f; g.fillStyle = tc; g.textBaseline = 'middle'; g.fillText(n, x0 + (face ? 5 + fw + 3 : 6), y0 + ph / 2 + 0.5);
       names.set(n, im); return im; }
     // in the game: other players within 100 km who are off the screen get an arrow at the edge with how far away they are
     function drawBirdEdge(x, y, name, d) {
