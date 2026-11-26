@@ -1033,6 +1033,9 @@
     // stopped ones sleep curled up in a little nest. Yours sleeps in its nest where you left it (before your first
     // flight, over your home city); tap it and it wakes, flaps up out of the nest, and the game carries on from there.
     const ICON_ALT = 0.25;
+    // other birds, nests and name pills are placed on whole screen pixels: small pictures slid by fractions of a pixel get
+    // re-blurred differently every frame and seem to wiggle against the map
+    const snap = s => s && { x: Math.round(s.x * DPR) / DPR, y: Math.round(s.y * DPR) / DPR };
     let mine = null, dots = [], dotsOff = 0, dotsAt = 0, idleRaf = 0, idleLast = 0, tko = null;
     // (your own bird is in the public list too, maybe a few seconds out of date: it's recognised by its flights' start times)
     const myDeps = new Set(), isMine = d => myDeps.has(d.depart);
@@ -1108,9 +1111,9 @@
       cx.save(); if (alpha != null) cx.globalAlpha = alpha;
       const c = cx, br = 1 + 0.03 * Math.sin(t * 2.1 + seed), lg = name ? sleepyLogo(name) : null, adm = name && roles.get(name) === 'admin';
       const G = (col, x0, y0, r, hi, lo) => { const g = c.createRadialGradient(x0 - r * 0.35, y0 - r * 0.45, r * 0.1, x0, y0, r * 1.05); g.addColorStop(0, css(lift(col, hi))); g.addColorStop(0.65, css(col)); g.addColorStop(1, css(lift(col, lo))); return g; };
-      c.save(); c.translate(x, y); c.scale(-k * br, k * br);
+      c.save(); c.translate(x, y); c.scale(-k, k);
       c.beginPath(); c.moveTo(-7, -2); c.quadraticCurveTo(-11, 0, -7, 2); c.fillStyle = css(lift(cl, 0.75)); c.fill();                          // tail
-      c.beginPath(); c.arc(-2, 1, 8.5, 0, 7); c.fillStyle = G(cl, -2, 1, 8.5, 1.18, 0.82); c.fill();                                            // body
+      c.beginPath(); c.arc(-2, 1, 8.5 * br, 0, 7); c.fillStyle = G(cl, -2, 1, 8.5, 1.18, 0.82); c.fill();                                       // body (breathing)
       if (lg) { const hs = adm ? 22.5 : 19; c.save(); c.translate(adm ? 4.2 : 4.6, adm ? -5.2 : -4.4); c.scale(-1, 1); c.rotate(-0.3); c.drawImage(lg, -hs / 2, -hs / 2, hs, hs); c.restore(); }
       else { const hc = lift(cl, 1.4); c.beginPath(); c.arc(4.4, -3.6, 5.6, 0, 7); c.fillStyle = G(hc, 4.4, -3.6, 5.6, 1.12, 0.92); c.fill(); }   // head
       c.beginPath(); c.moveTo(-8.6, 2.6); c.quadraticCurveTo(-3.5, 9.2, 5, 3.8); c.quadraticCurveTo(1, 2.2, -2, 2.4); c.quadraticCurveTo(-6, 2.2, -8.6, 2.6); c.fillStyle = css(lift(cl, 0.86)); c.fill();   // wing
@@ -1138,7 +1141,7 @@
       // everyone else
       for (const d of dots) { const tq = Math.min(tn, dotsAt + 8000), q = flyAt(d, tq); if (!q) continue;
         if (isMine(d) || (d.u && d.u === mn) || (mp && km(mp, q) < 0.05)) continue;   // that's you
-        const s = scr(q[0], q[1]); if (!onScr(s)) continue;
+        const s = snap(scr(q[0], q[1])); if (!onScr(s)) continue;
         if (!close) { c.beginPath(); c.arc(s.x, s.y, 2.5, 0, 7); c.fillStyle = 'rgba(0,0,0,.3)'; c.fill();
           c.beginPath(); c.arc(s.x, s.y, 1.9, 0, 7); c.fillStyle = `rgba(${d.col[0]},${d.col[1]},${d.col[2]},.72)`; c.fill(); continue; }
         const flying = tq < d.arrive, hd = headAt(d, tq), a0 = hd != null ? hd - Math.PI / 2 : -Math.PI / 2;
@@ -1184,7 +1187,7 @@
       if (!r && !faceWait.has(nm)) { faceWait.add(nm); K.sub(nm, em, () => names.delete(n), 't'); } return null; }
     function nameImg(n) { let im = names.get(n); if (im && im._col === tagColOf(n)) return im;
       im = document.createElement('canvas'); const f = '700 9.5px -apple-system,system-ui,sans-serif', m = document.createElement('canvas').getContext('2d'); m.font = f;
-      const face = tagFace(n), tc = tagColOf(n), tw = Math.ceil(m.measureText(n).width), fw = face ? 12 : 0, pw = tw + fw + (face ? 14 : 12), w = pw + 2, h = 18, k = Math.min(3, Math.max(2, devicePixelRatio || 1));
+      const face = tagFace(n), tc = tagColOf(n), tw = Math.ceil(m.measureText(n).width), fw = face ? 12 : 0, pw = tw + fw + (face ? 14 : 12), w = pw + 2, h = 18, k = DPR;   // the same pixel density as the game's drawing layer, so the pill is copied 1:1
       im.width = w * k; im.height = h * k; im._w = w; im._h = h; im._col = tc;
       const g = im.getContext('2d'); g.scale(k, k); const x0 = 1, y0 = 1, ph = 16, r = 8;
       g.beginPath(); g.moveTo(x0 + r, y0); g.arcTo(x0 + pw, y0, x0 + pw, y0 + ph, r); g.arcTo(x0 + pw, y0 + ph, x0, y0 + ph, r); g.arcTo(x0, y0 + ph, x0, y0, r); g.arcTo(x0, y0, x0 + pw, y0, r); g.closePath();
@@ -1240,14 +1243,14 @@
         if (p && km(p, [q.lat, q.lng]) < CATCH_KM) tryCatch(w);
       }
       // other birds
-      for (const b of birds) { const q = posAt(b, now); if (!q || !front(q[0], q[1])) continue; const s = sc(q[0], q[1]); if (!s) continue;
+      for (const b of birds) { const q = posAt(b, now); if (!q || !front(q[0], q[1])) continue; const s = snap(sc(q[0], q[1])); if (!s) continue;
         if (!inView(s)) { const d = p ? km(p, q) : 0; if (d < 100 && b.a) drawBirdEdge(s.x, s.y, b.u, d); continue; }
         const moving = now < b.arrive, ahead = posAt(b, now + 600), s2 = ahead && sc(ahead[0], ahead[1]);
         if (!moving) { const hd = headAt(b, now); drawNest(s.x, s.y, 0.8); drawSleeper(s.x, s.y, 0, col(b.u), 0.8, t, b.u.length, true, null, b.u);
-          const nl = nameImg(b.u); c.drawImage(nl, s.x - nl._w / 2, s.y + 22 - nl._h / 2 - 3, nl._w, nl._h); continue; }
+          const nl = nameImg(b.u); c.drawImage(nl, Math.round((s.x - nl._w / 2) * DPR) / DPR, Math.round((s.y + 22 - nl._h / 2 - 3) * DPR) / DPR, nl._w, nl._h); continue; }
         let a = angs.get(b.u) ?? -Math.PI / 2; if (moving && s2 && Math.hypot(s2.x - s.x, s2.y - s.y) > 0.5) a = ease(a, Math.atan2(s2.y - s.y, s2.x - s.x), dt, b.u); angs.set(b.u, a);
         drawBird(s.x, s.y, a, b.u, 0.8, 0.92, 0, pose(b.u, moving, bankAt(b, now), dt));
-        const nl = nameImg(b.u); c.drawImage(nl, s.x - nl._w / 2, s.y + 26 - nl._h / 2 - 3, nl._w, nl._h); }
+        const nl = nameImg(b.u); c.drawImage(nl, Math.round((s.x - nl._w / 2) * DPR) / DPR, Math.round((s.y + 26 - nl._h / 2 - 3) * DPR) / DPR, nl._w, nl._h); }
       // until the game's first answer arrives (with names), the nests the globe already knew about stay on the screen
       if (!birdsIn) { const tq = Math.min(Date.now() + dotsOff, dotsAt + 8000);
         for (const d of dots) { if (tq < d.arrive || isMine(d)) continue; const q = flyAt(d, tq); if (!q || (p && km(p, q) < 0.05) || !front(q[0], q[1])) continue;
