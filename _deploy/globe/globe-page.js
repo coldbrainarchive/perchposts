@@ -564,7 +564,7 @@
       if (te && tilesOn) { if (a > lastA * 1.004) { te.tileUrl = null; clearTimeout(outT); outT = setTimeout(() => { if (tilesOn) { te.tileUrl = TILE; const v = world.pointOfView(); world.pointOfView({ ...v, altitude: v.altitude + 1e-5 }); } }, 250); } }
       lastA = a;
       if (!tilesOn && a < ON) { tilesOn = true; keepBase(); world.globeTileEngineUrl(TILE);
-        if (!tuned) { try { world.scene().traverse(o => { if (!tuned && o && Array.isArray(o.thresholds) && 'tileUrl' in o) { o.thresholds = o.thresholds.map((v, i) => 8 / Math.pow(2, i - 1)); tuned = true; te = o; tileEng = o; tileHooks(o); if (hdOn) tuneHd(o); } }); } catch (e) {} } }
+        if (!tuned) { try { world.scene().traverse(o => { if (!tuned && o && Array.isArray(o.thresholds) && 'tileUrl' in o) { o.thresholds = o.thresholds.map((v, i) => 8 / Math.pow(2, i - 1)); tuned = true; te = o; tileEng = o; tileHooks(o); } }); } catch (e) {} } }
       else if (tilesOn && a > OFF) { tilesOn = false; clearTimeout(outT); world.globeTileEngineUrl(null); try { world.globeTileEngineClearCache(); } catch (e) {} pend = 0; busy(); } };
     world.controls().addEventListener('change', imagery); setInterval(imagery, 500);
     try { world.onZoom(() => { imagery(); }); } catch (e) {}  // also during animated flights (double-tap, story picks)
@@ -587,7 +587,8 @@
   // Sharp close-up imagery (Esri) for the closest levels: at Take flight height (~10 km up) it loads level 15 (~3 m a
   // pixel, about one map pixel per screen pixel on a phone), so houses and roads show. The engine uses the first level
   // whose threshold is at or below the altitude, so: level 13 from the Take flight pill down, 15 in the game, never 16.
-  const HD_FROM = 13, HD_MAX = 15; let hdOn = false, tileEng = null, tileSrc = null;
+  // Test (2026-11-26): /globe/#esri uses Esri for the close levels 13-14 (same tile count as EOX), for that visit only.
+  const HD_FROM = 13, HD_MAX = 15; let hdOn = /esri/.test(location.hash), tileEng = null, tileSrc = null;
   function tuneHd(o) { const t = o.thresholds.slice(); while (t.length < 16) t.push(8 / Math.pow(2, t.length - 1));
     t[14] = 0.0018; t[15] = 0.0015; o.thresholds = t.slice(0, 16); }
   // Smoother map tiles (2026-11-25):
