@@ -493,7 +493,7 @@
       .globeImageUrl('/globe/earth-s2-4k.jpg')
       .onGlobeReady(() => { const l = $('glLoad'); l && l.classList.add('gone'); setTimeout(() => l && l.remove(), 400); hiRes();
         // the birds on the globe fade in once it's there (before, their dots showed through the half-loaded globe)
-        setTimeout(() => document.body.classList.add('gl-ready'), 450); })
+        setTimeout(() => document.body.classList.add('gl-ready'), 1700); })
       .globeTileEngineMaxLevel(14)
       .showAtmosphere(true).atmosphereColor('#8ab4ff').atmosphereAltitude(0.18)
       .htmlElementsData(marks).htmlLat('lat').htmlLng('lng').htmlAltitude(0.01).htmlElement(pinEl).htmlTransitionDuration(0)
@@ -877,7 +877,10 @@
     document.body.appendChild(bar);
     bar.addEventListener('pointerdown', ev => ev.stopPropagation());
     // your own bird on the globe is the way in (no button): an invisible tap target sits on it when it shows as a bird
-    const myBtn = document.createElement('button'); myBtn.type = 'button'; myBtn.className = 'hunt-me'; myBtn.setAttribute('aria-label', 'Take flight'); myBtn.innerHTML = '<i class="me-dot"></i>'; document.body.appendChild(myBtn);
+    const myBtn = document.createElement('button'); myBtn.type = 'button'; myBtn.className = 'hunt-me'; myBtn.setAttribute('aria-label', 'Take flight'); document.body.appendChild(myBtn);
+    // your dot, zoomed out: drawn inside the globe area (moved like the map's place names, so it stays fixed to the map on
+    // phones) on a layer above the story pins; the button above is only the invisible place to tap
+    const meDot = document.createElement('div'); meDot.className = 'me-dot'; host.appendChild(meDot);
     myBtn.addEventListener('pointerdown', ev => ev.stopPropagation());
     // tapping your dot (zoomed out) flies the view down to your bird; tapping your bird (zoomed in) takes off
     let myBtnMode = 'bird', myBtnAt = null;
@@ -1174,12 +1177,13 @@
         let a = idleAng.get(d.i) ?? a0; a = ease(a, a0, dt, 'dot' + d.i); idleAng.set(d.i, a);
         const ps = pose('dot' + d.i, true, bankAt(d, tq), dt); intoSprite(sk, sz, sz, s.x, s.y, (x, y) => drawBird(x, y, a, '', 0.8 * km2, 0.92, 0, ps, d.col)); }
       // you
-      let show = false;
+      let show = false, dotOn = false;
       if (mn && mp) { const s = scr(mp[0], mp[1]);
         if (onScr(s)) { const cl = col(mn);
           if (!close) { // you: bigger, ringed in white, with a soft glow that slowly pulses so you can always find yourself. It's
             // the button itself that draws it, so it sits above the story pins and can always be tapped
-            const mc = css(cl); if (myBtn._mc !== mc) { myBtn._mc = mc; myBtn.style.setProperty('--mc', mc); myBtn.style.setProperty('--mg', `rgba(${cl[0]},${cl[1]},${cl[2]},.6)`); }
+            const mc = css(cl); if (meDot._mc !== mc) { meDot._mc = mc; meDot.style.setProperty('--mc', mc); meDot.style.setProperty('--mg', `rgba(${cl[0]},${cl[1]},${cl[2]},.6)`); }
+            meDot.style.transform = `translate3d(${s.x}px,${s.y}px,0)`; dotOn = true;
             show = true; myBtnMode = 'dot'; myBtnAt = mp; myBtn.style.transform = `translate(${cr.left + s.x - 24}px,${cr.top + s.y - 24}px)`; }
           else { const hd = mine.me ? headAt(mine.me, tn) : null, a = hd != null ? hd - Math.PI / 2 : -Math.PI / 2;
             const msz = 96 * Math.max(0.5, km2);
@@ -1193,7 +1197,7 @@
               if (u > 0.95) { tko = null; enter(); } }
             show = !tko; myBtnMode = 'bird'; myBtn.style.transform = `translate(${cr.left + s.x - 24}px,${cr.top + s.y - 24}px)`; } } }
       if (myBtn.classList.contains('in') !== show) myBtn.classList.toggle('in', show);
-      if (myBtn.classList.contains('dot') !== (myBtnMode === 'dot')) myBtn.classList.toggle('dot', myBtnMode === 'dot');
+      if (meDot.classList.contains('on') !== dotOn) meDot.classList.toggle('on', dotOn);
       { const lb = myBtnMode === 'dot' ? 'Go to my bird' : 'Take flight'; if (myBtn.getAttribute('aria-label') !== lb) myBtn.setAttribute('aria-label', lb); }
       spritesEnd();
     }
