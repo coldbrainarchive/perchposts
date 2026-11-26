@@ -5,3 +5,6 @@ CREATE TABLE IF NOT EXISTS hunt_worms (id TEXT PRIMARY KEY, lat REAL NOT NULL, l
 CREATE INDEX IF NOT EXISTS idx_hunt_worms_live ON hunt_worms(gone_at) WHERE caught_by IS NULL;
 -- added 2026-11-25 (bird turns): ALTER TABLE hunt_birds ADD COLUMN brg0 REAL; ALTER TABLE hunt_birds ADD COLUMN brg1 REAL;
 -- added 2026-11-25 (tap to flap): ALTER TABLE hunt_birds ADD COLUMN v0 REAL;
+
+-- 2026-11-26: each bird's colour for the public dots on the globe (set by the owner's page; roles override it)
+ALTER TABLE hunt_birds ADD COLUMN col TEXT;

@@ -876,7 +876,7 @@
     // your own bird on the globe is the way in (no button): an invisible tap target sits on it when it shows as a bird
     const myBtn = document.createElement('button'); myBtn.type = 'button'; myBtn.className = 'hunt-me'; myBtn.setAttribute('aria-label', 'Take flight'); document.body.appendChild(myBtn);
     myBtn.addEventListener('pointerdown', ev => ev.stopPropagation());
-    myBtn.addEventListener('click', () => { if (tok()) enter(); });
+    myBtn.addEventListener('click', () => { if (tok() && !tko && !on) tko = { t0: performance.now() }; });
     bar.querySelector('.hb-x').addEventListener('click', () => leave());
 
 
@@ -897,6 +897,8 @@
       const c = world.controls(); c.autoRotate = false; c.enableRotate = false; c.enableZoom = false;
       const v = world.pointOfView();
       $('huntN').textContent = balance == null ? '–' : balance; hintUntil = Date.now() + 4000;
+      // (your bird's spot is already known from the globe, so the dive down to it starts at once, not after the server answers)
+      if (mine && mine.me) { me = { ...mine.me }; zoomIn = { la: v.lat, lo: v.lng, a: v.altitude, t0: performance.now() }; }
       poll(true, [v.lat, v.lng]); loop();
     }
     const TZ = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { return ''; } })();
@@ -909,7 +911,7 @@
       if (me) mine = { me: { ...me, from: posAt(me, srv()), to: posAt(me, srv()), b0: headAt(me, srv()) ?? me.b1, b1: headAt(me, srv()) ?? me.b1, depart: srv(), arrive: srv() }, home: null };
       pauseNow(); idleRaf = requestAnimationFrame(idle);
     }
-    addEventListener('pagehide', () => { if (on) pauseNow(true); });
+    addEventListener('pagehide', () => { try { if (on) pauseNow(true); } catch (e) {} });
     document.addEventListener('visibilitychange', () => {
       if (!on) { if (!document.hidden) { loadMine(); loadDots(); } return; }
       if (document.hidden) pauseNow(true);
@@ -919,7 +921,7 @@
       clearTimeout(pollT); if (!on) return;
       if (document.hidden) { pollT = setTimeout(() => poll(), 2000); return; }
       const t0 = Date.now(), sent = t0;
-      const r = await api('/hunt/state', start ? { start: 1, tz: TZ, lat: at[0], lng: at[1] } : {});
+      const r = await api('/hunt/state', start ? { start: 1, tz: TZ, lat: at[0], lng: at[1], col: kitCol() } : {});
       if (!on) return;
       if (r.s === 401) { leave(); toast('Sign in to take flight', true); return; }
       if (r.s === 200 && r.j.now) {
@@ -936,7 +938,7 @@
         // starting: your bird is already in the air — still flying from a moment ago, or it takes off on its last heading
         if (start && me) {
           if (me.arrive <= now || me.b1 == null) { let b0 = me.b1 != null ? me.b1 : NaN; if (!isFinite(b0)) try { b0 = parseFloat(localStorage.getItem('pp_hunt_brg')); } catch (e) {} flyDir(isFinite(b0) ? b0 : Math.random() * 6.2832); }
-          const v0 = world.pointOfView(); zoomIn = { la: v0.lat, lo: v0.lng, a: v0.altitude, t0: performance.now() }; }
+          if (!zoomIn) { const v0 = world.pointOfView(); zoomIn = { la: v0.lat, lo: v0.lng, a: v0.altitude, t0: performance.now() }; } }
       }
       pollT = setTimeout(() => poll(), 2000);
     }
@@ -979,8 +981,8 @@
     // right on the ground: anything drawn even a few km up slides against the map when the camera is this low
     const sc = (la, lo) => world.getScreenCoords(la, lo, 0);
     // a simple bird seen from above in the bird's colour; the beak points where it's going
-    function drawBird(x, y, a, name, s, alpha, swoop, ps) {
-      const c = cx, c0 = col(name), cl = css(c0), dk = css(shade(c0)), sw = swoop || 0, k = s * 0.8 * (1 - 0.2 * sw), bk = ps.bk, ab = Math.abs(bk), span = ps.span;
+    function drawBird(x, y, a, name, s, alpha, swoop, ps, colIn) {
+      const c = cx, c0 = colIn || col(name), cl = css(c0), dk = css(shade(c0)), sw = swoop || 0, k = s * 0.8 * (1 - 0.2 * sw), bk = ps.bk, ab = Math.abs(bk), span = ps.span;
       // in a turn it glides with its wings out; seen from above, the wing it leans toward looks shorter
       const qL = span * (bk < 0 ? 1 - 0.4 * ab : 1 - 0.05 * ab), qR = span * (bk > 0 ? 1 - 0.4 * ab : 1 - 0.05 * ab), roll = bk * 2;
       const shape = () => { c.beginPath();
@@ -1025,39 +1027,92 @@
       c.fillStyle = gold ? 'rgba(192,132,252,.85)' : 'rgba(242,160,164,.75)'; c.fill(); c.restore();
     }
     // ── out of the game: your bird and everyone else's on the globe ──
-    // Zoomed out, every bird is a tiny dot (anyone can see them; no names). Yours is a slightly bigger dot in your
-    // bird's colour, and once you're zoomed in a fair way it becomes your bird, flapping gently where it was left
-    // (or, before your first flight, over your home city). Tap it and the game carries on from there.
+    // Zoomed out, every bird is a small dot in its colour (anyone can see them; colours only, never names); yours is
+    // bigger, solid and ringed in white. Zoomed in a fair way, birds show as they look in the game: flying ones fly,
+    // stopped ones sleep curled up in a little nest. Yours sleeps in its nest where you left it (before your first
+    // flight, over your home city); tap it and it wakes, flaps up out of the nest, and the game carries on from there.
     const ICON_ALT = 0.25;
-    let mine = null, dots = [], dotsOff = 0, dotsAt = 0, idleRaf = 0, idleLast = 0;
+    let mine = null, dots = [], dotsOff = 0, dotsAt = 0, idleRaf = 0, idleLast = 0, tko = null;
+    const kitCol = () => { try { const n = myName(); return window._ppKit && window._ppKit.bodyCol && n ? window._ppKit.bodyCol(n).join(',') : undefined; } catch (e) { return undefined; } };
     const loadMine = () => { if (!tok()) { mine = null; return; }
-      api('/hunt/me', { tz: TZ }).then(r => { if (r.s !== 200 || !r.j) return; mine = { me: r.j.me, home: r.j.home };
-        const mn = myName(); if (mn) { if (r.j.role) roles.set(mn, r.j.role); else roles.delete(mn); } loadKit(() => {}); }); };
+      api('/hunt/me', { tz: TZ, col: kitCol() }).then(r => { if (r.s !== 200 || !r.j) return; mine = { me: r.j.me, home: r.j.home };
+        const mn = myName(); if (mn) { if (r.j.role) roles.set(mn, r.j.role); else roles.delete(mn); }
+        if (!window._ppKit) loadKit(() => { if (r.j.me) api('/hunt/me', { tz: TZ, col: kitCol() }); }); }); };
+    const parseCol = c => { const v = typeof c === 'string' ? c.split(',').map(Number) : null; return v && v.length === 3 && v.every(x => x >= 0 && x <= 255) ? v : [214, 218, 226]; };
     const loadDots = () => fetch(API + '/hunt/dots').then(r => r.json()).then(j => { if (!j || !Array.isArray(j.b)) return; dotsOff = j.now - Date.now();
-      dotsAt = j.now; dots = j.b.map(d => ({ from: [d[0], d[1]], to: [d[0], d[1]], b0: d[2], b1: d[3], depart: d[4], arrive: d[5] })); }).catch(() => {});
+      dotsAt = j.now; dots = j.b.map((d, i) => ({ i, from: [d[0], d[1]], to: [d[0], d[1]], b0: d[2], b1: d[3], depart: d[4], arrive: d[5], col: parseCol(d[6]) })); }).catch(() => {});
     // (a bird can be paused on someone else's phone at any moment: the dots are fetched every 8 s and a moving one is only
     // carried on for up to 8 s past the latest news of it, so a stopped bird's dot doesn't keep drifting away)
-    loadMine(); loadDots(); setInterval(() => { if (!document.hidden && !on) loadDots(); }, 8000); setInterval(() => { if (!document.hidden && !on) loadMine(); }, 30000);
+    loadMine(); loadDots(); setInterval(() => { if (!document.hidden) loadDots(); }, 8000); setInterval(() => { if (!document.hidden && !on) loadMine(); }, 30000);
+    // a little woven nest seen from above (twigs placed the same way every time)
+    function drawNest(x, y, k) {
+      const c = cx; c.save(); c.translate(x, y); c.scale(k, k);
+      c.beginPath(); c.ellipse(2, 4, 15, 12, 0, 0, 7); c.fillStyle = 'rgba(0,0,0,.28)'; c.fill();
+      c.beginPath(); c.ellipse(0, 0, 15, 12.5, 0, 0, 7); c.fillStyle = '#7a5230'; c.fill();
+      c.beginPath(); c.ellipse(0, 0.6, 10, 8, 0, 0, 7); c.fillStyle = '#3d2615'; c.fill();
+      c.lineCap = 'round';
+      for (let i = 0; i < 22; i++) { const a0 = i * 0.2856 + (i % 3) * 0.4, r = 11.2 + (i % 4) * 0.9, l = 0.5 + (i % 5) * 0.08;
+        c.beginPath(); c.ellipse(0, 0, r, r * 0.83, 0, a0, a0 + l); c.strokeStyle = i % 2 ? '#a8784a' : '#8f6238'; c.lineWidth = 1.1 + (i % 3) * 0.35; c.stroke(); }
+      c.restore();
+    }
+    // a bird asleep in the nest, seen from just above: round and fluffed up, wings folded over its back, head tucked
+    // down with its eyes shut (two little curves), breathing slowly; small z's drift up from your own
+    function drawSleeper(x, y, a, cl, k, t, seed, zs) {
+      const c = cx, br = 1 + 0.04 * Math.sin(t * 2.1 + seed), dk = shade(cl), wing = cl.map(v => Math.round(v * 0.8)), line = 'rgba(0,0,0,.35)';
+      c.save(); c.translate(x, y); c.rotate(a); c.scale(k, k);
+      c.beginPath(); c.moveTo(-7, -2.4); c.lineTo(-12.5, -3.6); c.lineTo(-11.4, 0); c.lineTo(-12.5, 3.6); c.lineTo(-7, 2.4); c.closePath(); c.fillStyle = css(dk); c.fill();   // tail
+      c.save(); c.scale(br, br);
+      c.beginPath(); c.ellipse(-0.5, 0, 9, 7.6, 0, 0, 7); c.fillStyle = css(cl); c.fill(); c.lineWidth = 0.8; c.strokeStyle = line; c.stroke();            // body
+      for (const sd of [-1, 1]) { c.beginPath(); c.ellipse(-2.4, sd * 3.1, 7, 3.6, sd * 0.16, 0, 7); c.fillStyle = css(wing); c.fill(); c.lineWidth = 0.6; c.strokeStyle = line; c.stroke();   // folded wings
+        c.beginPath(); for (let i = 0; i < 3; i++) { c.moveTo(-6.5 + i * 2.2, sd * (1.6 + i * 0.2)); c.lineTo(-8.6 + i * 2.2, sd * (4.6 - i * 0.2)); } c.lineWidth = 0.55; c.strokeStyle = 'rgba(0,0,0,.28)'; c.stroke(); }
+      c.restore();
+      c.beginPath(); c.arc(5.2, 0, 4.6, 0, 7); c.fillStyle = css(cl); c.fill(); c.lineWidth = 0.8; c.strokeStyle = line; c.stroke();                         // head
+      c.beginPath(); c.arc(6.4, -2.1, 1.25, 0.15 * Math.PI, 0.85 * Math.PI); c.moveTo(7.6, 2.1); c.arc(6.4, 2.1, 1.25, 0.15 * Math.PI, 0.85 * Math.PI);    // eyes shut
+      c.lineWidth = 0.75; c.strokeStyle = 'rgba(20,20,24,.85)'; c.stroke();
+      c.beginPath(); c.moveTo(9.4, -1.2); c.lineTo(11.6, 0); c.lineTo(9.4, 1.2); c.closePath(); c.fillStyle = css(dk); c.fill();                              // beak, resting
+      c.restore();
+      if (zs) { c.save(); c.fillStyle = '#e2e8f0'; c.shadowColor = 'rgba(0,0,0,.85)'; c.shadowBlur = 3;
+        for (let i = 0; i < 2; i++) { const u = ((t + seed + i * 1.3) % 2.6) / 2.6; c.globalAlpha = Math.sin(Math.PI * u) * 0.9;
+          c.font = `700 ${7 + 4 * u}px -apple-system,system-ui,sans-serif`; c.fillText('z', x + 9 * k + 9 * u, y - 9 * k - 16 * u); }
+        c.restore(); }
+    }
+    const idleAng = new Map();
     function idle(ts) {
       if (on) return; idleRaf = requestAnimationFrame(idle);
       const dt = idleLast ? Math.min(0.1, Math.max(0, ts - idleLast) / 1000) : 0.016; idleLast = ts;
       const cr = cv.getBoundingClientRect(), c = cx; c.setTransform(DPR, 0, 0, DPR, 0, 0); c.clearRect(0, 0, W, H);
       try { world.camera().updateMatrixWorld(); } catch (e) {}
-      const v = world.pointOfView(), cosCap = Math.cos(Math.acos(1 / (1 + v.altitude)) * 0.97), tn = Date.now() + dotsOff;
+      const v = world.pointOfView(), cosCap = Math.cos(Math.acos(1 / (1 + v.altitude)) * 0.97), tn = Date.now() + dotsOff, t = performance.now() / 1000, close = v.altitude <= ICON_ALT;
       const front = (la, lo) => Math.sin(v.lat * R) * Math.sin(la * R) + Math.cos(v.lat * R) * Math.cos(la * R) * Math.cos((lo - v.lng) * R) > cosCap;
       const scr = (la, lo) => front(la, lo) ? world.getScreenCoords(la, lo, 0) : null;
-      const onScr = s => s && s.x > -10 && s.x < W + 10 && s.y > -10 && s.y < H + 10;
-      for (const d of dots) { const q = flyAt(d, Math.min(tn, dotsAt + 8000)); if (!q) continue; const s = scr(q[0], q[1]); if (!onScr(s)) continue;
-        c.beginPath(); c.arc(s.x, s.y, 2.6, 0, 7); c.fillStyle = 'rgba(0,0,0,.45)'; c.fill();
-        c.beginPath(); c.arc(s.x, s.y, 1.8, 0, 7); c.fillStyle = 'rgba(255,255,255,.9)'; c.fill(); }
-      let show = false;
+      const onScr = s => s && s.x > -30 && s.x < W + 30 && s.y > -30 && s.y < H + 30;
       const mn = myName(), mp = mine && (mine.me ? flyAt(mine.me, tn) : mine.home);
+      // everyone else
+      for (const d of dots) { const tq = Math.min(tn, dotsAt + 8000), q = flyAt(d, tq); if (!q) continue;
+        if (mp && km(mp, q) < 0.05) continue;   // that's you
+        const s = scr(q[0], q[1]); if (!onScr(s)) continue;
+        if (!close) { c.beginPath(); c.arc(s.x, s.y, 2.5, 0, 7); c.fillStyle = 'rgba(0,0,0,.3)'; c.fill();
+          c.beginPath(); c.arc(s.x, s.y, 1.9, 0, 7); c.fillStyle = `rgba(${d.col[0]},${d.col[1]},${d.col[2]},.72)`; c.fill(); continue; }
+        const flying = tq < d.arrive, hd = headAt(d, tq), a0 = hd != null ? hd - Math.PI / 2 : -Math.PI / 2;
+        if (!flying) { drawNest(s.x, s.y, 0.95); drawSleeper(s.x, s.y, a0, d.col, 0.95, t, d.i * 0.77, false); continue; }
+        let a = idleAng.get(d.i) ?? a0; a = ease(a, a0, dt, 'dot' + d.i); idleAng.set(d.i, a);
+        drawBird(s.x, s.y, a, '', 0.7, 0.9, 0, pose('dot' + d.i, true, bankAt(d, tq), dt), d.col); }
+      // you
+      let show = false;
       if (mn && mp) { const s = scr(mp[0], mp[1]);
         if (onScr(s)) { const cl = col(mn);
-          if (v.altitude > ICON_ALT) { c.beginPath(); c.arc(s.x, s.y, 4.6, 0, 7); c.fillStyle = 'rgba(0,0,0,.5)'; c.fill(); c.beginPath(); c.arc(s.x, s.y, 3.4, 0, 7); c.fillStyle = css(cl); c.fill(); }
+          if (!close) { c.beginPath(); c.arc(s.x, s.y, 5.2, 0, 7); c.fillStyle = 'rgba(0,0,0,.45)'; c.fill(); c.beginPath(); c.arc(s.x, s.y, 4.3, 0, 7); c.fillStyle = '#fff'; c.fill();
+            c.beginPath(); c.arc(s.x, s.y, 3.2, 0, 7); c.fillStyle = css(cl); c.fill(); }
           else { const hd = mine.me ? headAt(mine.me, tn) : null, a = hd != null ? hd - Math.PI / 2 : -Math.PI / 2;
-            drawBird(s.x, s.y, a, mn, 0.85, 1, 0, pose('@idle', false, 0, dt));
-            show = true; myBtn.style.transform = `translate(${cr.left + s.x - 24}px,${cr.top + s.y - 24}px)`; } } }
+            drawNest(s.x, s.y, 1.25);
+            if (!tko) drawSleeper(s.x, s.y, a, cl, 1.25, t, 0, true);
+            else { // waking up: a little stretch, then it flaps hard and lifts up out of the nest
+              const u = (performance.now() - tko.t0) / 1000;
+              if (u < 0.22) drawSleeper(s.x, s.y - 2 * u / 0.22, a, cl, 1.25 * (1 + 0.18 * Math.sin(Math.PI * u / 0.22)), t, 0, false);
+              else { const e = Math.min(1, (u - 0.22) / 0.7), ez = e * e * (3 - 2 * e);
+                drawBird(s.x, s.y - 16 * ez, a, mn, 0.75 + 0.35 * ez, 1, -0.6 * ez, pose('@tko', true, 0, dt * 1.8)); }
+              if (u > 0.95) { tko = null; enter(); } }
+            show = !tko; myBtn.style.transform = `translate(${cr.left + s.x - 24}px,${cr.top + s.y - 24}px)`; } } }
       if (myBtn.classList.contains('in') !== show) myBtn.classList.toggle('in', show);
     }
     idleRaf = requestAnimationFrame(idle);
@@ -1119,9 +1174,16 @@
       for (const b of birds) { const q = posAt(b, now); if (!q || !front(q[0], q[1])) continue; const s = sc(q[0], q[1]); if (!s) continue;
         if (!inView(s)) { const d = p ? km(p, q) : 0; if (d < 100) drawBirdEdge(s.x, s.y, b.u, d); continue; }
         const moving = now < b.arrive, ahead = posAt(b, now + 600), s2 = ahead && sc(ahead[0], ahead[1]);
+        if (!moving) { const hd = headAt(b, now); drawNest(s.x, s.y, 0.95); drawSleeper(s.x, s.y, hd != null ? hd - Math.PI / 2 : 0, col(b.u), 0.95, t, b.u.length, false);
+          const nl = nameImg(b.u); c.drawImage(nl, s.x - nl._w / 2, s.y + 22 - nl._h / 2 - 3, nl._w, nl._h); continue; }
         let a = angs.get(b.u) ?? -Math.PI / 2; if (moving && s2 && Math.hypot(s2.x - s.x, s2.y - s.y) > 0.5) a = ease(a, Math.atan2(s2.y - s.y, s2.x - s.x), dt, b.u); angs.set(b.u, a);
         drawBird(s.x, s.y, a, b.u, 0.8, 0.92, 0, pose(b.u, moving, bankAt(b, now), dt));
         const nl = nameImg(b.u); c.drawImage(nl, s.x - nl._w / 2, s.y + 26 - nl._h / 2 - 3, nl._w, nl._h); }
+      // birds asleep in their nests nearby (players who aren't playing right now): no names, just their colours
+      { const tq = Math.min(Date.now() + dotsOff, dotsAt + 8000);
+        for (const d of dots) { if (tq < d.arrive) continue; const q = flyAt(d, tq); if (!q || (p && km(p, q) < 0.05) || birds.some(b => { const bq = posAt(b, now); return bq && km(bq, q) < 0.05; })) continue;
+          if (!front(q[0], q[1])) continue; const s = sc(q[0], q[1]); if (!inView(s)) continue;
+          const hd = headAt(d, tq); drawNest(s.x, s.y, 0.95); drawSleeper(s.x, s.y, hd != null ? hd - Math.PI / 2 : 0, d.col, 0.95, t, d.i * 0.77, false); } }
       // effects: catches (your bird dives, the worm is pulled up, +1 / +5 rises) and worms another bird took
       let swoop = 0;
       fx = fx.filter(f => { const age = (performance.now() - f.t0) / 1000, s = sc(f.lat, f.lng); if (!s) return age < 1.4;

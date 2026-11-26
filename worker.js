@@ -2393,9 +2393,11 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     const key = new Request("https://perchposts-hunt.cache/dots");
     const hit = await caches.default.match(key); if (hit) return hit;
     try {
-      const { results = [] } = await env.DB.prepare(`SELECT from_lat, from_lng, brg0, brg1, depart_at, arrive_at FROM hunt_birds LIMIT 5000`).all();
+      // each bird's colour (admins white, mods purple, else the colour its own page saved) but never its name
+      const { results = [] } = await env.DB.prepare(`SELECT h.from_lat, h.from_lng, h.brg0, h.brg1, h.depart_at, h.arrive_at, h.col, (SELECT m.role FROM mod_users m WHERE LOWER(m.username) = LOWER(h.username) AND m.deleted_at IS NULL LIMIT 1) AS role FROM hunt_birds h LIMIT 5000`).all();
       const r4 = x => x == null ? null : Math.round(x * 1e4) / 1e4;
-      const res = new Response(JSON.stringify({ now: Date.now(), b: results.map(b => [r4(b.from_lat), r4(b.from_lng), r4(b.brg0), r4(b.brg1), b.depart_at, b.arrive_at]) }),
+      const colOf = b => b.role === "admin" ? "244,244,245" : b.role === "mod" ? "192,132,252" : (b.col || null);
+      const res = new Response(JSON.stringify({ now: Date.now(), b: results.map(b => [r4(b.from_lat), r4(b.from_lng), r4(b.brg0), r4(b.brg1), b.depart_at, b.arrive_at, colOf(b)]) }),
         { headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "public, max-age=5" } });
       ctx.waitUntil(caches.default.put(key, res.clone()));
       return res;
@@ -2446,14 +2448,17 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       let x = 0; for (const ch of String(username)) x = (x * 31 + ch.charCodeAt(0)) >>> 0;
       const a = (x % 3600) / 3600 * 2 * Math.PI, d = 0.5 + ((x >>> 12) % 1000) / 1000 * 1.5;
       return [h[0] + d * Math.cos(a) / 111.2, h[1] + d * Math.sin(a) / (111.2 * Math.cos(h[0] * R))]; };
+    // the owner's page tells us its bird's colour (worked out from the name by the bird kit), for the public dots
+    const colIn = typeof body.col === "string" && /^\d{1,3},\d{1,3},\d{1,3}$/.test(body.col) && body.col.split(",").every(v => +v <= 255) ? body.col : null;
     try {
       let me = await env.DB.prepare(`SELECT * FROM hunt_birds WHERE username = ?`).bind(username).first();
+      if (me && colIn && me.col !== colIn) { await env.DB.prepare(`UPDATE hunt_birds SET col = ? WHERE username = ?`).bind(colIn, username).run(); me.col = colIn; }
       if (url.pathname === "/hunt/state") {
         // a new bird starts over your home city; after that it always carries on from wherever it was left (paused)
         if (!me) {
           const [la, lo] = homeFor();
-          await env.DB.prepare(`INSERT OR REPLACE INTO hunt_birds (username, from_lat, from_lng, to_lat, to_lng, depart_at, arrive_at, seen_at, spawn_at, brg0, brg1) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`)
-            .bind(username, la, lo, la, lo, now, now, now, now).run();
+          await env.DB.prepare(`INSERT OR REPLACE INTO hunt_birds (username, from_lat, from_lng, to_lat, to_lng, depart_at, arrive_at, seen_at, spawn_at, brg0, brg1, col) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)`)
+            .bind(username, la, lo, la, lo, now, now, now, now, colIn).run();
           me = { username, from_lat: la, from_lng: lo, to_lat: la, to_lng: lo, depart_at: now, arrive_at: now, seen_at: now, spawn_at: now };
         }
         const p = posAt(me, now);
