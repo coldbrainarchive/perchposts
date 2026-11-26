@@ -2605,9 +2605,16 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       // the page says when you tapped (its copy of the server clock, "t"): the new flight starts from that moment, so the
       // server's copy is the same path your phone already drew and nothing has to be corrected on your screen (only
       // up to 2 s back, and never in the future)
-      const tapT = Number(body.t), at = Number.isFinite(tapT) && tapT <= now && now - tapT < 2000 && tapT >= (me ? me.depart_at : 0) ? Math.round(tapT) : now;
+      // (up to 10 s back: on slow 5G a tap can take over 2 s to arrive, and starting it late put your bird ~1 km off)
+      // (and up to 3 s ahead: over uneven connections the phone's estimate of our clock can run a little fast)
+      const tapT = Number(body.t), at = Number.isFinite(tapT) && tapT <= now + 3000 && now - tapT < 10000 && tapT >= (me ? me.depart_at : 0) ? Math.round(tapT) : now;
+      // an older tap than the one we already have (two taps' requests can arrive in either order): ignore it, or its
+      // heading would replace the newer one and the bird would jump when the page next checked
+      if (me && Number.isFinite(tapT) && tapT < me.depart_at && (url.pathname === "/hunt/fly" || (url.pathname === "/hunt/pause" && !body.leaving)))
+        return json({ now, stale: true, me: flight(me) });
       if (url.pathname === "/hunt/pause") {
-        const f0 = flight(me), h = headAt(f0, at) ?? me.brg1 ?? 0, p = await clearPerch(posAt(me, at), h);
+        // nests can't overlap, so going to sleep glides on until there's room; just landing (standing in the game) stays put
+        const f0 = flight(me), h = headAt(f0, at) ?? me.brg1 ?? 0, p0 = posAt(me, at), p = body.leaving ? await clearPerch(p0, h) : p0;
         await env.DB.prepare(`UPDATE hunt_birds SET from_lat = ?, from_lng = ?, to_lat = ?, to_lng = ?, brg0 = ?, brg1 = ?, depart_at = ?, arrive_at = ?, flown = COALESCE(flown, 0) + ? WHERE username = ?`)
           .bind(p[0], p[1], p[0], p[1], h, h, now, now, segKm(me), username).run();
         me.flown = (me.flown || 0) + segKm(me); me.from_lat = me.to_lat = p[0]; me.from_lng = me.to_lng = p[1]; me.brg0 = me.brg1 = h; me.depart_at = me.arrive_at = now;

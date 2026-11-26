@@ -792,11 +792,15 @@
       const t = srv(), p = posAt(me, t), h = me && t < me.arrive ? headAt(me, t) : null;
       const f = fTurn({ from: p, to: p, b0: h == null ? brg : h, b1: brg, depart: t }); f.arrive = t + flyFor(f._T); me = f; flySent = Date.now(); flyWait++;
       try { localStorage.setItem('pp_hunt_brg', String(brg)); } catch (e) {}
-      api('/hunt/fly', { brg, t }).then(x => { flyWait = Math.max(0, flyWait - 1); if (x.s === 200 && x.j.me && on && flyWait === 0) setMe(x.j.me, 'fly'); });
+      sendQ(() => api('/hunt/fly', { brg, t })).then(x => { flyWait = Math.max(0, flyWait - 1); if (x.s === 200 && x.j.me && !x.j.stale && on && flyWait === 0) setMe(x.j.me, 'fly'); });
     }
     // the server's copy of a flight starts a moment later than the one the page drew, so swapping to it would make the
     // bird hop a few pixels: the difference is blended away over a third of a second instead
     let diagAt = 0;
+    // turns and landings go to the server one after another (each once the last has answered), so they can never
+    // arrive out of order on a slow connection; the bird itself still turns the moment you tap
+    let sendChain = Promise.resolve();
+    const sendQ = fn => { const p = sendChain.then(fn, fn); sendChain = p.catch(() => {}); return p; };
     function setMe(f, src) {
       if (f && f.depart) myDeps.add(f.depart);
       const t = srv(), a = me && posAt(me, t), b = posAt(f, t);
@@ -1088,8 +1092,8 @@
     function landNow(quiet) {
       const t = srv(), p = posAt(me, t), h = headAt(me, t) ?? me.b1 ?? 0; landed = true;
       setMe({ from: p, to: p, b0: h, b1: h, depart: t, arrive: t }); flySent = Date.now(); flyWait++;
-      fetch(API + '/hunt/pause', { method: 'POST', headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ col: kitCol(), t, sid: SID }) }).then(r => r.json())
-        .then(j => { flyWait = Math.max(0, flyWait - 1); if (j && j.me && on && landed) { setMe(j.me, 'pause'); if (j.st) { gSt = j.st; gStAt = j.now; } } }).catch(() => { flyWait = Math.max(0, flyWait - 1); });
+      sendQ(() => fetch(API + '/hunt/pause', { method: 'POST', headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ col: kitCol(), t, sid: SID }) })).then(r => r.json())
+        .then(j => { flyWait = Math.max(0, flyWait - 1); if (j && j.me && !j.stale && on && landed) { setMe(j.me, 'pause'); if (j.st) { gSt = j.st; gStAt = j.now; } } }).catch(() => { flyWait = Math.max(0, flyWait - 1); });
       if (!quiet) ghEvent('Landed', ghTown || 'here', '#fcd34d');
     }
     // the screen locks, you switch apps or close the page: you leave the game like tapping the × (your bird goes to
