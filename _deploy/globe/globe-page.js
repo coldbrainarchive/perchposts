@@ -944,9 +944,18 @@
     const meDot = document.createElement('div'); meDot.className = 'me-dot'; host.appendChild(meDot);
     myBtn.addEventListener('pointerdown', ev => ev.stopPropagation());
     // tapping your dot (zoomed out) flies the view down to your bird; tapping your bird (zoomed in) takes off
-    let myBtnMode = 'bird', myBtnAt = null;
+    let myBtnMode = 'bird', myBtnAt = null, dotFly = null;
+    // the flight down to your bird is driven here, a frame at a time (on iPhones the globe's own animated move could stop
+    // partway or twitch back and forth)
+    function dotFlyStep() {
+      if (!dotFly) return; const k = Math.min(1, (performance.now() - dotFly.t0) / 2000), e = k < .5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+      const dl = ((dotFly.lo - dotFly.lo0 + 540) % 360) - 180, la = dotFly.la0 + (dotFly.la - dotFly.la0) * e, lo = dotFly.lo0 + dl * e;
+      const al = Math.exp(Math.log(dotFly.a0) + (Math.log(GAME_ALT) - Math.log(dotFly.a0)) * e);   // zoom evenly (in steps that feel the same at every height)
+      world.pointOfView({ lat: la, lng: lo, altitude: al }, 0); if (k >= 1) dotFly = null;
+    }
+    world.renderer().domElement.addEventListener('pointerdown', () => { dotFly = null; });   // touching the map stops the flight
     myBtn.addEventListener('click', () => { if (!tok() || tko || on) return;
-      if (myBtnMode === 'dot' && myBtnAt) { const c = world.controls(); c.autoRotate = false; world.pointOfView({ lat: myBtnAt[0], lng: myBtnAt[1], altitude: GAME_ALT }, 2000); return; }   // all the way down to playing height
+      if (myBtnMode === 'dot' && myBtnAt) { const c = world.controls(); c.autoRotate = false; const v = world.pointOfView(); dotFly = { la0: v.lat, lo0: v.lng, a0: v.altitude, la: myBtnAt[0], lo: myBtnAt[1], t0: performance.now() }; return; }   // all the way down to playing height
       tko = { t0: performance.now() }; });
     bar.querySelector('.hb-x').addEventListener('click', () => leave());
 
@@ -1265,7 +1274,7 @@
     }
     const idleAng = new Map();
     function idle(ts) {
-      if (on) return; idleRaf = requestAnimationFrame(idle);
+      if (on) return; idleRaf = requestAnimationFrame(idle); dotFlyStep();
       const dt = idleLast ? Math.min(0.1, Math.max(0, ts - idleLast) / 1000) : 0.016; idleLast = ts;
       const cr = cv.getBoundingClientRect(), c = cx; c.setTransform(DPR, 0, 0, DPR, 0, 0); c.clearRect(0, 0, W, H);
       try { world.camera().updateMatrixWorld(); } catch (e) {}
