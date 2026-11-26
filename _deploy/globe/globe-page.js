@@ -925,7 +925,7 @@
     // dinner from the server (/hunt/me or /hunt/state): a full bar, told in the log (now, or as soon as you're playing)
     let mealNote = null;
     const mealIn = j => { const m = j && j.meal; if (!m) return; if (j.balance != null) setBal(j.balance);
-      if (m.ate > 0) { enKm = EN_MAX; enAt = Date.now(); enTired = false; enSave(); mealNote = ['Dinner', 'ate a worm · stamina full', '#f2a0a4']; }
+      if (m.ate > 0) { enKm = EN_MAX; enAt = Date.now(); enTired = false; enSave(); mealNote = ['Dinner', 'ate a worm · stamina full', '#e8555c']; }
       else mealNote = ['Hungry', 'no worm for dinner · resting only', '#f87171'];
       if (on) { ghEvent(...mealNote); mealNote = null; } };
     const outOfWorms = () => { if (!landed) landNow(); ghEvent('Out of worms', 'catch or earn a worm to fly again', '#f87171'); };
@@ -934,7 +934,7 @@
       if (eating) return; if (balance != null && balance < 1) { enTired = true; outOfWorms(); return; }
       eating = true;
       api('/hunt/eat').then(r => { eating = false;
-        if (r.s === 200 && r.j.ok) { enKm = EN_MAX; enTired = false; enSave(); if (r.j.balance != null) setBal(r.j.balance); ghEvent('−1', 'Ate a worm · stamina full', '#f2a0a4'); if (then) then(); return; }
+        if (r.s === 200 && r.j.ok) { enKm = EN_MAX; enTired = false; enSave(); if (r.j.balance != null) setBal(r.j.balance); ghEvent('−1', 'Ate a worm · stamina full', '#e8555c'); if (then) then(); return; }
         if (r.j.balance != null) setBal(r.j.balance); enTired = true; outOfWorms(); });
     }
     let gSt = null, gStAt = 0, ghNext = 0, ghTown = '', ghTownAt = 0, ghTopB = 70, ghBotT = 0, met = new Set();
@@ -1102,7 +1102,7 @@
     async function tryCatch(w) {
       if (asking.has(w.id)) return; asking.add(w.id);
       const r = await api('/hunt/catch', { id: w.id });
-      if (r.s === 200 && r.j.ok) { w.mine = true; worms.delete(w.id); ghEvent('+' + (r.j.value || 1), r.j.value > 1 ? 'Caught a rare worm' : 'Caught a worm', r.j.value > 1 ? '#c084fc' : '#f2a0a4'); fx.push({ k: 'catch', lat: w.at ? w.at[0] : w.lat, lng: w.at ? w.at[1] : w.lng, t0: performance.now(), v: r.j.value }); if (r.j.balance != null) setBal(r.j.balance); return; }
+      if (r.s === 200 && r.j.ok) { w.mine = true; worms.delete(w.id); ghEvent('+' + (r.j.value || 1), r.j.value > 1 ? 'Caught a rare worm' : 'Caught a worm', r.j.value > 1 ? '#c084fc' : '#e8555c'); fx.push({ k: 'catch', lat: w.at ? w.at[0] : w.lat, lng: w.at ? w.at[1] : w.lng, t0: performance.now(), v: r.j.value }); if (r.j.balance != null) setBal(r.j.balance); return; }
       if (r.s === 409) { worms.delete(w.id); if (!seenTaken.has(w.id)) { seenTaken.add(w.id); fx.push({ k: 'poof', lat: w.at ? w.at[0] : w.lat, lng: w.at ? w.at[1] : w.lng, t0: performance.now(), by: r.j.by, gold: w.v > 1 }); } return; }
       if (r.s === 410 || r.s === 404) { worms.delete(w.id); return; }
       setTimeout(() => asking.delete(w.id), 800);   // not close enough on the server's clock yet: try again in a moment
@@ -1182,7 +1182,7 @@
       for (let i = 0; i <= n; i++) { const f = i / 8, px = x - 5 + f * 10, py = y + Math.sin(t * 4 + f * 6) * 1.6; i ? c.lineTo(px, py) : c.moveTo(px, py); }
       c.lineCap = 'round'; c.lineJoin = 'round';
       c.strokeStyle = 'rgba(0,0,0,.35)'; c.lineWidth = 3.6; c.stroke();
-      c.strokeStyle = gold ? '#c084fc' : '#f2a0a4'; c.lineWidth = 2.2; c.stroke();
+      c.strokeStyle = gold ? '#c084fc' : '#e8555c'; c.lineWidth = 2.2; c.stroke();
       c.restore();
     }
     function drawEdge(x, y, gold, t) {
@@ -1193,7 +1193,7 @@
       const ex = cx0 + dx * f, ey = cy0 + dy * f, a = Math.atan2(dy, dx), pulse = 1;
       const c = cx; c.save(); c.translate(ex, ey); c.rotate(a); c.globalAlpha = pulse;
       c.beginPath(); c.moveTo(5, 0); c.lineTo(-3, -4); c.lineTo(-3, 4); c.closePath();
-      c.fillStyle = gold ? 'rgba(192,132,252,.85)' : 'rgba(242,160,164,.75)'; c.fill(); c.restore();
+      c.fillStyle = gold ? 'rgba(192,132,252,.85)' : 'rgba(232,85,92,.75)'; c.fill(); c.restore();
     }
     // ── out of the game: your bird and everyone else's on the globe ──
     // Zoomed out, every bird is a small dot in its colour (anyone can see them; colours only, never names); yours is
@@ -1457,9 +1457,9 @@
       fx = fx.filter(f => { const age = (performance.now() - f.t0) / 1000, s = sc(f.lat, f.lng); if (!s) return age < 1.4;
         if (f.k === 'catch') {
           if (age < 0.5) swoop = Math.max(swoop, Math.sin(Math.PI * age / 0.5));
-          if (age < 0.35) { c.save(); c.globalAlpha = 1 - age / 0.35; c.translate(s.x, s.y - 12 * age / 0.35); c.scale(1 - age / 0.35, 1 - age / 0.35); c.beginPath(); c.moveTo(-5, 0); c.quadraticCurveTo(0, -3, 5, 0); c.strokeStyle = f.v > 1 ? '#c084fc' : '#f2a0a4'; c.lineWidth = 2.2; c.lineCap = 'round'; c.stroke(); c.restore(); }
+          if (age < 0.35) { c.save(); c.globalAlpha = 1 - age / 0.35; c.translate(s.x, s.y - 12 * age / 0.35); c.scale(1 - age / 0.35, 1 - age / 0.35); c.beginPath(); c.moveTo(-5, 0); c.quadraticCurveTo(0, -3, 5, 0); c.strokeStyle = f.v > 1 ? '#c084fc' : '#e8555c'; c.lineWidth = 2.2; c.lineCap = 'round'; c.stroke(); c.restore(); }
           c.save(); c.globalAlpha = Math.max(0, 1 - Math.max(0, age - 0.7) / 0.7); c.font = '700 13px -apple-system,system-ui,sans-serif'; c.textAlign = 'center';
-          c.fillStyle = f.v > 1 ? '#c084fc' : '#f2a0a4'; c.shadowColor = 'rgba(0,0,0,.8)'; c.shadowBlur = 3; c.fillText('+' + f.v, s.x, s.y - 18 - 16 * age); c.restore();
+          c.fillStyle = f.v > 1 ? '#c084fc' : '#e8555c'; c.shadowColor = 'rgba(0,0,0,.8)'; c.shadowBlur = 3; c.fillText('+' + f.v, s.x, s.y - 18 - 16 * age); c.restore();
           return age < 1.4; }
         if (f.k === 'poof') {
           for (let i = 0; i < 5; i++) { const an = i / 5 * 6.283, d = 3 + 10 * age; c.beginPath(); c.arc(s.x + Math.cos(an) * d, s.y + Math.sin(an) * d * 0.6, Math.max(0, 1.6 * (1 - age / 1.2)), 0, 7); c.fillStyle = `rgba(160,120,90,${Math.max(0, 0.8 - age / 1.2)})`; c.fill(); }
