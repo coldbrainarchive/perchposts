@@ -882,6 +882,61 @@
     bar.innerHTML = `<span class="hb-n"><span class="hw">${WORM_SVG}</span><b id="huntN">–</b></span><span class="hb-t" id="huntT">Tap to fly</span><button type="button" class="hb-x" aria-label="Land (leave Take flight)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>`;
     document.body.appendChild(bar);
     bar.addEventListener('pointerdown', ev => ev.stopPropagation());
+    // ── the game's two bars (the user's layout "D", 2026-11-26) ──
+    // Top: land ×, level + XP (placeholders until the XP rules are set), your bird's local time, worms. Bottom: the
+    // nearest town and the country under your bird, how far you've flown, how far home is (with an arrow), and the map
+    // and passport buttons (their panels open from the bottom-right; both are still to come). A short log rises above it.
+    const ghTop = document.createElement('div'), ghBot = document.createElement('div'), ghLog = document.createElement('div'), ghPanel = document.createElement('div');
+    ghTop.className = 'gh gh-top'; ghBot.className = 'gh gh-bot'; ghLog.className = 'gh-log'; ghPanel.className = 'gh-panel';
+    const RING = 2 * Math.PI * 19;
+    ghTop.innerHTML = `<button type="button" class="gh-x" aria-label="Land (leave Take flight)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      <div class="gh-lv"><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="19" fill="rgba(21,23,29,.92)" stroke="rgba(255,255,255,.12)" stroke-width="4"/><circle id="ghRing" cx="22" cy="22" r="19" fill="none" stroke="#c084fc" stroke-width="4" stroke-linecap="round" stroke-dasharray="0 ${RING}" transform="rotate(-90 22 22)"/></svg><small>LV</small><b id="ghLv">1</b></div>
+      <div class="gh-mid"><div class="gh-r1"><span class="gh-time" id="ghTime">–</span><span class="gh-worm" id="ghWormBox">${WORM_SVG}<b id="ghWorms">–</b></span></div>
+        <div class="gh-xp"><i id="ghXp"></i></div><div class="gh-r2"><span id="ghLvT">LEVEL 1</span><span id="ghXpT">0 / 100 XP</span></div></div>`;
+    ghBot.innerHTML = `<div class="gh-place"><b id="ghPlace">–</b><small id="ghCountry">&nbsp;</small></div>
+      <div class="gh-stat"><b id="ghFlown">0 km</b><small>FLOWN</small></div>
+      <div class="gh-stat"><b><span id="ghHome">–</span> <i id="ghArrow">↑</i></b><small>HOME</small></div>
+      <button type="button" class="gh-btn" id="ghMap" aria-label="Map"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 6.5l6-2.5 6 2.5 6-2.5v13.5l-6 2.5-6-2.5-6 2.5z"/><path d="M9 4v13.5M15 6.5V20"/></svg></button>
+      <button type="button" class="gh-btn pass" id="ghPass" aria-label="Passport"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2.5"/><circle cx="12" cy="10.5" r="3.2"/><path d="M8.5 16.5h7"/></svg></button>`;
+    for (const el of [ghTop, ghBot, ghLog, ghPanel]) { document.body.appendChild(el); el.addEventListener('pointerdown', ev => ev.stopPropagation()); }
+    ghTop.querySelector('.gh-x').addEventListener('click', () => leave());
+    let ghOpen = null;
+    const PANELS = { map: ['Your travels', 'The map of everywhere your bird has seen, region by region, is coming next.'],
+                     pass: ['Your passport', 'Your Bird ID and the stamps from your travels are coming soon.'] };
+    const openPanel = k => { ghOpen = ghOpen === k ? null : k; $('ghMap').classList.toggle('on', ghOpen === 'map'); $('ghPass').classList.toggle('on', ghOpen === 'pass');
+      ghPanel.classList.toggle('in', !!ghOpen); if (ghOpen) ghPanel.innerHTML = `<div style="opacity:.55;color:#c084fc">${ghOpen === 'map' ? $('ghMap').innerHTML : $('ghPass').innerHTML}</div><h3>${PANELS[ghOpen][0]}</h3><p>${PANELS[ghOpen][1]}</p>`; };
+    $('ghMap').addEventListener('click', () => openPanel('map')); $('ghPass').addEventListener('click', () => openPanel('pass'));
+    // the log: short lines that rise above the bottom bar and fade (the newest at the bottom, three at most)
+    function ghEvent(tag, text, colour) { const d = document.createElement('div'); d.innerHTML = `<span style="background:${colour}">${tag}</span>`; d.appendChild(document.createTextNode(text));
+      ghLog.appendChild(d); while (ghLog.children.length > 3) ghLog.firstChild.remove();
+      setTimeout(() => { d.style.opacity = '0'; setTimeout(() => d.remove(), 650); }, 6500); }
+    // towns for "where you are" (the same list the map's names come from)
+    let towns = null; const loadTowns = () => { if (towns) return; towns = []; fetch('/globe/map-data.json').then(r => r.json()).then(d => { towns = [...(d.c || []), ...(d.t || [])].map(t => [t[0], +t[1], +t[2]]); }).catch(() => { towns = null; }); };
+    let gSt = null, gStAt = 0, ghNext = 0, ghTown = '', ghTownAt = 0, ghTopB = 70, ghBotT = 0, met = new Set();
+    const regionName = (() => { try { return new Intl.DisplayNames(['en'], { type: 'region' }); } catch (e) { return null; } })();
+    const flag = cc => cc && cc.length === 2 ? String.fromCodePoint(...[...cc.toUpperCase()].map(ch => 127397 + ch.charCodeAt(0))) : '';
+    function ghUpdate(now, p) {
+      const pf = performance.now(); if (pf < ghNext) return; ghNext = pf + 250;
+      const rt = ghTop.getBoundingClientRect(), rb = ghBot.getBoundingClientRect(); ghTopB = rt.bottom; ghBotT = rb.top || H;
+      ghLog.style.bottom = (H - ghBotT + 10) + 'px'; ghPanel.style.bottom = (H - ghBotT + 10) + 'px';
+      // your bird's local time
+      if (gSt && gSt.tz) { try { const d = new Date(now), parts = new Intl.DateTimeFormat('en-GB', { timeZone: gSt.tz, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZoneName: 'short' }).formatToParts(d);
+        const g = t => (parts.find(x => x.type === t) || {}).value || '', hr = +g('hour'), sun = hr >= 6 && hr < 18;
+        $('ghTime').innerHTML = `${sun ? '☀︎' : '☾'} ${g('hour')}:${g('minute')}<s>:${g('second')}</s><em>${g('timeZoneName').replace(/^GMT\+0$/, 'GMT')}</em>`; } catch (e) {} }
+      // where you are
+      if (p) { loadTowns(); let best = null, bd = 25; if (towns && towns.length) for (const t of towns) { if (Math.abs(t[1] - p[0]) > 0.3) continue; const d = km(p, [t[1], t[2]]); if (d < bd) { bd = d; best = t[0]; } }
+        const name = best || 'Open country'; if ($('ghPlace').textContent !== name) $('ghPlace').textContent = name;
+        if (best && best !== ghTown) { if (ghTown && pf > ghTownAt) ghEvent('Over', best, '#93c5fd'); ghTown = best; ghTownAt = pf + 4000; }
+        const cc = gSt && gSt.cc, cn = cc ? `${flag(cc)} ${(regionName && regionName.of(cc) || cc).toUpperCase()}` : ' '; if ($('ghCountry').textContent !== cn) $('ghCountry').textContent = cn; }
+      // how far you've flown: the server's total, carried on while you fly
+      if (gSt) { const fl = gSt.flown + (me && now < me.arrive && me.b1 != null ? SPEED * Math.max(0, Math.min(now, me.arrive) - Math.max(gStAt, me.depart)) / 1000 : 0);
+        $('ghFlown').textContent = fl < 10 ? fl.toFixed(1) + ' km' : Math.round(fl) + ' km'; }
+      // how far home is, and which way (the map is always north-up)
+      if (gSt && gSt.home && p) { const d = km(p, gSt.home); $('ghHome').textContent = d < 0.1 ? 'Home' : d < 10 ? d.toFixed(1) + ' km' : Math.round(d) + ' km';
+        $('ghArrow').style.transform = `rotate(${bearing(p, gSt.home) * 180 / Math.PI}deg)`; $('ghArrow').style.visibility = d < 0.1 ? 'hidden' : ''; }
+      // level / XP: placeholders until the XP rules are decided
+      $('ghWorms').textContent = balance == null ? '–' : balance;
+    }
     // your own bird on the globe is the way in (no button): an invisible tap target sits on it when it shows as a bird
     const myBtn = document.createElement('button'); myBtn.type = 'button'; myBtn.className = 'hunt-me'; myBtn.setAttribute('aria-label', 'Take flight'); document.body.appendChild(myBtn);
     // your dot, zoomed out: drawn inside the globe area (moved like the map's place names, so it stays fixed to the map on
@@ -913,6 +968,7 @@
       const c = world.controls(); c.autoRotate = false; c.enableRotate = false; c.enableZoom = false; c.enableDamping = false;   // no leftover drift from a swipe or pinch
       const v = world.pointOfView();
       $('huntN').textContent = balance == null ? '–' : balance; hintUntil = Date.now() + 4000;
+      ghLog.innerHTML = ''; ghTown = ''; met = new Set(); ghNext = 0; ghEvent('Tap', 'anywhere to fly that way', '#c084fc');
       // (your bird's spot is already known from the globe, so the dive down to it starts at once, not after the server answers)
       if (mine && mine.me) { me = { ...mine.me }; zoomIn = { la: v.lat, lo: v.lng, a: v.altitude, t0: performance.now() }; }
       poll(true, [v.lat, v.lng]); loop();
@@ -922,7 +978,7 @@
     const pauseNow = keep => fetch(API + '/hunt/pause', { method: 'POST', keepalive: !!keep, headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ col: kitCol() }) })
       .then(r => r.json()).then(j => { if (j && j.me) { myDeps.add(j.me.depart); mine = { me: j.me, home: null }; if (on && document.hidden) me = j.me; } }).catch(() => {});
     function leave() {
-      if (!on) return; on = false; document.body.classList.remove('hunting'); bar.classList.remove('in'); world.controls().enableRotate = true; world.controls().enableZoom = true; world.controls().enableDamping = true; try { paint(); } catch (e) {}
+      if (!on) return; on = false; if (ghOpen) openPanel(ghOpen); document.body.classList.remove('hunting'); bar.classList.remove('in'); world.controls().enableRotate = true; world.controls().enableZoom = true; world.controls().enableDamping = true; try { paint(); } catch (e) {}
       cancelAnimationFrame(raf); clearTimeout(pollT); cx.clearRect(0, 0, cv.width, cv.height); target = null; fx = [];
       if (me) mine = { me: { ...me, from: posAt(me, srv()), to: posAt(me, srv()), b0: headAt(me, srv()) ?? me.b1, b1: headAt(me, srv()) ?? me.b1, depart: srv(), arrive: srv() }, home: null };
       pauseNow(); idleRaf = requestAnimationFrame(idle);
@@ -944,6 +1000,8 @@
         const t1 = Date.now(); clockSample(r.j.now - (t0 + t1) / 2, t1 - t0);
         if (sent > flySent && !flyWait && r.j.me && (!me || r.j.me.depart >= me.depart - 50)) setMe(r.j.me);   // a flight you just set wins over an older answer
         if (r.j.balance != null) setBal(r.j.balance);
+        if (r.j.st) { gSt = r.j.st; gStAt = r.j.now; }
+        { const pp = me && posAt(me, srv()); if (pp) for (const b of r.j.birds || []) { if (!b.a || met.has(b.u)) continue; const q = posAt(b, srv()); if (q && km(pp, q) < 3) { met.add(b.u); ghEvent('Met', b.u, '#6ee7b7'); } } }
         birdsIn = true; birds = r.j.birds || []; for (const b of birds) { if (b.r) roles.set(b.u, b.r); else roles.delete(b.u); }
         { const mn = myName(); if (mn) { if (r.j.role) roles.set(mn, r.j.role); else roles.delete(mn); } }
         const now = srv(), ids = new Set((r.j.worms || []).map(w => w.id));
@@ -958,7 +1016,7 @@
       }
       pollT = setTimeout(() => poll(), 2000);
     }
-    function setBal(n) { const el = $('huntN'); if (balance != null && n > balance) { el.parentElement.classList.remove('bump'); void el.offsetWidth; el.parentElement.classList.add('bump'); } balance = n; el.textContent = n; }
+    function setBal(n) { const el = $('huntN'); if (balance != null && n > balance) { const wb = $('ghWormBox'); if (wb) { wb.classList.remove('bump'); void wb.offsetWidth; wb.classList.add('bump'); } el.parentElement.classList.remove('bump'); void el.offsetWidth; el.parentElement.classList.add('bump'); } balance = n; el.textContent = n; }
 
     // the spot on the ground under a point on the screen. (The library's toGlobeCoords hits the first thing in the scene,
     // and the night layer floats ~10 km up, which at hunting height pulled every tap about two-thirds of the way in
@@ -987,7 +1045,7 @@
     async function tryCatch(w) {
       if (asking.has(w.id)) return; asking.add(w.id);
       const r = await api('/hunt/catch', { id: w.id });
-      if (r.s === 200 && r.j.ok) { w.mine = true; worms.delete(w.id); fx.push({ k: 'catch', lat: w.at ? w.at[0] : w.lat, lng: w.at ? w.at[1] : w.lng, t0: performance.now(), v: r.j.value }); if (r.j.balance != null) setBal(r.j.balance); return; }
+      if (r.s === 200 && r.j.ok) { w.mine = true; worms.delete(w.id); ghEvent('+' + (r.j.value || 1), r.j.value > 1 ? 'Caught a rare worm' : 'Caught a worm', r.j.value > 1 ? '#c084fc' : '#f2a0a4'); fx.push({ k: 'catch', lat: w.at ? w.at[0] : w.lat, lng: w.at ? w.at[1] : w.lng, t0: performance.now(), v: r.j.value }); if (r.j.balance != null) setBal(r.j.balance); return; }
       if (r.s === 409) { worms.delete(w.id); if (!seenTaken.has(w.id)) { seenTaken.add(w.id); fx.push({ k: 'poof', lat: w.at ? w.at[0] : w.lat, lng: w.at ? w.at[1] : w.lng, t0: performance.now(), by: r.j.by, gold: w.v > 1 }); } return; }
       if (r.s === 410 || r.s === 404) { worms.delete(w.id); return; }
       setTimeout(() => asking.delete(w.id), 800);   // not close enough on the server's clock yet: try again in a moment
@@ -1034,7 +1092,7 @@
     }
     function drawEdge(x, y, gold, t) {
       // a worm off the screen: an arrow on the edge pointing at it
-      const m = 26, topY = 80, botY = H - 90;
+      const m = 26, topY = ghTopB + 22, botY = (ghBotT || H) - 26;
       const cx0 = W / 2, cy0 = (topY + botY) / 2, dx = x - cx0, dy = y - cy0;
       const sx = (W / 2 - m) / Math.abs(dx || 1e-6), sy = ((botY - topY) / 2) / Math.abs(dy || 1e-6), f = Math.min(sx, sy);
       const ex = cx0 + dx * f, ey = cy0 + dy * f, a = Math.atan2(dy, dx), pulse = 1;
@@ -1240,7 +1298,7 @@
       names.set(n, im); return im; }
     // in the game: other players within 100 km who are off the screen get an arrow at the edge with how far away they are
     function drawBirdEdge(x, y, name, d) {
-      const m = 30, topY = 84, botY = H - 96, cx0 = W / 2, cy0 = (topY + botY) / 2, dx = x - cx0, dy = y - cy0;
+      const m = 30, topY = ghTopB + 26, botY = (ghBotT || H) - 30, cx0 = W / 2, cy0 = (topY + botY) / 2, dx = x - cx0, dy = y - cy0;
       const f = Math.min((W / 2 - m) / Math.abs(dx || 1e-6), ((botY - topY) / 2) / Math.abs(dy || 1e-6)), ex = cx0 + dx * f, ey = cy0 + dy * f, a = Math.atan2(dy, dx), cl = css(col(name));
       const c = cx; c.save(); c.translate(ex, ey); c.save(); c.rotate(a); c.beginPath(); c.moveTo(7, 0); c.lineTo(-3, -5); c.lineTo(-3, 5); c.closePath();
       c.fillStyle = cl; c.shadowColor = 'rgba(0,0,0,.8)'; c.shadowBlur = 3; c.fill(); c.restore();
@@ -1266,7 +1324,7 @@
       c.setTransform(DPR, 0, 0, DPR, 0, 0); c.clearRect(0, 0, W, H);
       const v = world.pointOfView(), cosCap = Math.cos(Math.acos(1 / (1 + v.altitude)) * 0.95);
       const front = (la, lo) => Math.sin(v.lat * R) * Math.sin(la * R) + Math.cos(v.lat * R) * Math.cos(la * R) * Math.cos((lo - v.lng) * R) > cosCap;
-      const inView = s => s && s.x > -30 && s.x < W + 30 && s.y > 60 && s.y < H - 70;
+      const inView = s => s && s.x > -30 && s.x < W + 30 && s.y > ghTopB - 10 && s.y < (ghBotT || H) + 10;
       // where you tapped: a small ring that fades out
       if (target) { const s = sc(target.lat, target.lng), age = (performance.now() - target.t0) / 1000;
         if (age > 0.6) target = null; else if (s) { c.save(); c.globalAlpha = 0.7 * (1 - age / 0.6); c.strokeStyle = '#fff'; c.lineWidth = 1.5;
@@ -1334,6 +1392,7 @@
       // the line under your worm count: day or night where your bird is
       const tEl = $('huntT'); if (tEl) { const hint = Date.now() < hintUntil; if (tEl.classList.contains('on') !== hint) tEl.classList.toggle('on', hint); }
       spritesEnd();
+      ghUpdate(now, p);
     }
   }
 

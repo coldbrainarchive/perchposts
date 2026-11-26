@@ -8,3 +8,8 @@ CREATE INDEX IF NOT EXISTS idx_hunt_worms_live ON hunt_worms(gone_at) WHERE caug
 
 -- 2026-11-26: each bird's colour for the public dots on the globe (set by the owner's page; roles override it)
 ALTER TABLE hunt_birds ADD COLUMN col TEXT;
+
+-- 2026-11-26: the game's bars: total distance flown (km) and each bird's home spot
+ALTER TABLE hunt_birds ADD COLUMN flown REAL DEFAULT 0;
+ALTER TABLE hunt_birds ADD COLUMN home_lat REAL;
+ALTER TABLE hunt_birds ADD COLUMN home_lng REAL;
