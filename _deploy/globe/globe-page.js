@@ -879,7 +879,11 @@
     // your own bird on the globe is the way in (no button): an invisible tap target sits on it when it shows as a bird
     const myBtn = document.createElement('button'); myBtn.type = 'button'; myBtn.className = 'hunt-me'; myBtn.setAttribute('aria-label', 'Take flight'); document.body.appendChild(myBtn);
     myBtn.addEventListener('pointerdown', ev => ev.stopPropagation());
-    myBtn.addEventListener('click', () => { if (tok() && !tko && !on) tko = { t0: performance.now() }; });
+    // tapping your dot (zoomed out) flies the view down to your bird; tapping your bird (zoomed in) takes off
+    let myBtnMode = 'bird', myBtnAt = null;
+    myBtn.addEventListener('click', () => { if (!tok() || tko || on) return;
+      if (myBtnMode === 'dot' && myBtnAt) { const c = world.controls(); c.autoRotate = false; world.pointOfView({ lat: myBtnAt[0], lng: myBtnAt[1], altitude: GAME_ALT / 0.6 }, 1800); return; }
+      tko = { t0: performance.now() }; });
     bar.querySelector('.hb-x').addEventListener('click', () => leave());
 
 
@@ -1178,7 +1182,8 @@
             gr.addColorStop(0, `rgba(${cl[0]},${cl[1]},${cl[2]},${0.55 + 0.2 * pu})`); gr.addColorStop(1, `rgba(${cl[0]},${cl[1]},${cl[2]},0)`);
             c.beginPath(); c.arc(s.x, s.y, 18 + 3 * pu, 0, 7); c.fillStyle = gr; c.fill();
             c.beginPath(); c.arc(s.x, s.y, 7.2, 0, 7); c.fillStyle = 'rgba(0,0,0,.45)'; c.fill(); c.beginPath(); c.arc(s.x, s.y, 6.2, 0, 7); c.fillStyle = '#fff'; c.fill();
-            c.beginPath(); c.arc(s.x, s.y, 4.6, 0, 7); c.fillStyle = css(cl); c.fill(); }
+            c.beginPath(); c.arc(s.x, s.y, 4.6, 0, 7); c.fillStyle = css(cl); c.fill();
+            show = true; myBtnMode = 'dot'; myBtnAt = mp; myBtn.style.transform = `translate(${cr.left + s.x - 24}px,${cr.top + s.y - 24}px)`; }
           else { const hd = mine.me ? headAt(mine.me, tn) : null, a = hd != null ? hd - Math.PI / 2 : -Math.PI / 2;
             const msz = 96 * Math.max(0.5, km2);
             if (!tko) intoSprite('me', msz, msz, s.x, s.y, (x, y) => { drawNest(x, y, 0.8 * km2); drawSleeper(x, y, a, cl, 0.8 * km2, t, 0, true, null, mn); });   // same size as everyone else's nest
@@ -1189,8 +1194,9 @@
                 if (fin < 1) drawSleeper(x, y, a, cl, 0.8 * km2, t, 0, false, 1 - fin, mn);   // the sleeping bird uncurls into the flying one
                 drawBird(x, y - 6 * ez * km2, a, mn, km2 * (0.8 + 0.2 * ez) / (1 - 0.2 * sw), fin, sw, ps, cl); });   // grows to its game size as it lifts off
               if (u > 0.95) { tko = null; enter(); } }
-            show = !tko; myBtn.style.transform = `translate(${cr.left + s.x - 24}px,${cr.top + s.y - 24}px)`; } } }
+            show = !tko; myBtnMode = 'bird'; myBtn.style.transform = `translate(${cr.left + s.x - 24}px,${cr.top + s.y - 24}px)`; } } }
       if (myBtn.classList.contains('in') !== show) myBtn.classList.toggle('in', show);
+      { const lb = myBtnMode === 'dot' ? 'Go to my bird' : 'Take flight'; if (myBtn.getAttribute('aria-label') !== lb) myBtn.setAttribute('aria-label', lb); }
       spritesEnd();
     }
     idleRaf = requestAnimationFrame(idle);
