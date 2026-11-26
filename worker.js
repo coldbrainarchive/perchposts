@@ -52,10 +52,38 @@ export default {
     ctx.waitUntil(ensureIndexes(env, event));
     // Globe page: rebuild the 24h trending stories every hour
     ctx.waitUntil(buildTrending(env).catch(e => console.error("buildTrending", e.message)));
+    ctx.waitUntil(sinkWet(env, Date.now()).catch(e => console.error("sinkWet", e.message)));
   }
 };
 
 const LOGIN_TRIES = 10, LOCK_MINUTES = 15;
+
+// Take flight: a bird left treading water when its player went away (hunt_birds.wet_until = when its stamina runs
+// out) drowns at that moment: it washes up at its home spot with a full stamina bar but NO worms (its whole worm
+// balance is spent, the user's rule 2026-11-26), and the player gets a notification saying why. Run from any hunt
+// request, the public dots, and the hourly cron, so it happens even if nobody is playing.
+const HUNT_EN_MAX = 150, HUNT_SWIM_KMS = 0.75 * 0.35;   // km of stamina when full; km per second used treading water
+async function sinkWet(env, now) {
+  const { results = [] } = await env.DB.prepare(`SELECT username, from_lat, from_lng, home_lat, home_lng FROM hunt_birds WHERE wet_until IS NOT NULL AND wet_until <= ? LIMIT 10`).bind(now).all();
+  for (const b of results) {
+    const hl = b.home_lat ?? b.from_lat, hg = b.home_lng ?? b.from_lng;
+    const claim = await env.DB.prepare(`UPDATE hunt_birds SET wet_until = NULL, from_lat = ?, from_lng = ?, to_lat = ?, to_lng = ?, depart_at = ?, arrive_at = ? WHERE username = ? AND wet_until IS NOT NULL AND wet_until <= ?`)
+      .bind(hl, hg, hl, hg, now, now, b.username, now).run();
+    if (!claim.meta || !claim.meta.changes) continue;
+    const lost = await huntWipeWorms(env, b.username, now);
+    await env.DB.prepare(`UPDATE hunt_birds SET drowned_at = ?, drowned_lost = ? WHERE username = ?`).bind(now, lost, b.username).run();
+    await env.DB.prepare(`INSERT INTO system_notifications (id, user_id, message) VALUES (?, ?, ?)`).bind(crypto.randomUUID(), b.username,
+      JSON.stringify({ text: `Your bird ran out of stamina in the water and drowned. It washed up at home${lost ? ` and lost all ${lost} worm${lost === 1 ? "" : "s"}` : ""}.`, icon: "GLOBE" })).run();
+  }
+}
+// spend a player's whole worm balance (given to the game, like a worm eaten); returns how many
+async function huntWipeWorms(env, name, now) {
+  const r = await env.DB.prepare(`SELECT COALESCE((SELECT worm_start FROM mod_users WHERE username = ?1), 0) + (SELECT COUNT(*) FROM worms WHERE receiver = ?1) - (SELECT COUNT(*) FROM worms WHERE giver = ?1) AS b`).bind(name).first();
+  const n = Math.max(0, r?.b || 0); if (!n) return 0;
+  const iso = new Date(now).toISOString(), ins = env.DB.prepare(`INSERT INTO worms (id, giver, receiver, post_id, comment_id, created_at) VALUES (?, ?, '__hunt__', NULL, NULL, ?)`);
+  for (let i = 0; i < n; i += 100) await env.DB.batch(Array.from({ length: Math.min(100, n - i) }, () => ins.bind(crypto.randomUUID(), name, iso)));
+  return n;
+}
 
 // Posts written by people. Queries must repeat this text exactly to use idx_posts_human_activity.
 const HUMAN_POSTS = `username NOT IN ('NewsBot','ScienceBot','NatureBot','SportsBot')`;
@@ -2392,14 +2420,15 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   // name and role, so the globe can draw everyone's own logo bird asleep in its nest. Cached at the edge for 5 s.
   if (url.pathname === "/hunt/dots" && request.method === "GET") {
     const named = !!(username && !isBot), key = new Request(`https://perchposts-hunt.cache/dots${named ? "-n" : ""}`);
+    ctx.waitUntil(sinkWet(env, Date.now()).catch(() => {}));
     const hit = await caches.default.match(key);
     if (hit) return named ? new Response(hit.body, { headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "private, max-age=5" } }) : hit;
     try {
-      const { results = [] } = await env.DB.prepare(`SELECT h.username, h.from_lat, h.from_lng, h.brg0, h.brg1, h.depart_at, h.arrive_at, h.col, (SELECT m.role FROM mod_users m WHERE LOWER(m.username) = LOWER(h.username) AND m.deleted_at IS NULL LIMIT 1) AS role FROM hunt_birds h LIMIT 5000`).all();
+      const { results = [] } = await env.DB.prepare(`SELECT h.username, h.from_lat, h.from_lng, h.brg0, h.brg1, h.depart_at, h.arrive_at, h.col, h.wet_until, (SELECT m.role FROM mod_users m WHERE LOWER(m.username) = LOWER(h.username) AND m.deleted_at IS NULL LIMIT 1) AS role FROM hunt_birds h LIMIT 5000`).all();
       const r4 = x => x == null ? null : Math.round(x * 1e4) / 1e4;
       const colOf = b => b.role === "admin" ? "155,184,185" : (b.col || null);   // every bird its real colour; admins' logo is the blue-grey admin bird
       const body = JSON.stringify({ now: Date.now(), b: results.map(b => [r4(b.from_lat), r4(b.from_lng), r4(b.brg0), r4(b.brg1), b.depart_at, b.arrive_at, colOf(b),
-        ...(named ? [b.username, b.role === "admin" || b.role === "mod" ? b.role : null] : [])]) });
+        ...(named ? [b.username, b.role === "admin" || b.role === "mod" ? b.role : null] : [null, null]), b.wet_until != null && b.wet_until > Date.now() ? 1 : 0]) });   // [9]: drowning in the water
       const res = new Response(body, { headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": `${named ? "private" : "public"}, max-age=5` } });
       ctx.waitUntil(caches.default.put(key, new Response(body, { headers: { "Content-Type": "application/json", "Cache-Control": "public, max-age=5" } })));
       return res;
@@ -2462,7 +2491,13 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         p = [p0[0] + d * Math.cos(h) / 111.2, p0[1] + d * Math.sin(h) / (111.2 * Math.cos(p0[0] * R))]; }
       return p; };
     try {
+      await sinkWet(env, now);   // anyone (you too) whose time in the water ran out while away
       let me = await env.DB.prepare(`SELECT * FROM hunt_birds WHERE username = ?`).bind(username).first();
+      // playing again: a bird that was left in the water is yours to save now (the page keeps its stamina)
+      if (me && me.wet_until != null && (url.pathname === "/hunt/state" || url.pathname === "/hunt/fly")) { await env.DB.prepare(`UPDATE hunt_birds SET wet_until = NULL WHERE username = ?`).bind(username).run(); me.wet_until = null; }
+      // in the water and right by it (the coarse land map, with a 4 km margin for the page's sharper one)
+      const nearWater = p => { const ring = d => [0, 1, 2, 3, 4, 5].map(i => [p[0] + d * Math.cos(i * Math.PI / 3) / 111.2, p[1] + d * Math.sin(i * Math.PI / 3) / (111.2 * Math.cos(p[0] * R))]);
+        return !(isLand(p[0], p[1]) && ring(4).every(q => isLand(q[0], q[1]))); };
       if (me && colIn && me.col !== colIn) { await env.DB.prepare(`UPDATE hunt_birds SET col = ? WHERE username = ?`).bind(colIn, username).run(); me.col = colIn; }
       // the game's bars: how far you've flown (stored total + the flight you're on), where home is, and the time zone and
       // country under your bird (the nearest time-zone city, so it can be off right next to a border)
@@ -2535,12 +2570,14 @@ async function handleRequest(request, env, ctx, corsHeaders) {
           // everyone within 100 km, with names (players in the game see who's who): flying now ("a": active in the
           // last 45 s) or asleep in their nests; nearest first
           birds: birds.map(b => ({ b, d: km(p, posAt(b, now)) })).filter(x => x.d < 100).sort((x, y) => x.d - y.d).slice(0, 40)
-            .map(({ b }) => ({ u: b.username, ...(b.seen_at > now - 45000 ? { a: 1 } : {}), ...(b.role === 'admin' || b.role === 'mod' ? { r: b.role } : {}), ...flight(b) })),
+            .map(({ b }) => ({ u: b.username, ...(b.seen_at > now - 45000 ? { a: 1 } : {}), ...(b.wet_until != null && b.wet_until > now ? { w: 1 } : {}), ...(b.role === 'admin' || b.role === 'mod' ? { r: b.role } : {}), ...flight(b) })),
           role: await accountRole(username),
           worms: live.filter(w => km(p, [w.lat, w.lng]) < NEAR).map(w => ({ id: w.id, lat: w.lat, lng: w.lng, v: w.value, born: w.born_at, gone: w.gone_at })), spawned });
       }
       // your bird when you're not playing: where it is (or, before your first flight, where it will start)
-      if (url.pathname === "/hunt/me") { const meal = await dinner(); return json({ now, me: flight(me), st: stats(), ...(meal ? { meal, balance: await wormBalance(username) } : {}), home: me ? null : await clearPerch(homeFor(), 1.1), role: await accountRole(username) }); }
+      if (url.pathname === "/hunt/me") { const meal = await dinner();
+        let drowned = null; if (me && me.drowned_at) { drowned = { at: me.drowned_at, lost: me.drowned_lost || 0 }; await env.DB.prepare(`UPDATE hunt_birds SET drowned_at = NULL, drowned_lost = NULL WHERE username = ?`).bind(username).run(); }
+        return json({ now, me: flight(me), st: stats(), ...(drowned ? { drowned } : {}), ...(me && me.wet_until != null && me.wet_until > now ? { wet: me.wet_until } : {}), ...(meal || drowned ? { balance: await wormBalance(username) } : {}), ...(meal ? { meal } : {}), home: me ? null : await clearPerch(homeFor(), 1.1), role: await accountRole(username) }); }
       if (!me) return json({ error: "Start the hunt first" }, 400);
       // leaving the game: the bird stops right where it is, facing the way it was going, until you come back
       if (url.pathname === "/hunt/pause") {
@@ -2548,7 +2585,15 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         await env.DB.prepare(`UPDATE hunt_birds SET from_lat = ?, from_lng = ?, to_lat = ?, to_lng = ?, brg0 = ?, brg1 = ?, depart_at = ?, arrive_at = ?, flown = COALESCE(flown, 0) + ? WHERE username = ?`)
           .bind(p[0], p[1], p[0], p[1], h, h, now, now, segKm(me), username).run();
         me.flown = (me.flown || 0) + segKm(me); me.from_lat = me.to_lat = p[0]; me.from_lng = me.to_lng = p[1]; me.brg0 = me.brg1 = h; me.depart_at = me.arrive_at = now;
-        return json({ now, me: { from: p, to: p, b0: h, b1: h, depart: now, arrive: now }, st: stats() });
+        let wet = null;
+        if (body.leaving && body.wet && nearWater(p)) {   // left the game treading water: it keeps treading on what stamina it has, then drowns
+          const en = Math.max(0, Math.min(1, Number(body.en) || 0)), until = now + Math.round(en * HUNT_EN_MAX / HUNT_SWIM_KMS * 1000), mins = Math.max(1, Math.round((until - now) / 60000));
+          await env.DB.prepare(`UPDATE hunt_birds SET wet_until = ? WHERE username = ?`).bind(until, username).run(); wet = until;
+          if (!me.wet_note_at || now - me.wet_note_at > 30 * 60000) {
+            await env.DB.prepare(`UPDATE hunt_birds SET wet_note_at = ? WHERE username = ?`).bind(now, username).run();
+            await env.DB.prepare(`INSERT INTO system_notifications (id, user_id, message) VALUES (?, ?, ?)`).bind(crypto.randomUUID(), username,
+              JSON.stringify({ text: `Your bird is still in the water, treading water. It has about ${mins} min of stamina left. Fly it to land in Take flight, or it drowns and washes up at home with no worms.`, icon: "GLOBE" })).run(); } }
+        return json({ now, me: { from: p, to: p, b0: h, b1: h, depart: now, arrive: now }, st: stats(), ...(wet ? { wet } : {}) });
       }
       if (url.pathname === "/hunt/fly") {
         // a new heading: the bird turns from the way it's going now (gliding round), then flies straight on
@@ -2564,13 +2609,13 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         // it really is stopped on or right by water, so this can't be used as a free trip home from anywhere)
         const p = posAt(me, now);
         if (now < me.arrive_at) return json({ error: "Still flying" }, 400);
-        const ring = d => [0, 1, 2, 3, 4, 5].map(i => [p[0] + d * Math.cos(i * Math.PI / 3) / 111.2, p[1] + d * Math.sin(i * Math.PI / 3) / (111.2 * Math.cos(p[0] * R))]);
-        if (isLand(p[0], p[1]) && ring(4).every(q => isLand(q[0], q[1]))) return json({ error: "Not in water" }, 400);
+        if (!nearWater(p)) return json({ error: "Not in water" }, 400);
         const hm = me.home_lat != null ? [me.home_lat, me.home_lng] : homeFor(), h = await clearPerch(hm, 1.1), b = me.brg1 ?? 0;
         await env.DB.prepare(`UPDATE hunt_birds SET from_lat = ?, from_lng = ?, to_lat = ?, to_lng = ?, brg0 = ?, brg1 = ?, depart_at = ?, arrive_at = ?, flown = COALESCE(flown, 0) + ? WHERE username = ?`)
           .bind(h[0], h[1], h[0], h[1], b, b, now, now, segKm(me), username).run();
         me.flown = (me.flown || 0) + segKm(me); me.from_lat = me.to_lat = h[0]; me.from_lng = me.to_lng = h[1]; me.brg0 = me.brg1 = b; me.depart_at = me.arrive_at = now;
-        return json({ now, me: flight(me), st: stats() });
+        const lost = await huntWipeWorms(env, username, now);   // washes up with no worms (it only drowns with none, but just in case)
+        return json({ now, me: flight(me), st: stats(), lost, balance: 0 });
       }
       if (url.pathname === "/hunt/eat") {
         // your bird ran out of stamina and eats one worm from your real balance. Spent like a worm given to the game

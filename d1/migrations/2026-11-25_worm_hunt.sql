@@ -17,3 +17,10 @@ ALTER TABLE hunt_birds ADD COLUMN home_lng REAL;
 -- 2026-11-26: dinner: when the bird last ate its daily worm, and how many days it went without one (for starving, later)
 ALTER TABLE hunt_birds ADD COLUMN fed_at INTEGER;
 ALTER TABLE hunt_birds ADD COLUMN missed INTEGER DEFAULT 0;
+
+-- 2026-11-26: left in the water: when its stamina runs out (then it drowns, washes up at home, loses its worms),
+-- when the player was last told, and the drowning news for their next visit
+ALTER TABLE hunt_birds ADD COLUMN wet_until INTEGER;
+ALTER TABLE hunt_birds ADD COLUMN wet_note_at INTEGER;
+ALTER TABLE hunt_birds ADD COLUMN drowned_at INTEGER;
+ALTER TABLE hunt_birds ADD COLUMN drowned_lost INTEGER;

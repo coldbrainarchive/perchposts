@@ -946,7 +946,7 @@
       if (drowning) return; drowning = { t0: performance.now() }; peck = null;
       ghEvent('Drowned', 'out of stamina in the water · back home', '#60a5fa');
       setTimeout(() => { api('/hunt/drown').then(r => { const ok = r.s === 200 && r.j.me;
-        if (ok) { setMe(r.j.me); if (r.j.st) { gSt = r.j.st; gStAt = r.j.now; } wet = false; landed = true; enSave(); ghEvent('Home', 'your bird made it back to its nest', '#fcd34d'); }
+        if (ok) { setMe(r.j.me); if (r.j.st) { gSt = r.j.st; gStAt = r.j.now; } if (r.j.balance != null) setBal(r.j.balance); wet = false; landed = true; enKm = EN_MAX; enTired = false; enSave(); ghEvent('Home', 'washed up at home · stamina full, no worms', '#fcd34d'); }
         else { wet = false; noWater = Date.now() + 120000; }   // the server's coarser map says land here (a small lake): count it as land
         drowning = null; }); }, 1700);
     }
@@ -957,6 +957,9 @@
       if (m.ate > 0) { enKm = EN_MAX; enAt = Date.now(); enTired = false; enSave(); mealNote = ['Dinner', 'ate a worm · stamina full', '#e8555c']; }
       else mealNote = ['Hungry', 'no worm for dinner · resting only', '#f87171'];
       if (on) { ghEvent(...mealNote); mealNote = null; } };
+    // drowned while you were away (the server sank it when its stamina ran out): full bar, no worms, told in the log
+    const drownedIn = j => { if (!j || !j.drowned) return; if (j.balance != null) setBal(j.balance); enKm = EN_MAX; enAt = Date.now(); wet = false; enTired = false; enSave();
+      const n = j.drowned.lost; mealNote = ['Drowned', `while you were away · washed up at home${n ? ` · lost all ${n} worm${n === 1 ? '' : 's'}` : ''}`, '#60a5fa']; if (on) { ghEvent(...mealNote); mealNote = null; } };
     const outOfWorms = () => { if (!landed) landNow(); ghEvent('Out of worms', 'catch or earn a worm to fly again', '#f87171'); };
     // eat one worm: stamina back to full, then carry on (then() takes off again if you were standing)
     function eatWorm(then, fail, quiet) {
@@ -1063,8 +1066,8 @@
     }
     const TZ = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { return ''; } })();
     // pausing: the server stops the bird where it is (also when the page is hidden or closed mid-flight)
-    const pauseNow = keep => fetch(API + '/hunt/pause', { method: 'POST', keepalive: !!keep, headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ col: kitCol() }) })
-      .then(r => r.json()).then(j => { if (j && j.me) { myDeps.add(j.me.depart); mine = { me: j.me, home: null }; if (on && document.hidden) me = j.me; } }).catch(() => {});
+    const pauseNow = keep => fetch(API + '/hunt/pause', { method: 'POST', keepalive: !!keep, headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ col: kitCol(), leaving: 1, wet: wet && !drowning, en: enKm / EN_MAX }) })
+      .then(r => r.json()).then(j => { if (j && j.me) { myDeps.add(j.me.depart); mine = { me: j.me, home: null, wet: j.wet || 0 }; if (on && document.hidden) me = j.me; } }).catch(() => {});
     function leave() {
       if (!on) return; on = false; if (ghOpen) openPanel(ghOpen); document.body.classList.remove('hunting'); bar.classList.remove('in'); world.controls().enableRotate = true; world.controls().enableZoom = true; world.controls().enableDamping = true; try { paint(); } catch (e) {}
       cancelAnimationFrame(raf); clearTimeout(pollT); cx.clearRect(0, 0, cv.width, cv.height); target = null; fx = [];
@@ -1270,13 +1273,13 @@
     const myDeps = new Set(), isMine = d => myDeps.has(d.depart);
     const kitCol = () => { try { const n = myName(); return window._ppKit && window._ppKit.bodyCol && n ? window._ppKit.bodyCol(n).join(',') : undefined; } catch (e) { return undefined; } };
     const loadMine = () => { if (!tok()) { mine = null; return; }
-      api('/hunt/me', { tz: TZ, col: kitCol(), en: enKm / EN_MAX }).then(r => { if (r.s !== 200 || !r.j) return; mealIn(r.j); mine = { me: r.j.me, home: r.j.home }; if (r.j.me) myDeps.add(r.j.me.depart);
+      api('/hunt/me', { tz: TZ, col: kitCol(), en: enKm / EN_MAX }).then(r => { if (r.s !== 200 || !r.j) return; mealIn(r.j); drownedIn(r.j); mine = { me: r.j.me, home: r.j.home, wet: r.j.wet || 0 }; if (r.j.me) myDeps.add(r.j.me.depart);
         const mn = myName(); if (mn) { if (r.j.role) roles.set(mn, r.j.role); else roles.delete(mn); }
         if (!window._ppKit) loadKit(() => { if (r.j.me) api('/hunt/me', { tz: TZ, col: kitCol(), en: enKm / EN_MAX }); }); }); };
     const parseCol = c => { const v = typeof c === 'string' ? c.split(',').map(Number) : null; return v && v.length === 3 && v.every(x => x >= 0 && x <= 255) ? v : [214, 218, 226]; };
     // (signed in, the list also has each bird's name and role, so sleeping birds show their owner's own logo bird)
     const loadDots = () => fetch(API + '/hunt/dots', { headers: hdr() }).then(r => r.json()).then(j => { if (!j || !Array.isArray(j.b)) return; dotsOff = j.now - Date.now();
-      dotsAt = j.now; dots = j.b.map((d, i) => ({ i, from: [d[0], d[1]], to: [d[0], d[1]], b0: d[2], b1: d[3], depart: d[4], arrive: d[5], col: parseCol(d[6]), u: d[7] || null }));
+      dotsAt = j.now; dots = j.b.map((d, i) => ({ i, from: [d[0], d[1]], to: [d[0], d[1]], b0: d[2], b1: d[3], depart: d[4], arrive: d[5], col: parseCol(d[6]), u: d[7] || null, wet: d[9] === 1 }));
       for (const d of j.b) if (d[7]) { if (d[8]) roles.set(d[7], d[8]); else if (d[7] !== myName()) roles.delete(d[7]); } }).catch(() => {});
     // (a bird can be paused on someone else's phone at any moment: the dots are fetched every 8 s and a moving one is only
     // carried on for up to 8 s past the latest news of it, so a stopped bird's dot doesn't keep drifting away)
@@ -1333,6 +1336,20 @@
       })().then(o => sleepy.set(key, o || 'fail')).catch(() => sleepy.set(key, 'fail'));
       return null;
     }
+    function drawDrowning(x, y, a, cl, k, t, seed, name) {
+      const c = cx, T = t + seed;
+      for (let i = 0; i < 3; i++) { const ph = (T * 0.9 + i / 3) % 1;
+        c.beginPath(); c.ellipse(x, y, (7 + ph * 20) * k, (7 + ph * 20) * k * 0.8, 0, 0, 7); c.strokeStyle = `rgba(220,236,255,${(1 - ph) * 0.5})`; c.lineWidth = 1.2; c.stroke(); }
+      const cyc = T % 2.6, burst = cyc < 0.9 ? Math.sin(Math.PI * cyc / 0.9) : 0, flap = burst * (0.5 + 0.5 * Math.sin(T * 22));   // every few seconds a weak, frantic burst of flapping
+      const under = 0.5 + 0.5 * Math.sin(T * 1.3), rock = Math.sin(T * 2.3) * 0.12;
+      drawBird(x, y + under * 1.2 * k, a + rock, name, 0.9 * k, 1 - 0.3 * under, 1, { span: 0.32 + 0.5 * flap, bk: 0, lift: flap }, cl);
+      c.save(); c.translate(x, y + under * 1.2 * k); c.rotate(a + rock);   // mostly under the surface
+      const g = c.createRadialGradient(-6 * k, 0, 1, -6 * k, 0, 12 * k); g.addColorStop(0, 'rgba(30,62,92,.6)'); g.addColorStop(1, 'rgba(30,62,92,0)');
+      c.beginPath(); c.ellipse(-6 * k, 0, 12 * k, 8 * k, 0, 0, 7); c.fillStyle = g; c.fill(); c.restore();
+      c.fillStyle = 'rgba(235,245,255,.85)';
+      if (burst > 0.15) for (let i = 0; i < 5; i++) { const an = i * 1.26 + T * 3, r = (9 + 5 * burst) * k; c.beginPath(); c.arc(x + Math.cos(an) * r, y + Math.sin(an) * r * 0.8 - burst * 3 * k, 1.1 * k, 0, 7); c.fill(); }   // splashes
+      for (let i = 0; i < 2; i++) { const u = (T * 0.7 + i * 0.5) % 1; c.globalAlpha = (1 - u) * 0.8; c.beginPath(); c.arc(x + (6 + i * 3) * k * Math.cos(a), y + (6 + i * 3) * k * Math.sin(a) - u * 8 * k, (0.8 + u) * k, 0, 7); c.strokeStyle = 'rgba(235,245,255,.9)'; c.lineWidth = 0.7; c.stroke(); } c.globalAlpha = 1;   // bubbles
+    }
     function drawSleeper(x, y, a, cl, k, t, seed, zs, alpha, name) {
       // asleep in the nest ("B5", the user's pick): a round body in the bird's colour with a little tail, the player's own
       // logo bird as the head with its eyes shut (a plain soft head when we don't know whose bird it is), and a wing
@@ -1383,6 +1400,7 @@
           c.beginPath(); c.arc(s.x, s.y, 2.6, 0, 7); c.fillStyle = css(d.col); c.fill(); continue; }
         const flying = tq < d.arrive, hd = headAt(d, tq), a0 = hd != null ? hd - Math.PI / 2 : -Math.PI / 2;
         const sk = 'o:' + (d.u || d.i), sz = 76 * Math.max(0.5, km2);
+        if (!flying && d.wet) { intoSprite(sk, sz, sz, s.x, s.y, (x, y) => drawDrowning(x, y, a0, d.col, 0.8 * km2, t, d.i * 0.77, d.u)); continue; }
         if (!flying) { intoSprite(sk, sz, sz, s.x, s.y, (x, y) => { drawNest(x, y, 0.8 * km2); drawSleeper(x, y, a0, d.col, 0.8 * km2, t, d.i * 0.77, true, null, d.u); }); continue; }
         let a = idleAng.get(d.i) ?? a0; a = ease(a, a0, dt, 'dot' + d.i); idleAng.set(d.i, a);
         const ps = pose('dot' + d.i, true, bankAt(d, tq), dt); intoSprite(sk, sz, sz, s.x, s.y, (x, y) => drawBird(x, y, a, d.u || '', 0.8 * km2, 0.92, 0, ps, d.col)); }
@@ -1397,7 +1415,9 @@
             show = true; myBtnMode = 'dot'; myBtnAt = mp; myBtn.style.transform = `translate(${cr.left + s.x - 24}px,${cr.top + s.y - 24}px)`; }
           else { const hd = mine.me ? headAt(mine.me, tn) : null, a = hd != null ? hd - Math.PI / 2 : -Math.PI / 2;
             const msz = 96 * Math.max(0.5, km2);
-            if (!tko) intoSprite('me', msz, msz, s.x, s.y, (x, y) => { drawNest(x, y, 0.8 * km2); drawSleeper(x, y, a, cl, 0.8 * km2, t, 0, true, null, mn); });   // same size as everyone else's nest
+            const myWet = mine.wet && mine.wet > Date.now() + dotsOff;
+            if (!tko && myWet) intoSprite('me', msz, msz, s.x, s.y, (x, y) => drawDrowning(x, y, a, cl, 0.8 * km2, t, 0, mn));
+            else if (!tko) intoSprite('me', msz, msz, s.x, s.y, (x, y) => { drawNest(x, y, 0.8 * km2); drawSleeper(x, y, a, cl, 0.8 * km2, t, 0, true, null, mn); });   // same size as everyone else's nest
             else { // waking up: the wings open, it flaps hard and lifts off (its shadow drops away), the nest fades out
               const u = (performance.now() - tko.t0) / 1000, e = Math.min(1, u / 0.9), ez = e * e * (3 - 2 * e), sw = 1 - 1.4 * ez;
               const ps = pose('@tko', true, 0, dt * 1.6), fin = Math.min(1, u / 0.25); ps.span = 0.32 + (ps.span - 0.32) * fin;
@@ -1494,6 +1514,7 @@
         const moving = now < b.arrive, ahead = posAt(b, now + 600), s2 = ahead && sc(ahead[0], ahead[1]);
         if (!moving && b.a) { const ha = headAt(b, now), aa = ha != null ? ha - Math.PI / 2 : -Math.PI / 2; intoSprite('b:' + b.u, 76, 76, s.x, s.y, (x, y) => drawBird(x, y, aa, b.u, 1, 0.92, 1, { span: 0.32, bk: 0, lift: 0 }));
           pillSprite(b.u, s.x, s.y + 20); continue; }   // playing but landed: standing on the ground
+        if (!moving && b.w) { const ha = headAt(b, now); intoSprite('b:' + b.u, 76, 76, s.x, s.y, (x, y) => drawDrowning(x, y, ha != null ? ha - Math.PI / 2 : 0, col(b.u), 0.8, t, b.u.length, b.u)); pillSprite(b.u, s.x, s.y + 20); continue; }
         if (!moving) { intoSprite('b:' + b.u, 76, 76, s.x, s.y, (x, y) => { drawNest(x, y, 0.8); drawSleeper(x, y, 0, col(b.u), 0.8, t, b.u.length, true, null, b.u); });
           pillSprite(b.u, s.x, s.y + 17); continue; }
         let a = angs.get(b.u) ?? -Math.PI / 2; if (moving && s2 && Math.hypot(s2.x - s.x, s2.y - s.y) > 0.5) a = ease(a, Math.atan2(s2.y - s.y, s2.x - s.x), dt, b.u); angs.set(b.u, a);
