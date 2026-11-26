@@ -1068,18 +1068,15 @@
       c.restore();
     }
     function drawSleeper(x, y, a, cl, k, t, seed, zs, alpha) {
+      // curled up like a ball (the user's pick, "J10"): a round body in the bird's colour with a little tail nub, and a big
+      // soft, much lighter head resting on the front of it
       cx.save(); if (alpha != null) cx.globalAlpha = alpha;
-      const c = cx, br = 1 + 0.035 * Math.sin(t * 2.1 + seed), lo = lift(cl, 0.78), hi = lift(cl, 1.15), dk = shade(cl);
-      c.save(); c.translate(x, y); c.rotate(a); c.scale(k, k);
-      c.beginPath(); c.moveTo(-6.5, -2); c.quadraticCurveTo(-11.5, -2.6, -12, 0); c.quadraticCurveTo(-11.5, 2.6, -6.5, 2); c.closePath(); c.fillStyle = css(lo); c.fill();   // tail
-      c.save(); c.scale(br, br);
-      let g = c.createRadialGradient(-1.5, -3, 1, 0, 0, 10); g.addColorStop(0, css(hi)); g.addColorStop(0.7, css(cl)); g.addColorStop(1, css(lift(cl, 0.88)));
-      c.beginPath(); c.ellipse(-0.5, 0, 8.8, 7.4, 0, 0, 7); c.fillStyle = g; c.fill();                                                         // body, fluffed up
-      c.beginPath(); c.moveTo(4, 1.2); c.quadraticCurveTo(0, 7.4, -8.4, 3.2); c.quadraticCurveTo(-3, 1.6, 4, 1.2); c.fillStyle = css(lo); c.fill();   // folded wing
-      c.restore();
-      g = c.createRadialGradient(3, -4.2, 0.5, 3.6, -3, 5.2); g.addColorStop(0, css(hi)); g.addColorStop(1, css(cl));
-      c.beginPath(); c.arc(3.6, -2.8, 4.6, 0, 7); c.fillStyle = g; c.fill(); c.lineWidth = 0.6; c.strokeStyle = 'rgba(0,0,0,.18)'; c.stroke();                                                                     // head, turned onto the shoulder
-      c.beginPath(); c.moveTo(1.2, -4.9); c.lineTo(-2.4, -4.4); c.lineTo(0.9, -3.2); c.closePath(); c.fillStyle = css(dk); c.fill();            // beak tucked back
+      const c = cx, br = 1 + 0.035 * Math.sin(t * 2.1 + seed);
+      const G = (col, x0, r, hi, lo) => { const g = c.createRadialGradient(x0 - r * 0.35, -r * 0.45, r * 0.1, x0, 0, r * 1.05); g.addColorStop(0, css(lift(col, hi))); g.addColorStop(0.65, css(col)); g.addColorStop(1, css(lift(col, lo))); return g; };
+      c.save(); c.translate(x, y); c.rotate(a); c.scale(k * br, k * br);
+      c.beginPath(); c.moveTo(-7, -2); c.quadraticCurveTo(-11, 0, -7, 2); c.fillStyle = css(lift(cl, 0.75)); c.fill();   // tail nub
+      c.beginPath(); c.arc(0, 0, 8.5, 0, 7); c.fillStyle = G(cl, 0, 8.5, 1.18, 0.82); c.fill();                          // body
+      const hc = lift(cl, 1.4); c.beginPath(); c.arc(3.4, 0, 5.4, 0, 7); c.fillStyle = G(hc, 3.4, 5.4, 1.12, 0.92); c.fill();   // head
       c.restore();
       if (zs) { c.save(); c.fillStyle = '#e2e8f0'; c.shadowColor = 'rgba(0,0,0,.85)'; c.shadowBlur = 3;
         for (let i = 0; i < 2; i++) { const u = ((t + seed + i * 1.3) % 2.6) / 2.6; c.globalAlpha = Math.sin(Math.PI * u) * 0.85;
