@@ -792,7 +792,7 @@
       const t = srv(), p = posAt(me, t), h = me && t < me.arrive ? headAt(me, t) : null;
       const f = fTurn({ from: p, to: p, b0: h == null ? brg : h, b1: brg, depart: t }); f.arrive = t + flyFor(f._T); me = f; flySent = Date.now(); flyWait++;
       try { localStorage.setItem('pp_hunt_brg', String(brg)); } catch (e) {}
-      api('/hunt/fly', { brg }).then(x => { flyWait = Math.max(0, flyWait - 1); if (x.s === 200 && x.j.me && on && flyWait === 0) setMe(x.j.me); });
+      api('/hunt/fly', { brg, t }).then(x => { flyWait = Math.max(0, flyWait - 1); if (x.s === 200 && x.j.me && on && flyWait === 0) setMe(x.j.me); });
     }
     // the server's copy of a flight starts a moment later than the one the page drew, so swapping to it would make the
     // bird hop a few pixels: the difference is blended away over a third of a second instead
@@ -1007,7 +1007,7 @@
       { const t = Date.now(), dms = Math.max(0, t - enAt); enAt = t;
         const flying = me && now < me.arrive && me.b1 != null && !landed, w = p ? isWater(p[0], p[1]) : null;   // (also fetches the map around you)
         if (!flying && w != null && w !== wet && !(w && Date.now() < noWater)) { wet = w; if (wet && enKm > 0 && !drowning) ghEvent('Treading water', 'uses stamina', '#60a5fa'); enSave(); }
-        if (flying && w != null) { if (w && !overW && Date.now() > overWAt) { overWAt = Date.now() + 60000; ghEvent('Over water', 'run out of stamina here and you fall in · no worms left and you drown', '#60a5fa'); } overW = w; }   // flying out over water: a short warning (at most once a minute, so coastlines don't spam it)
+        if (flying && w != null) { if (w && !overW && Date.now() > overWAt) { overWAt = Date.now() + 60000; ghEvent('Over water', 'run out here and you’ll fall in', '#60a5fa'); } overW = w; }   // flying out over water: a short warning (at most once a minute, so coastlines don't spam it)
         if (flying) { if (wet) { wet = false; } enAdd(-SPEED * Math.min(5000, dms) / 1000); }
         else if (wet) enAdd(-SWIM * Math.min(5000, dms)); else enAdd(dms * EN_REST);   // (rest counts all the time you were away)
         if (flying && enKm <= 0 && !enTired) { if (w === true) { landNow(true); wet = true; ghEvent('Splash', 'out of stamina over water', '#60a5fa'); } else eatStop(); }   // over water: falls in (then eats, below); over land: lands, eats, flies on
@@ -1038,7 +1038,7 @@
     world.renderer().domElement.addEventListener('pointerdown', () => { dotFly = null; });   // touching the map stops the flight
     myBtn.addEventListener('click', () => { if (!tok() || tko || on) return;
       if (myBtnMode === 'dot' && myBtnAt) { const c = world.controls(); c.autoRotate = false; const v = world.pointOfView(); dotFly = { la0: v.lat, lo0: v.lng, a0: v.altitude, la: myBtnAt[0], lo: myBtnAt[1], t0: performance.now() }; return; }   // all the way down to playing height
-      tko = { t0: performance.now() }; });
+      tko = { t0: performance.now(), wet: !!(mine && mine.wet && mine.wet > Date.now() + dotsOff) }; });
     bar.querySelector('.hb-x').addEventListener('click', () => leave());
 
 
@@ -1066,7 +1066,7 @@
     }
     const TZ = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { return ''; } })();
     // pausing: the server stops the bird where it is (also when the page is hidden or closed mid-flight)
-    const pauseNow = keep => fetch(API + '/hunt/pause', { method: 'POST', keepalive: !!keep, headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ col: kitCol(), leaving: 1, wet: wet && !drowning, en: enKm / EN_MAX }) })
+    const pauseNow = keep => fetch(API + '/hunt/pause', { method: 'POST', keepalive: !!keep, headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ col: kitCol(), leaving: 1, wet: wet && !drowning, en: enKm / EN_MAX, t: srv() }) })
       .then(r => r.json()).then(j => { if (j && j.me) { myDeps.add(j.me.depart); mine = { me: j.me, home: null, wet: j.wet || 0 }; if (on && document.hidden) me = j.me; } }).catch(() => {});
     function leave() {
       if (!on) return; on = false; if (ghOpen) openPanel(ghOpen); document.body.classList.remove('hunting'); bar.classList.remove('in'); world.controls().enableRotate = true; world.controls().enableZoom = true; world.controls().enableDamping = true; try { paint(); } catch (e) {}
@@ -1077,7 +1077,7 @@
     function landNow(quiet) {
       const t = srv(), p = posAt(me, t), h = headAt(me, t) ?? me.b1 ?? 0; landed = true;
       setMe({ from: p, to: p, b0: h, b1: h, depart: t, arrive: t }); flySent = Date.now(); flyWait++;
-      fetch(API + '/hunt/pause', { method: 'POST', headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ col: kitCol() }) }).then(r => r.json())
+      fetch(API + '/hunt/pause', { method: 'POST', headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ col: kitCol(), t }) }).then(r => r.json())
         .then(j => { flyWait = Math.max(0, flyWait - 1); if (j && j.me && on && landed) { setMe(j.me); if (j.st) { gSt = j.st; gStAt = j.now; } } }).catch(() => { flyWait = Math.max(0, flyWait - 1); });
       if (!quiet) ghEvent('Landed', ghTown || 'here', '#fcd34d');
     }
@@ -1096,7 +1096,7 @@
       if (r.s === 401) { leave(); toast('Sign in to take flight', true); return; }
       if (r.s === 200 && r.j.now) {
         const t1 = Date.now(); clockSample(r.j.now - (t0 + t1) / 2, t1 - t0);
-        if (sent > flySent && !flyWait && r.j.me && (!me || r.j.me.depart >= me.depart - 50)) setMe(r.j.me);   // a flight you just set wins over an older answer
+        if (sent > flySent && !flyWait && r.j.me && (!me || r.j.me.depart >= me.depart - 50)) { const q1 = me && posAt(me, srv()), q2 = posAt(r.j.me, srv()); if (!q1 || !q2 || km(q1, q2) > 0.04 || Math.abs((r.j.me.b1 ?? 0) - (me.b1 ?? 0)) > 0.01) setMe(r.j.me); }   // a flight you just set wins over an older answer; and the same flight (within 40 m) is left alone so your bird never slides
         if (r.j.balance != null) setBal(r.j.balance);
         if (r.j.st) { gSt = r.j.st; gStAt = r.j.now; } mealIn(r.j);
         { const pp = me && posAt(me, srv()); if (pp) for (const b of r.j.birds || []) { if (!b.a || met.has(b.u)) continue; const q = posAt(b, srv()); if (q && km(pp, q) < 3) { met.add(b.u); ghEvent('Met', b.u, '#6ee7b7'); } } }
@@ -1421,9 +1421,12 @@
             else { // waking up: the wings open, it flaps hard and lifts off (its shadow drops away), the nest fades out
               const u = (performance.now() - tko.t0) / 1000, e = Math.min(1, u / 0.9), ez = e * e * (3 - 2 * e), sw = 1 - 1.4 * ez;
               const ps = pose('@tko', true, 0, dt * 1.6), fin = Math.min(1, u / 0.25); ps.span = 0.32 + (ps.span - 0.32) * fin;
-              intoSprite('me', msz, msz, s.x, s.y, (x, y) => { drawNest(x, y, 0.8 * km2, 1 - ez);
-                if (fin < 1) drawSleeper(x, y, a, cl, 0.8 * km2, t, 0, false, 1 - fin, mn);   // the sleeping bird uncurls into the flying one
-                drawBird(x, y - 6 * ez * km2, a, mn, km2 * (0.8 + 0.2 * ez) / (1 - 0.2 * sw), fin, sw, ps, cl); });   // grows to its game size as it lifts off
+              intoSprite('me', msz, msz, s.x, s.y, (x, y) => {
+                if (tko.wet) { const k = 0.8 * km2; for (let i = 0; i < 3; i++) { const ph = (t * 0.9 + i / 3) % 1;   // out of the water: no nest, just the ripples it leaves behind, fading
+                    cx.beginPath(); cx.ellipse(x, y, (7 + ph * 20) * k, (7 + ph * 20) * k * 0.8, 0, 0, 7); cx.strokeStyle = `rgba(220,236,255,${(1 - ph) * 0.5 * (1 - ez)})`; cx.lineWidth = 1.2; cx.stroke(); } }
+                else { drawNest(x, y, 0.8 * km2, 1 - ez);
+                  if (fin < 1) drawSleeper(x, y, a, cl, 0.8 * km2, t, 0, false, 1 - fin, mn); }   // the sleeping bird uncurls into the flying one
+                drawBird(x, y - 6 * ez * km2, a, mn, km2 * (0.8 + 0.2 * ez) / (1 - 0.2 * sw), tko.wet ? 1 : fin, sw, ps, cl); });   // grows to its game size as it lifts off
               if (u > 0.95) { tko = null; enter(); } }
             show = !tko; myBtnMode = 'bird'; myBtn.style.transform = `translate(${cr.left + s.x - 24}px,${cr.top + s.y - 24}px)`; } } }
       if (myBtn.classList.contains('in') !== show) myBtn.classList.toggle('in', show);
@@ -1522,8 +1525,8 @@
         pillSprite(b.u, s.x, s.y + 20); }
       // until the game's first answer arrives (with names), the nests the globe already knew about stay on the screen
       if (!birdsIn) { const tq = Math.min(Date.now() + dotsOff, dotsAt + 8000);
-        for (const d of dots) { if (tq < d.arrive || isMine(d)) continue; const q = flyAt(d, tq); if (!q || (p && km(p, q) < 0.05) || !front(q[0], q[1])) continue;
-          const s = sc(q[0], q[1]); if (!inView(s)) continue; const hd = headAt(d, tq); intoSprite('o:' + (d.u || d.i), 76, 76, s.x, s.y, (x, y) => { drawNest(x, y, 0.8); drawSleeper(x, y, hd != null ? hd - Math.PI / 2 : 0, d.col, 0.8, t, d.i * 0.77, true, null, d.u); }); } }
+        for (const d of dots) { if (tq < d.arrive || isMine(d) || (d.u && d.u === myName())) continue; const q = flyAt(d, tq); if (!q || (p && km(p, q) < 0.05) || !front(q[0], q[1])) continue;
+          const s = sc(q[0], q[1]); if (!inView(s)) continue; const hd = headAt(d, tq); intoSprite('o:' + (d.u || d.i), 76, 76, s.x, s.y, (x, y) => { if (d.wet) { drawDrowning(x, y, hd != null ? hd - Math.PI / 2 : 0, d.col, 0.8, t, d.i * 0.77, d.u); return; } drawNest(x, y, 0.8); drawSleeper(x, y, hd != null ? hd - Math.PI / 2 : 0, d.col, 0.8, t, d.i * 0.77, true, null, d.u); }); } }
       // effects: catches (your bird dives, the worm is pulled up, +1 / +5 rises) and worms another bird took
       let swoop = 0;
       fx = fx.filter(f => { const age = (performance.now() - f.t0) / 1000, s = sc(f.lat, f.lng); if (!s) return age < 1.4;

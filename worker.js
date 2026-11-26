@@ -2580,8 +2580,12 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         return json({ now, me: flight(me), st: stats(), ...(drowned ? { drowned } : {}), ...(me && me.wet_until != null && me.wet_until > now ? { wet: me.wet_until } : {}), ...(meal || drowned ? { balance: await wormBalance(username) } : {}), ...(meal ? { meal } : {}), home: me ? null : await clearPerch(homeFor(), 1.1), role: await accountRole(username) }); }
       if (!me) return json({ error: "Start the hunt first" }, 400);
       // leaving the game: the bird stops right where it is, facing the way it was going, until you come back
+      // the page says when you tapped (its copy of the server clock, "t"): the new flight starts from that moment, so the
+      // server's copy is the same path your phone already drew and nothing has to be corrected on your screen (only
+      // up to 2 s back, and never in the future)
+      const tapT = Number(body.t), at = Number.isFinite(tapT) && tapT <= now && now - tapT < 2000 && tapT >= (me ? me.depart_at : 0) ? Math.round(tapT) : now;
       if (url.pathname === "/hunt/pause") {
-        const f0 = flight(me), h = headAt(f0, now) ?? me.brg1 ?? 0, p = await clearPerch(posAt(me, now), h);
+        const f0 = flight(me), h = headAt(f0, at) ?? me.brg1 ?? 0, p = await clearPerch(posAt(me, at), h);
         await env.DB.prepare(`UPDATE hunt_birds SET from_lat = ?, from_lng = ?, to_lat = ?, to_lng = ?, brg0 = ?, brg1 = ?, depart_at = ?, arrive_at = ?, flown = COALESCE(flown, 0) + ? WHERE username = ?`)
           .bind(p[0], p[1], p[0], p[1], h, h, now, now, segKm(me), username).run();
         me.flown = (me.flown || 0) + segKm(me); me.from_lat = me.to_lat = p[0]; me.from_lng = me.to_lng = p[1]; me.brg0 = me.brg1 = h; me.depart_at = me.arrive_at = now;
@@ -2598,11 +2602,11 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       if (url.pathname === "/hunt/fly") {
         // a new heading: the bird turns from the way it's going now (gliding round), then flies straight on
         const brg = +body.brg; if (!Number.isFinite(brg) || Math.abs(brg) > 100) return json({ error: "Bad heading" }, 400);
-        const f0 = flight(me), p = posAt(me, now), h = now < me.arrive_at ? headAt(f0, now) : null;
-        const f = fTurn({ from: p, to: p, b0: h == null ? brg : h, b1: brg, depart: now }); f.arrive = now + Math.round(flyFor(f._T));
+        const f0 = flight(me), p = posAt(me, at), h = at < me.arrive_at ? headAt(f0, at) : null;
+        const f = fTurn({ from: p, to: p, b0: h == null ? brg : h, b1: brg, depart: at }); f.arrive = at + Math.round(flyFor(f._T));
         await env.DB.prepare(`UPDATE hunt_birds SET from_lat = ?, from_lng = ?, to_lat = ?, to_lng = ?, brg0 = ?, brg1 = ?, depart_at = ?, arrive_at = ?, seen_at = ?, flown = COALESCE(flown, 0) + ? WHERE username = ?`)
-          .bind(p[0], p[1], p[0], p[1], f.b0, f.b1, now, f.arrive, now, segKm(me), username).run();
-        return json({ now, me: { from: p, to: p, b0: f.b0, b1: f.b1, depart: now, arrive: f.arrive } });
+          .bind(p[0], p[1], p[0], p[1], f.b0, f.b1, at, f.arrive, now, segKm(me), username).run();
+        return json({ now, me: { from: p, to: p, b0: f.b0, b1: f.b1, depart: at, arrive: f.arrive } });
       }
       if (url.pathname === "/hunt/drown") {
         // out of stamina in the water: the bird is put back at its home spot (the page drains stamina; here we only check
