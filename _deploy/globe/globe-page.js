@@ -1173,13 +1173,13 @@
             c.beginPath(); c.arc(s.x, s.y, 3.2, 0, 7); c.fillStyle = css(cl); c.fill(); }
           else { const hd = mine.me ? headAt(mine.me, tn) : null, a = hd != null ? hd - Math.PI / 2 : -Math.PI / 2;
             const msz = 96 * Math.max(0.5, km2);
-            if (!tko) intoSprite('me', msz, msz, s.x, s.y, (x, y) => { drawNest(x, y, km2); drawSleeper(x, y, a, cl, km2, t, 0, true, null, mn); });
+            if (!tko) intoSprite('me', msz, msz, s.x, s.y, (x, y) => { drawNest(x, y, 0.8 * km2); drawSleeper(x, y, a, cl, 0.8 * km2, t, 0, true, null, mn); });   // same size as everyone else's nest
             else { // waking up: the wings open, it flaps hard and lifts off (its shadow drops away), the nest fades out
               const u = (performance.now() - tko.t0) / 1000, e = Math.min(1, u / 0.9), ez = e * e * (3 - 2 * e), sw = 1 - 1.4 * ez;
               const ps = pose('@tko', true, 0, dt * 1.6), fin = Math.min(1, u / 0.25); ps.span = 0.32 + (ps.span - 0.32) * fin;
-              intoSprite('me', msz, msz, s.x, s.y, (x, y) => { drawNest(x, y, km2, 1 - ez);
-                if (fin < 1) drawSleeper(x, y, a, cl, km2, t, 0, false, 1 - fin, mn);   // the sleeping bird uncurls into the flying one
-                drawBird(x, y - 6 * ez * km2, a, mn, km2 / (1 - 0.2 * sw), fin, sw, ps, cl); });
+              intoSprite('me', msz, msz, s.x, s.y, (x, y) => { drawNest(x, y, 0.8 * km2, 1 - ez);
+                if (fin < 1) drawSleeper(x, y, a, cl, 0.8 * km2, t, 0, false, 1 - fin, mn);   // the sleeping bird uncurls into the flying one
+                drawBird(x, y - 6 * ez * km2, a, mn, km2 * (0.8 + 0.2 * ez) / (1 - 0.2 * sw), fin, sw, ps, cl); });   // grows to its game size as it lifts off
               if (u > 0.95) { tko = null; enter(); } }
             show = !tko; myBtn.style.transform = `translate(${cr.left + s.x - 24}px,${cr.top + s.y - 24}px)`; } } }
       if (myBtn.classList.contains('in') !== show) myBtn.classList.toggle('in', show);
