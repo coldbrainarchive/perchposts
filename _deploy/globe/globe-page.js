@@ -1132,7 +1132,7 @@
       c.beginPath(); c.arc(-1.6, 1.4, 7.4, 0, 7); c.fillStyle = G(cl, -1.6, 1.4, 7.4, 1.18, 0.82); c.fill();                                    // body (a little smaller, 2026-11-26)
       if (lg) { const hs = adm ? 22.5 : 19; c.save(); c.translate(adm ? 4.2 : 4.6, adm ? -5.2 : -4.4); c.scale(-1, 1); c.rotate(-0.3); c.drawImage(lg, -hs / 2, -hs / 2, hs, hs); c.restore(); }
       else { const hc = lift(cl, 1.4); c.beginPath(); c.arc(4.4, -3.6, 5.6, 0, 7); c.fillStyle = G(hc, 4.4, -3.6, 5.6, 1.12, 0.92); c.fill(); }   // head
-      c.beginPath(); c.moveTo(-7.6, 3); c.quadraticCurveTo(-3, 8.6, 4.4, 4); c.quadraticCurveTo(0.8, 2.6, -1.8, 2.8); c.quadraticCurveTo(-5.4, 2.6, -7.6, 3); c.fillStyle = css(lift(cl, 0.86)); c.fill();   // wing
+      c.beginPath(); c.moveTo(-8.4, 2.2); c.quadraticCurveTo(-3.2, 10, 5.4, 3.6); c.quadraticCurveTo(1, 1.6, -1.8, 1.9); c.quadraticCurveTo(-5.8, 1.7, -8.4, 2.2); c.fillStyle = css(lift(cl, 0.86)); c.fill();   // wing
       c.restore();
       if (zs) { c.save(); c.fillStyle = '#e2e8f0'; c.shadowColor = 'rgba(0,0,0,.85)'; c.shadowBlur = 3;
         for (let i = 0; i < 2; i++) { const u = ((t + seed + i * 1.3) % 2.6) / 2.6; c.globalAlpha = Math.sin(Math.PI * u) * 0.85;
