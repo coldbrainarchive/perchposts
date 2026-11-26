@@ -560,7 +560,7 @@
     const imagery = () => { const a = world.pointOfView().altitude;
       // zooming OUT: stop asking for new tiles (the ones already there stay; the whole-Earth image underneath has the
       // same colours) and resume once the zoom settles — otherwise every in-between level gets fetched and thrown away
-      if (te && tilesOn && !document.body.classList.contains('hunting')) { if (a > lastA * 1.004) { te.tileUrl = null; clearTimeout(outT); outT = setTimeout(() => { if (tilesOn) { te.tileUrl = TILE; const v = world.pointOfView(); world.pointOfView({ ...v, altitude: v.altitude + 1e-5 }); } }, 250); } }
+      if (te && tilesOn && !document.body.classList.contains('hunting')) { if (a > lastA * 1.004) { te.tileUrl = null; clearTimeout(outT); outT = setTimeout(() => { if (tilesOn) { te.tileUrl = TILE; try { te.updatePov(world.camera()); } catch (e) {} lastA = world.pointOfView().altitude; } }, 250); } }   // (asks the tiles to look again without moving the camera: the old 1e-5 nudge counted as another zoom-out very close in and crept the view outwards by itself)
       lastA = a;
       if (!tilesOn && a < ON) { tilesOn = true; keepBase(); world.globeTileEngineUrl(TILE);
         if (!tuned) { try { world.scene().traverse(o => { if (!tuned && o && Array.isArray(o.thresholds) && 'tileUrl' in o) { o.thresholds = o.thresholds.map((v, i) => 8 / Math.pow(2, i - 1)); tuned = true; te = o; tileEng = o; tileHooks(o); } }); } catch (e) {} } }
