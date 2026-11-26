@@ -491,7 +491,9 @@
     world = new Globe($('globe'), { animateIn: true })
       .backgroundColor('rgba(0,0,0,0)')
       .globeImageUrl('/globe/earth-s2-4k.jpg')
-      .onGlobeReady(() => { const l = $('glLoad'); l && l.classList.add('gone'); setTimeout(() => l && l.remove(), 400); hiRes(); })
+      .onGlobeReady(() => { const l = $('glLoad'); l && l.classList.add('gone'); setTimeout(() => l && l.remove(), 400); hiRes();
+        // the birds on the globe fade in once it's there (before, their dots showed through the half-loaded globe)
+        setTimeout(() => document.body.classList.add('gl-ready'), 450); })
       .globeTileEngineMaxLevel(14)
       .showAtmosphere(true).atmosphereColor('#8ab4ff').atmosphereAltitude(0.18)
       .htmlElementsData(marks).htmlLat('lat').htmlLng('lng').htmlAltitude(0.01).htmlElement(pinEl).htmlTransitionDuration(0)
