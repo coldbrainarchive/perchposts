@@ -877,12 +877,12 @@
     document.body.appendChild(bar);
     bar.addEventListener('pointerdown', ev => ev.stopPropagation());
     // your own bird on the globe is the way in (no button): an invisible tap target sits on it when it shows as a bird
-    const myBtn = document.createElement('button'); myBtn.type = 'button'; myBtn.className = 'hunt-me'; myBtn.setAttribute('aria-label', 'Take flight'); document.body.appendChild(myBtn);
+    const myBtn = document.createElement('button'); myBtn.type = 'button'; myBtn.className = 'hunt-me'; myBtn.setAttribute('aria-label', 'Take flight'); myBtn.innerHTML = '<i class="me-dot"></i>'; document.body.appendChild(myBtn);
     myBtn.addEventListener('pointerdown', ev => ev.stopPropagation());
     // tapping your dot (zoomed out) flies the view down to your bird; tapping your bird (zoomed in) takes off
     let myBtnMode = 'bird', myBtnAt = null;
     myBtn.addEventListener('click', () => { if (!tok() || tko || on) return;
-      if (myBtnMode === 'dot' && myBtnAt) { const c = world.controls(); c.autoRotate = false; world.pointOfView({ lat: myBtnAt[0], lng: myBtnAt[1], altitude: GAME_ALT / 0.6 }, 1800); return; }
+      if (myBtnMode === 'dot' && myBtnAt) { const c = world.controls(); c.autoRotate = false; world.pointOfView({ lat: myBtnAt[0], lng: myBtnAt[1], altitude: GAME_ALT }, 2000); return; }   // all the way down to playing height
       tko = { t0: performance.now() }; });
     bar.querySelector('.hb-x').addEventListener('click', () => leave());
 
@@ -1177,12 +1177,9 @@
       let show = false;
       if (mn && mp) { const s = scr(mp[0], mp[1]);
         if (onScr(s)) { const cl = col(mn);
-          if (!close) { // you: bigger, ringed in white, with a soft glow that slowly pulses so you can always find yourself
-            const pu = 0.5 + 0.5 * Math.sin(t * 2.4), gr = c.createRadialGradient(s.x, s.y, 4, s.x, s.y, 15 + 3 * pu);
-            gr.addColorStop(0, `rgba(${cl[0]},${cl[1]},${cl[2]},${0.55 + 0.2 * pu})`); gr.addColorStop(1, `rgba(${cl[0]},${cl[1]},${cl[2]},0)`);
-            c.beginPath(); c.arc(s.x, s.y, 18 + 3 * pu, 0, 7); c.fillStyle = gr; c.fill();
-            c.beginPath(); c.arc(s.x, s.y, 7.2, 0, 7); c.fillStyle = 'rgba(0,0,0,.45)'; c.fill(); c.beginPath(); c.arc(s.x, s.y, 6.2, 0, 7); c.fillStyle = '#fff'; c.fill();
-            c.beginPath(); c.arc(s.x, s.y, 4.6, 0, 7); c.fillStyle = css(cl); c.fill();
+          if (!close) { // you: bigger, ringed in white, with a soft glow that slowly pulses so you can always find yourself. It's
+            // the button itself that draws it, so it sits above the story pins and can always be tapped
+            const mc = css(cl); if (myBtn._mc !== mc) { myBtn._mc = mc; myBtn.style.setProperty('--mc', mc); myBtn.style.setProperty('--mg', `rgba(${cl[0]},${cl[1]},${cl[2]},.6)`); }
             show = true; myBtnMode = 'dot'; myBtnAt = mp; myBtn.style.transform = `translate(${cr.left + s.x - 24}px,${cr.top + s.y - 24}px)`; }
           else { const hd = mine.me ? headAt(mine.me, tn) : null, a = hd != null ? hd - Math.PI / 2 : -Math.PI / 2;
             const msz = 96 * Math.max(0.5, km2);
@@ -1196,6 +1193,7 @@
               if (u > 0.95) { tko = null; enter(); } }
             show = !tko; myBtnMode = 'bird'; myBtn.style.transform = `translate(${cr.left + s.x - 24}px,${cr.top + s.y - 24}px)`; } } }
       if (myBtn.classList.contains('in') !== show) myBtn.classList.toggle('in', show);
+      if (myBtn.classList.contains('dot') !== (myBtnMode === 'dot')) myBtn.classList.toggle('dot', myBtnMode === 'dot');
       { const lb = myBtnMode === 'dot' ? 'Go to my bird' : 'Take flight'; if (myBtn.getAttribute('aria-label') !== lb) myBtn.setAttribute('aria-label', lb); }
       spritesEnd();
     }
