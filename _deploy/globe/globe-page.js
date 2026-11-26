@@ -814,7 +814,7 @@
       // softer, with a slight tilt; from there the glide blends in, and turns of 90° or more glide all the way round
       const turning = Math.abs(want) > 0.02, size = Math.abs(want), u0 = Math.max(0, Math.min(1, (size - 0.28) / 0.72)), g = turning ? u0 * u0 * (3 - 2 * u0) : 0;
       if (P.glide > 0) P.glide -= dt;
-      const tA = P.glide > 0 ? 0 : turning ? Math.min(1 - 0.15 * Math.min(1, size / 0.28), 1 - g) : 1;
+      const tA = P.glide > 0 ? 0 : turning ? Math.min(1 - 0.07 * Math.min(1, size / 0.28), 1 - g) : 1;
       P.A += (tA - P.A) * (1 - Math.exp(-dt / (tA < P.A ? 0.11 : 0.2)));
       const before = P.ph; P.ph += dt * (moving ? 13 : 4) * (0.45 + 0.55 * P.A);
       if (Math.floor(before / 6.2832) !== Math.floor(P.ph / 6.2832)) { P.beats++;
@@ -822,7 +822,7 @@
       if (turning) P.beats = 0;
       // the lean follows a soft spring: a slight tilt straight away for any turn, and for gliding turns more lean
       // as the flapping fades
-      const tb = turning ? Math.sign(want) * (0.3 * Math.min(1, size / 0.28) + 0.7 * g * Math.max(0, Math.min(1, (1 - P.A) / Math.max(g, 0.01)))) : 0, w = 10;
+      const tb = turning ? Math.sign(want) * (0.3 * Math.min(1, size / 0.28) + 0.7 * g * Math.max(0, Math.min(1, (1 - P.A) / Math.max(g, 0.01)))) : 0, w = P.bw = (P.bw || 10) + ((turning ? 4.5 + 5.5 * g : P.bw || 10) - (P.bw || 10)) * Math.min(1, dt * 8);
       for (let left = dt; left > 1e-4; left -= 0.01) { const h = Math.min(0.01, left); P.bv += ((tb - P.bk) * w * w - 2 * w * P.bv) * h; P.bk += P.bv * h; }
       const f = 0.5 + 0.5 * Math.sin(P.ph), flapSpan = moving ? 0.55 + 0.45 * f : 0.9 + 0.1 * f;
       return { span: 0.97 + (flapSpan - 0.97) * P.A, bk: Math.max(-1, Math.min(1, P.bk)), lift: P.A * (f - 0.5) };
@@ -841,7 +841,15 @@
         if (pre.size > 300) pre.delete(pre.keys().next().value);
       } }
     // headings on screen ease toward where the bird is going, so nothing snaps
-    const ease = (cur, want, dt) => { if (cur == null) return want; let d = want - cur; d = Math.atan2(Math.sin(d), Math.cos(d)); return cur + d * (1 - Math.exp(-dt / 0.07)); };
+    // (a spring, not a plain ease: the beak starts swinging gently and settles gently, so even small turns are smooth;
+    // the 250 ms look-ahead it aims at makes up for the spring's lag)
+    const angV = new Map();
+    // every turn lines up gently over about a second (the user's choice); it aims ~0.6 s ahead along the path, which
+    // makes up for the spring's lag, so on big turns the beak still points round the curve rather than trailing it
+    const ease = (cur, want, dt, key) => { if (cur == null) return want; const w = 6;
+      let v = angV.get(key) || 0, a = cur;
+      for (let left = dt; left > 1e-4; left -= 0.01) { const h = Math.min(0.01, left); let e = want - a; e = Math.atan2(Math.sin(e), Math.cos(e)); v += (e * w * w - 2 * w * v) * h; a += v * h; }
+      angV.set(key, v); return a; };
     const myName = () => { try { return localStorage.getItem('_myUsername') || ''; } catch (e) { return ''; } };
     let on = false, me = null, birds = [], worms = new Map(), off = 0, balance = null, fx = [], target = null, raf = 0, pollT = 0, flySent = 0, flyWait = 0, corr = null, lastF = 0, frameMs = 16.7, zoomIn = null, extAt = 0, ang = -Math.PI / 2, angs = new Map(), asking = new Set(), seenTaken = new Set(), hintUntil = 0;
     const srv = () => Date.now() + off;
@@ -1047,8 +1055,8 @@
       }
       // other birds
       for (const b of birds) { const q = posAt(b, now); if (!q || !front(q[0], q[1])) continue; const s = sc(q[0], q[1]); if (!inView(s)) continue;
-        const moving = now < b.arrive, ahead = posAt(b, now + 250), s2 = ahead && sc(ahead[0], ahead[1]);
-        let a = angs.get(b.u) ?? -Math.PI / 2; if (moving && s2 && Math.hypot(s2.x - s.x, s2.y - s.y) > 0.5) a = ease(a, Math.atan2(s2.y - s.y, s2.x - s.x), dt); angs.set(b.u, a);
+        const moving = now < b.arrive, ahead = posAt(b, now + 600), s2 = ahead && sc(ahead[0], ahead[1]);
+        let a = angs.get(b.u) ?? -Math.PI / 2; if (moving && s2 && Math.hypot(s2.x - s.x, s2.y - s.y) > 0.5) a = ease(a, Math.atan2(s2.y - s.y, s2.x - s.x), dt, b.u); angs.set(b.u, a);
         drawBird(s.x, s.y, a, b.u, 0.8, 0.92, 0, pose(b.u, moving, bankAt(b, now), dt));
         c.save(); c.font = '600 9.5px -apple-system,system-ui,sans-serif'; c.textAlign = 'center'; c.fillStyle = 'rgba(255,255,255,.75)'; c.shadowColor = 'rgba(0,0,0,.9)'; c.shadowBlur = 3; c.fillText(b.u, s.x, s.y + 26); c.restore(); }
       // effects: catches (your bird dives, the worm is pulled up, +1 / +5 rises) and worms another bird took
@@ -1067,8 +1075,8 @@
         return false; });
       // your bird, on top of everything
       if (p) { const s = sc(pv[0], pv[1]);
-        if (s) { const moving = now < me.arrive, ah = posAt(me, now + 250), s2 = ah && sc(ah[0] + cc[0], ah[1] + cc[1]);
-          if (moving && s2 && Math.hypot(s2.x - s.x, s2.y - s.y) > 0.5) ang = ease(ang, Math.atan2(s2.y - s.y, s2.x - s.x), dt);
+        if (s) { const moving = now < me.arrive, ah = posAt(me, now + 600), s2 = ah && sc(ah[0] + cc[0], ah[1] + cc[1]);
+          if (moving && s2 && Math.hypot(s2.x - s.x, s2.y - s.y) > 0.5) ang = ease(ang, Math.atan2(s2.y - s.y, s2.x - s.x), dt, '@me');
           else if (!moving) { // sitting still: the beak slowly turns toward the nearest worm
             let best = null, bd = 1e9; for (const w of worms.values()) { if (!w.at) continue; const d = km(p, w.at); if (d < bd) { bd = d; best = w; } }
             const ws = best && sc(best.at[0], best.at[1]);
