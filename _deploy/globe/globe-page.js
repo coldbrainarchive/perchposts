@@ -1160,8 +1160,10 @@
       for (const d of dots) { const tq = Math.min(tn, dotsAt + 8000), q = flyAt(d, tq); if (!q) continue;
         if (isMine(d) || (d.u && d.u === mn) || (mp && km(mp, q) < 0.05)) continue;   // that's you
         const s = scr(q[0], q[1]); if (!onScr(s)) continue;
-        if (!close) { c.beginPath(); c.arc(s.x, s.y, 2.5, 0, 7); c.fillStyle = 'rgba(0,0,0,.3)'; c.fill();
-          c.beginPath(); c.arc(s.x, s.y, 1.9, 0, 7); c.fillStyle = `rgba(${d.col[0]},${d.col[1]},${d.col[2]},.72)`; c.fill(); continue; }
+        if (!close) { // everyone else: a solid dot in their colour with a thin light edge (easy to spot, but smaller than yours)
+          c.beginPath(); c.arc(s.x, s.y, 4.1, 0, 7); c.fillStyle = 'rgba(0,0,0,.4)'; c.fill();
+          c.beginPath(); c.arc(s.x, s.y, 3.4, 0, 7); c.fillStyle = 'rgba(255,255,255,.8)'; c.fill();
+          c.beginPath(); c.arc(s.x, s.y, 2.6, 0, 7); c.fillStyle = css(d.col); c.fill(); continue; }
         const flying = tq < d.arrive, hd = headAt(d, tq), a0 = hd != null ? hd - Math.PI / 2 : -Math.PI / 2;
         const sk = 'o:' + (d.u || d.i), sz = 76 * Math.max(0.5, km2);
         if (!flying) { intoSprite(sk, sz, sz, s.x, s.y, (x, y) => { drawNest(x, y, 0.8 * km2); drawSleeper(x, y, a0, d.col, 0.8 * km2, t, d.i * 0.77, true, null, d.u); }); continue; }
@@ -1171,8 +1173,12 @@
       let show = false;
       if (mn && mp) { const s = scr(mp[0], mp[1]);
         if (onScr(s)) { const cl = col(mn);
-          if (!close) { c.beginPath(); c.arc(s.x, s.y, 5.2, 0, 7); c.fillStyle = 'rgba(0,0,0,.45)'; c.fill(); c.beginPath(); c.arc(s.x, s.y, 4.3, 0, 7); c.fillStyle = '#fff'; c.fill();
-            c.beginPath(); c.arc(s.x, s.y, 3.2, 0, 7); c.fillStyle = css(cl); c.fill(); }
+          if (!close) { // you: bigger, ringed in white, with a soft glow that slowly pulses so you can always find yourself
+            const pu = 0.5 + 0.5 * Math.sin(t * 2.4), gr = c.createRadialGradient(s.x, s.y, 4, s.x, s.y, 15 + 3 * pu);
+            gr.addColorStop(0, `rgba(${cl[0]},${cl[1]},${cl[2]},${0.55 + 0.2 * pu})`); gr.addColorStop(1, `rgba(${cl[0]},${cl[1]},${cl[2]},0)`);
+            c.beginPath(); c.arc(s.x, s.y, 18 + 3 * pu, 0, 7); c.fillStyle = gr; c.fill();
+            c.beginPath(); c.arc(s.x, s.y, 7.2, 0, 7); c.fillStyle = 'rgba(0,0,0,.45)'; c.fill(); c.beginPath(); c.arc(s.x, s.y, 6.2, 0, 7); c.fillStyle = '#fff'; c.fill();
+            c.beginPath(); c.arc(s.x, s.y, 4.6, 0, 7); c.fillStyle = css(cl); c.fill(); }
           else { const hd = mine.me ? headAt(mine.me, tn) : null, a = hd != null ? hd - Math.PI / 2 : -Math.PI / 2;
             const msz = 96 * Math.max(0.5, km2);
             if (!tko) intoSprite('me', msz, msz, s.x, s.y, (x, y) => { drawNest(x, y, 0.8 * km2); drawSleeper(x, y, a, cl, 0.8 * km2, t, 0, true, null, mn); });   // same size as everyone else's nest
