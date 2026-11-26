@@ -726,17 +726,13 @@ function tagCol(n) {
   v = `hsl(${Math.round(fixPurple(h))}, 72%, 68%)`; cols.set(n, v); return v;
 }
 
-// game bird colour: the bird's own body colour (for the Take flight game). Never pure white (admins) or purple (mods):
-// pale grey/white birds are toned down a little and purple bodies are nudged to blue/pink, like the tags.
+// game bird colour: the bird's own body colour (for the Take flight game and the birds on the globe), the same as
+// its logo bird; only very dark birds are lifted a little so they still show up on the satellite map
 const bcols = new Map();
 function bodyCol(n) {
   let v = bcols.get(n); if (v) return v;
-  let [L, C, h] = kitT.describe(n).body;
-  if (C < .05) L = Math.min(L, .8);
-  L = Math.max(L, .55);   // dark birds are lifted a little so they still show up on the satellite map
-  let rgb = okToRgb(L, C, h);
-  if (C >= .05) { for (let k = 0; k < 40 && fixPurple(hueOf(rgb)) !== hueOf(rgb); k++) { h = (h + (hueOf(rgb) < 280 ? -4 : 4) + 360) % 360; rgb = okToRgb(L, C, h); } }
-  v = rgb.map(x => Math.round(x * 255)); bcols.set(n, v); return v;
+  let [L, C, h] = kitT.describe(n).body; L = Math.max(L, .55);
+  v = okToRgb(L, C, h).map(x => Math.round(x * 255)); bcols.set(n, v); return v;
 }
 
 return{get,sub,tagCol,bodyCol,ready,eye};})();

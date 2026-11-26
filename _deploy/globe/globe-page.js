@@ -231,7 +231,7 @@
   function loadKit(cb) {
     if (window._ppKit) return;
     if (kitCbs) { kitCbs.push(cb); return; }
-    kitCbs = [cb]; const s = document.createElement('script'); s.src = '/globe/birdkit.js?v=1401';
+    kitCbs = [cb]; const s = document.createElement('script'); s.src = '/globe/birdkit.js?v=1402';
     s.onload = () => { const l = kitCbs; kitCbs = []; l.forEach(f => f()); }; document.head.appendChild(s);
   }
   const admins = (() => { try { return new Set(JSON.parse(localStorage.getItem('_au') || '[]')); } catch (e) { return new Set(); } })();
@@ -795,6 +795,7 @@
     // the server's copy of a flight starts a moment later than the one the page drew, so swapping to it would make the
     // bird hop a few pixels: the difference is blended away over a third of a second instead
     function setMe(f) {
+      if (f && f.depart) myDeps.add(f.depart);
       const t = srv(), a = me && posAt(me, t), b = posAt(f, t);
       if (a && b && km(a, b) < 1) { const c0 = corrNow(); corr = { la: a[0] - b[0] + c0[0], lo: a[1] - b[1] + c0[1], t0: performance.now() }; }
       me = f;
@@ -880,11 +881,10 @@
     bar.querySelector('.hb-x').addEventListener('click', () => leave());
 
 
-    // a bird's colour in the game: admins white, mods the site purple, everyone else their bird's own body colour
-    // (from the same recipe as their logo bird). The beak is a darker shade of it.
+    // a bird's colour: its own body colour, the same as its logo bird (everyone, admins and mods too — the user's
+    // choice 2026-11-26). The beak is a darker shade of it.
     const roles = new Map(), cols = new Map();
-    const col = name => { const r = roles.get(name); if (r === 'admin') return [244, 244, 245]; if (r === 'mod') return [192, 132, 252];
-      let v = cols.get(name); if (v) return v;
+    const col = name => { let v = cols.get(name); if (v) return v;
       try { if (window._ppKit && window._ppKit.bodyCol) { v = window._ppKit.bodyCol(name); cols.set(name, v); return v; } } catch (e) {}
       return [94, 234, 212]; };
     const css = c => `rgb(${c[0]},${c[1]},${c[2]})`, shade = c => c[0] + c[1] + c[2] > 600 ? [150, 150, 158] : c.map(x => Math.round(x * 0.55));
@@ -903,8 +903,8 @@
     }
     const TZ = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { return ''; } })();
     // pausing: the server stops the bird where it is (also when the page is hidden or closed mid-flight)
-    const pauseNow = keep => fetch(API + '/hunt/pause', { method: 'POST', keepalive: !!keep, headers: { 'Content-Type': 'application/json', ...hdr() }, body: '{}' })
-      .then(r => r.json()).then(j => { if (j && j.me) { mine = { me: j.me, home: null }; if (on && document.hidden) me = j.me; } }).catch(() => {});
+    const pauseNow = keep => fetch(API + '/hunt/pause', { method: 'POST', keepalive: !!keep, headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ col: kitCol() }) })
+      .then(r => r.json()).then(j => { if (j && j.me) { myDeps.add(j.me.depart); mine = { me: j.me, home: null }; if (on && document.hidden) me = j.me; } }).catch(() => {});
     function leave() {
       if (!on) return; on = false; document.body.classList.remove('hunting'); bar.classList.remove('in'); world.controls().enableRotate = true; world.controls().enableZoom = true; try { paint(); } catch (e) {}
       cancelAnimationFrame(raf); clearTimeout(pollT); cx.clearRect(0, 0, cv.width, cv.height); target = null; fx = [];
@@ -921,7 +921,7 @@
       clearTimeout(pollT); if (!on) return;
       if (document.hidden) { pollT = setTimeout(() => poll(), 2000); return; }
       const t0 = Date.now(), sent = t0;
-      const r = await api('/hunt/state', start ? { start: 1, tz: TZ, lat: at[0], lng: at[1], col: kitCol() } : {});
+      const r = await api('/hunt/state', start ? { start: 1, tz: TZ, lat: at[0], lng: at[1], col: kitCol() } : { col: kitCol() });
       if (!on) return;
       if (r.s === 401) { leave(); toast('Sign in to take flight', true); return; }
       if (r.s === 200 && r.j.now) {
@@ -1033,9 +1033,11 @@
     // flight, over your home city); tap it and it wakes, flaps up out of the nest, and the game carries on from there.
     const ICON_ALT = 0.25;
     let mine = null, dots = [], dotsOff = 0, dotsAt = 0, idleRaf = 0, idleLast = 0, tko = null;
+    // (your own bird is in the public list too, maybe a few seconds out of date: it's recognised by its flights' start times)
+    const myDeps = new Set(), isMine = d => myDeps.has(d.depart);
     const kitCol = () => { try { const n = myName(); return window._ppKit && window._ppKit.bodyCol && n ? window._ppKit.bodyCol(n).join(',') : undefined; } catch (e) { return undefined; } };
     const loadMine = () => { if (!tok()) { mine = null; return; }
-      api('/hunt/me', { tz: TZ, col: kitCol() }).then(r => { if (r.s !== 200 || !r.j) return; mine = { me: r.j.me, home: r.j.home };
+      api('/hunt/me', { tz: TZ, col: kitCol() }).then(r => { if (r.s !== 200 || !r.j) return; mine = { me: r.j.me, home: r.j.home }; if (r.j.me) myDeps.add(r.j.me.depart);
         const mn = myName(); if (mn) { if (r.j.role) roles.set(mn, r.j.role); else roles.delete(mn); }
         if (!window._ppKit) loadKit(() => { if (r.j.me) api('/hunt/me', { tz: TZ, col: kitCol() }); }); }); };
     const parseCol = c => { const v = typeof c === 'string' ? c.split(',').map(Number) : null; return v && v.length === 3 && v.every(x => x >= 0 && x <= 255) ? v : [214, 218, 226]; };
@@ -1044,36 +1046,20 @@
     // (a bird can be paused on someone else's phone at any moment: the dots are fetched every 8 s and a moving one is only
     // carried on for up to 8 s past the latest news of it, so a stopped bird's dot doesn't keep drifting away)
     loadMine(); loadDots(); setInterval(() => { if (!document.hidden) loadDots(); }, 8000); setInterval(() => { if (!document.hidden && !on) loadMine(); }, 30000);
-    // a little woven nest seen from above (twigs placed the same way every time)
-    function drawNest(x, y, k) {
-      const c = cx; c.save(); c.translate(x, y); c.scale(k, k);
-      c.beginPath(); c.ellipse(2, 4, 15, 12, 0, 0, 7); c.fillStyle = 'rgba(0,0,0,.28)'; c.fill();
-      c.beginPath(); c.ellipse(0, 0, 15, 12.5, 0, 0, 7); c.fillStyle = '#7a5230'; c.fill();
-      c.beginPath(); c.ellipse(0, 0.6, 10, 8, 0, 0, 7); c.fillStyle = '#3d2615'; c.fill();
-      c.lineCap = 'round';
-      for (let i = 0; i < 22; i++) { const a0 = i * 0.2856 + (i % 3) * 0.4, r = 11.2 + (i % 4) * 0.9, l = 0.5 + (i % 5) * 0.08;
-        c.beginPath(); c.ellipse(0, 0, r, r * 0.83, 0, a0, a0 + l); c.strokeStyle = i % 2 ? '#a8784a' : '#8f6238'; c.lineWidth = 1.1 + (i % 3) * 0.35; c.stroke(); }
+    // a stopped bird: the same bird as when it flies, wings folded, sitting in a minimal nest (a thin brown ring),
+    // breathing slowly with little z's drifting up. Same size as in the game (yours 1, others 0.8).
+    function drawNest(x, y, k, alpha) {
+      const c = cx; c.save(); c.globalAlpha = alpha == null ? 1 : alpha;
+      c.beginPath(); c.arc(x, y + 1.2 * k, 14.5 * k, 0, 7); c.lineWidth = 2.6 * k; c.strokeStyle = 'rgba(0,0,0,.3)'; c.stroke();
+      c.beginPath(); c.arc(x, y, 14.5 * k, 0, 7); c.lineWidth = 2.2 * k; c.strokeStyle = '#9a6a3c'; c.stroke();
       c.restore();
     }
-    // a bird asleep in the nest, seen from just above: round and fluffed up, wings folded over its back, head tucked
-    // down with its eyes shut (two little curves), breathing slowly; small z's drift up from your own
     function drawSleeper(x, y, a, cl, k, t, seed, zs) {
-      const c = cx, br = 1 + 0.04 * Math.sin(t * 2.1 + seed), dk = shade(cl), wing = cl.map(v => Math.round(v * 0.8)), line = 'rgba(0,0,0,.35)';
-      c.save(); c.translate(x, y); c.rotate(a); c.scale(k, k);
-      c.beginPath(); c.moveTo(-7, -2.4); c.lineTo(-12.5, -3.6); c.lineTo(-11.4, 0); c.lineTo(-12.5, 3.6); c.lineTo(-7, 2.4); c.closePath(); c.fillStyle = css(dk); c.fill();   // tail
-      c.save(); c.scale(br, br);
-      c.beginPath(); c.ellipse(-0.5, 0, 9, 7.6, 0, 0, 7); c.fillStyle = css(cl); c.fill(); c.lineWidth = 0.8; c.strokeStyle = line; c.stroke();            // body
-      for (const sd of [-1, 1]) { c.beginPath(); c.ellipse(-2.4, sd * 3.1, 7, 3.6, sd * 0.16, 0, 7); c.fillStyle = css(wing); c.fill(); c.lineWidth = 0.6; c.strokeStyle = line; c.stroke();   // folded wings
-        c.beginPath(); for (let i = 0; i < 3; i++) { c.moveTo(-6.5 + i * 2.2, sd * (1.6 + i * 0.2)); c.lineTo(-8.6 + i * 2.2, sd * (4.6 - i * 0.2)); } c.lineWidth = 0.55; c.strokeStyle = 'rgba(0,0,0,.28)'; c.stroke(); }
-      c.restore();
-      c.beginPath(); c.arc(5.2, 0, 4.6, 0, 7); c.fillStyle = css(cl); c.fill(); c.lineWidth = 0.8; c.strokeStyle = line; c.stroke();                         // head
-      c.beginPath(); c.arc(6.4, -2.1, 1.25, 0.15 * Math.PI, 0.85 * Math.PI); c.moveTo(7.6, 2.1); c.arc(6.4, 2.1, 1.25, 0.15 * Math.PI, 0.85 * Math.PI);    // eyes shut
-      c.lineWidth = 0.75; c.strokeStyle = 'rgba(20,20,24,.85)'; c.stroke();
-      c.beginPath(); c.moveTo(9.4, -1.2); c.lineTo(11.6, 0); c.lineTo(9.4, 1.2); c.closePath(); c.fillStyle = css(dk); c.fill();                              // beak, resting
-      c.restore();
-      if (zs) { c.save(); c.fillStyle = '#e2e8f0'; c.shadowColor = 'rgba(0,0,0,.85)'; c.shadowBlur = 3;
-        for (let i = 0; i < 2; i++) { const u = ((t + seed + i * 1.3) % 2.6) / 2.6; c.globalAlpha = Math.sin(Math.PI * u) * 0.9;
-          c.font = `700 ${7 + 4 * u}px -apple-system,system-ui,sans-serif`; c.fillText('z', x + 9 * k + 9 * u, y - 9 * k - 16 * u); }
+      const br = 1 + 0.03 * Math.sin(t * 2.1 + seed);
+      drawBird(x, y, a, '', k * br / 0.8, 1, 1, { span: 0.32, bk: 0, lift: 0 }, cl);
+      if (zs) { const c = cx; c.save(); c.fillStyle = '#e2e8f0'; c.shadowColor = 'rgba(0,0,0,.85)'; c.shadowBlur = 3;
+        for (let i = 0; i < 2; i++) { const u = ((t + seed + i * 1.3) % 2.6) / 2.6; c.globalAlpha = Math.sin(Math.PI * u) * 0.85;
+          c.font = `700 ${(6 + 4 * u) * Math.max(0.8, k)}px -apple-system,system-ui,sans-serif`; c.fillText('z', x + 11 * k + 8 * u, y - 10 * k - 14 * u); }
         c.restore(); }
     }
     const idleAng = new Map();
@@ -1089,14 +1075,14 @@
       const mn = myName(), mp = mine && (mine.me ? flyAt(mine.me, tn) : mine.home);
       // everyone else
       for (const d of dots) { const tq = Math.min(tn, dotsAt + 8000), q = flyAt(d, tq); if (!q) continue;
-        if (mp && km(mp, q) < 0.05) continue;   // that's you
+        if (isMine(d) || (mp && km(mp, q) < 0.05)) continue;   // that's you
         const s = scr(q[0], q[1]); if (!onScr(s)) continue;
         if (!close) { c.beginPath(); c.arc(s.x, s.y, 2.5, 0, 7); c.fillStyle = 'rgba(0,0,0,.3)'; c.fill();
           c.beginPath(); c.arc(s.x, s.y, 1.9, 0, 7); c.fillStyle = `rgba(${d.col[0]},${d.col[1]},${d.col[2]},.72)`; c.fill(); continue; }
         const flying = tq < d.arrive, hd = headAt(d, tq), a0 = hd != null ? hd - Math.PI / 2 : -Math.PI / 2;
-        if (!flying) { drawNest(s.x, s.y, 0.95); drawSleeper(s.x, s.y, a0, d.col, 0.95, t, d.i * 0.77, false); continue; }
+        if (!flying) { drawNest(s.x, s.y, 0.8); drawSleeper(s.x, s.y, a0, d.col, 0.8, t, d.i * 0.77, true); continue; }
         let a = idleAng.get(d.i) ?? a0; a = ease(a, a0, dt, 'dot' + d.i); idleAng.set(d.i, a);
-        drawBird(s.x, s.y, a, '', 0.7, 0.9, 0, pose('dot' + d.i, true, bankAt(d, tq), dt), d.col); }
+        drawBird(s.x, s.y, a, '', 0.8, 0.92, 0, pose('dot' + d.i, true, bankAt(d, tq), dt), d.col); }
       // you
       let show = false;
       if (mn && mp) { const s = scr(mp[0], mp[1]);
@@ -1104,13 +1090,12 @@
           if (!close) { c.beginPath(); c.arc(s.x, s.y, 5.2, 0, 7); c.fillStyle = 'rgba(0,0,0,.45)'; c.fill(); c.beginPath(); c.arc(s.x, s.y, 4.3, 0, 7); c.fillStyle = '#fff'; c.fill();
             c.beginPath(); c.arc(s.x, s.y, 3.2, 0, 7); c.fillStyle = css(cl); c.fill(); }
           else { const hd = mine.me ? headAt(mine.me, tn) : null, a = hd != null ? hd - Math.PI / 2 : -Math.PI / 2;
-            drawNest(s.x, s.y, 1.25);
-            if (!tko) drawSleeper(s.x, s.y, a, cl, 1.25, t, 0, true);
-            else { // waking up: a little stretch, then it flaps hard and lifts up out of the nest
-              const u = (performance.now() - tko.t0) / 1000;
-              if (u < 0.22) drawSleeper(s.x, s.y - 2 * u / 0.22, a, cl, 1.25 * (1 + 0.18 * Math.sin(Math.PI * u / 0.22)), t, 0, false);
-              else { const e = Math.min(1, (u - 0.22) / 0.7), ez = e * e * (3 - 2 * e);
-                drawBird(s.x, s.y - 16 * ez, a, mn, 0.75 + 0.35 * ez, 1, -0.6 * ez, pose('@tko', true, 0, dt * 1.8)); }
+            if (!tko) { drawNest(s.x, s.y, 1); drawSleeper(s.x, s.y, a, cl, 1, t, 0, true); }
+            else { // waking up: the wings open, it flaps hard and lifts off (its shadow drops away), the nest fades out
+              const u = (performance.now() - tko.t0) / 1000, e = Math.min(1, u / 0.9), ez = e * e * (3 - 2 * e), sw = 1 - 1.4 * ez;
+              drawNest(s.x, s.y, 1, 1 - ez);
+              const ps = pose('@tko', true, 0, dt * 1.6); ps.span = 0.32 + (ps.span - 0.32) * Math.min(1, u / 0.25);
+              drawBird(s.x, s.y - 6 * ez, a, mn, 1 / (1 - 0.2 * sw), 1, sw, ps, cl);
               if (u > 0.95) { tko = null; enter(); } }
             show = !tko; myBtn.style.transform = `translate(${cr.left + s.x - 24}px,${cr.top + s.y - 24}px)`; } } }
       if (myBtn.classList.contains('in') !== show) myBtn.classList.toggle('in', show);
@@ -1174,16 +1159,16 @@
       for (const b of birds) { const q = posAt(b, now); if (!q || !front(q[0], q[1])) continue; const s = sc(q[0], q[1]); if (!s) continue;
         if (!inView(s)) { const d = p ? km(p, q) : 0; if (d < 100) drawBirdEdge(s.x, s.y, b.u, d); continue; }
         const moving = now < b.arrive, ahead = posAt(b, now + 600), s2 = ahead && sc(ahead[0], ahead[1]);
-        if (!moving) { const hd = headAt(b, now); drawNest(s.x, s.y, 0.95); drawSleeper(s.x, s.y, hd != null ? hd - Math.PI / 2 : 0, col(b.u), 0.95, t, b.u.length, false);
+        if (!moving) { const hd = headAt(b, now); drawNest(s.x, s.y, 0.8); drawSleeper(s.x, s.y, hd != null ? hd - Math.PI / 2 : 0, col(b.u), 0.8, t, b.u.length, true);
           const nl = nameImg(b.u); c.drawImage(nl, s.x - nl._w / 2, s.y + 22 - nl._h / 2 - 3, nl._w, nl._h); continue; }
         let a = angs.get(b.u) ?? -Math.PI / 2; if (moving && s2 && Math.hypot(s2.x - s.x, s2.y - s.y) > 0.5) a = ease(a, Math.atan2(s2.y - s.y, s2.x - s.x), dt, b.u); angs.set(b.u, a);
         drawBird(s.x, s.y, a, b.u, 0.8, 0.92, 0, pose(b.u, moving, bankAt(b, now), dt));
         const nl = nameImg(b.u); c.drawImage(nl, s.x - nl._w / 2, s.y + 26 - nl._h / 2 - 3, nl._w, nl._h); }
       // birds asleep in their nests nearby (players who aren't playing right now): no names, just their colours
       { const tq = Math.min(Date.now() + dotsOff, dotsAt + 8000);
-        for (const d of dots) { if (tq < d.arrive) continue; const q = flyAt(d, tq); if (!q || (p && km(p, q) < 0.05) || birds.some(b => { const bq = posAt(b, now); return bq && km(bq, q) < 0.05; })) continue;
+        for (const d of dots) { if (tq < d.arrive || isMine(d)) continue; const q = flyAt(d, tq); if (!q || (p && km(p, q) < 0.05) || birds.some(b => { const bq = posAt(b, now); return bq && km(bq, q) < 0.05; })) continue;
           if (!front(q[0], q[1])) continue; const s = sc(q[0], q[1]); if (!inView(s)) continue;
-          const hd = headAt(d, tq); drawNest(s.x, s.y, 0.95); drawSleeper(s.x, s.y, hd != null ? hd - Math.PI / 2 : 0, d.col, 0.95, t, d.i * 0.77, false); } }
+          const hd = headAt(d, tq); drawNest(s.x, s.y, 0.8); drawSleeper(s.x, s.y, hd != null ? hd - Math.PI / 2 : 0, d.col, 0.8, t, d.i * 0.77, true); } }
       // effects: catches (your bird dives, the worm is pulled up, +1 / +5 rises) and worms another bird took
       let swoop = 0;
       fx = fx.filter(f => { const age = (performance.now() - f.t0) / 1000, s = sc(f.lat, f.lng); if (!s) return age < 1.4;
