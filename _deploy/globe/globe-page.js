@@ -551,7 +551,6 @@
     // the closest levels (13+, Take flight height) use the sharp Esri imagery when the server has it switched on
     tileSrc = (x, y, l) => hdOn && l >= HD_FROM ? `${API}/globe-hd/${l}/${y}/${x}.jpg` : `${API}/globe-tile/${l}/${y}/${x}.jpg`;
     const TILE = (x, y, l) => { pend++; busy(); return tileSrc(x, y, l); };
-    // Esri close-up imagery switched off 2026-11-26 (too much data off Wi-Fi): EOX tiles only.
     try { new PerformanceObserver(list => { for (const e of list.getEntries()) if (e.name.includes('/globe-tile/')) pend = Math.max(0, pend - 1); busy(); }).observe({ type: 'resource', buffered: false }); } catch (e) {}
     // the library hides the whole-Earth image as soon as tiles switch on, which flashed black until they arrived:
     // keep it always showing underneath (a hair smaller, so tiles sit cleanly on top) — same imagery, so no seam
@@ -587,8 +586,9 @@
   // Sharp close-up imagery (Esri) for the closest levels: at Take flight height (~10 km up) it loads level 15 (~3 m a
   // pixel, about one map pixel per screen pixel on a phone), so houses and roads show. The engine uses the first level
   // whose threshold is at or below the altitude, so: level 13 from the Take flight pill down, 15 in the game, never 16.
-  // Test (2026-11-26): /globe/#esri uses Esri for the close levels 13-14 (same tile count as EOX), for that visit only.
-  const HD_FROM = 13, HD_MAX = 15; let hdOn = /esri/.test(location.hash), tileEng = null, tileSrc = null;
+  // Esri imagery for the close levels 13-14 (same tile count as EOX, ~1.5x the data, much sharper): the default since
+  // 2026-11-26. Set hdOn to false to go back to EOX everywhere (the worker falls back to EOX by itself if the key lapses).
+  const HD_FROM = 13, HD_MAX = 15; let hdOn = true, tileEng = null, tileSrc = null;
   function tuneHd(o) { const t = o.thresholds.slice(); while (t.length < 16) t.push(8 / Math.pow(2, t.length - 1));
     t[14] = 0.0018; t[15] = 0.0015; o.thresholds = t.slice(0, 16); }
   // Smoother map tiles (2026-11-25):
