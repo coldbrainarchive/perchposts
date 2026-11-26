@@ -24,3 +24,7 @@ ALTER TABLE hunt_birds ADD COLUMN wet_until INTEGER;
 ALTER TABLE hunt_birds ADD COLUMN wet_note_at INTEGER;
 ALTER TABLE hunt_birds ADD COLUMN drowned_at INTEGER;
 ALTER TABLE hunt_birds ADD COLUMN drowned_lost INTEGER;
+
+-- 2026-11-26: one bird, one device (the game session flying it), and a small log of big jumps a page saw (debugging)
+ALTER TABLE hunt_birds ADD COLUMN sess TEXT;
+CREATE TABLE IF NOT EXISTS hunt_diag (at INTEGER NOT NULL, username TEXT, data TEXT);

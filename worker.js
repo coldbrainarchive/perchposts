@@ -2504,6 +2504,17 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       // in the water and right by it (the coarse land map, with a 4 km margin for the page's sharper one)
       const nearWater = p => { const ring = d => [0, 1, 2, 3, 4, 5].map(i => [p[0] + d * Math.cos(i * Math.PI / 3) / 111.2, p[1] + d * Math.sin(i * Math.PI / 3) / (111.2 * Math.cos(p[0] * R))]);
         return !(isLand(p[0], p[1]) && ring(4).every(q => isLand(q[0], q[1]))); };
+      // one bird, one device: starting the game on a device makes it the one flying the bird (body.sid, made fresh on
+      // each page load); requests from any other device's game get "other": true and that page goes back to the globe
+      const sid = typeof body.sid === "string" ? body.sid.slice(0, 64) : null;
+      if (me && sid && url.pathname === "/hunt/state" && body.start) { await env.DB.prepare(`UPDATE hunt_birds SET sess = ? WHERE username = ?`).bind(sid, username).run(); me.sess = sid; }
+      else if (me && sid && me.sess && me.sess !== sid && ["/hunt/state", "/hunt/fly", "/hunt/pause", "/hunt/catch", "/hunt/drown"].includes(url.pathname)) return json({ other: true, error: "Your bird is being flown on another device" }, 409);
+      // the page reports a big jump of its own bird (for tracking down glitches); kept small
+      if (url.pathname === "/hunt/diag") {
+        await env.DB.prepare(`INSERT INTO hunt_diag (at, username, data) VALUES (?, ?, ?)`).bind(now, username, JSON.stringify(body.d || {}).slice(0, 2000)).run();
+        if (Math.random() < 0.05) ctx.waitUntil(env.DB.prepare(`DELETE FROM hunt_diag WHERE at < ?`).bind(now - 7 * 864e5).run().catch(() => {}));
+        return json({ ok: true });
+      }
       if (me && colIn && me.col !== colIn) { await env.DB.prepare(`UPDATE hunt_birds SET col = ? WHERE username = ?`).bind(colIn, username).run(); me.col = colIn; if (!isAdmin) huntHub(env, ctx, { t: "b", u: username, col: colIn }); }
       // the game's bars: how far you've flown (stored total + the flight you're on), where home is, and the time zone and
       // country under your bird (the nearest time-zone city, so it can be off right next to a border)

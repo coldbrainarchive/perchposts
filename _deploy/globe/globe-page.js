@@ -792,13 +792,17 @@
       const t = srv(), p = posAt(me, t), h = me && t < me.arrive ? headAt(me, t) : null;
       const f = fTurn({ from: p, to: p, b0: h == null ? brg : h, b1: brg, depart: t }); f.arrive = t + flyFor(f._T); me = f; flySent = Date.now(); flyWait++;
       try { localStorage.setItem('pp_hunt_brg', String(brg)); } catch (e) {}
-      api('/hunt/fly', { brg, t }).then(x => { flyWait = Math.max(0, flyWait - 1); if (x.s === 200 && x.j.me && on && flyWait === 0) setMe(x.j.me); });
+      api('/hunt/fly', { brg, t }).then(x => { flyWait = Math.max(0, flyWait - 1); if (x.s === 200 && x.j.me && on && flyWait === 0) setMe(x.j.me, 'fly'); });
     }
     // the server's copy of a flight starts a moment later than the one the page drew, so swapping to it would make the
     // bird hop a few pixels: the difference is blended away over a third of a second instead
-    function setMe(f) {
+    let diagAt = 0;
+    function setMe(f, src) {
       if (f && f.depart) myDeps.add(f.depart);
       const t = srv(), a = me && posAt(me, t), b = posAt(f, t);
+      if (a && b && src && km(a, b) > 0.3 && Date.now() > diagAt) { diagAt = Date.now() + 5000;   // a big jump: tell the server what happened (for tracking down glitches)
+        const fl = x => x && { d: x.depart, a: x.arrive, b0: x.b0 != null ? +x.b0.toFixed(4) : null, b1: x.b1 != null ? +x.b1.toFixed(4) : null, f: x.from && x.from.map(v => +v.toFixed(5)) };
+        api('/hunt/diag', { d: { src, km: +km(a, b).toFixed(3), t: Math.round(t), off: Math.round(off), offT: offT == null ? null : Math.round(offT), flyWait, landed, flySentAgo: Date.now() - flySent, local: fl(me), server: fl(f), ua: navigator.userAgent.slice(0, 80) } }); }
       if (a && b && km(a, b) < 1) { const c0 = corrNow(); corr = { la: a[0] - b[0] + c0[0], lo: a[1] - b[1] + c0[1], t0: performance.now() }; }
       me = f;
     }
@@ -870,7 +874,11 @@
       const best = clk.reduce((a, b) => b.rtt < a.rtt ? b : a); offT = best.o;
       if (clk.length === 1 || Math.abs(offT - off) > 1500) off = offT; };
     const clockStep = dt => { if (offT == null) return; const d = offT - off, m = dt * 0.03; off += d > m ? m : d < -m ? -m : d; };
-    const api = (path, body) => fetch(API + path, { method: 'POST', headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify(body || {}) }).then(async r => ({ s: r.status, j: await r.json().catch(() => ({})) })).catch(() => ({ s: 0, j: {} }));
+    // this page's game session: the newest device to start playing owns the bird; if another device takes over, the
+    // server answers "other" and this page goes back to the globe
+    const SID = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2)) ;
+    const otherDevice = j => { if (j && j.other && on) setTimeout(() => { if (!on) return; leave(); toast('Your bird is being flown on another device'); }, 0); };
+    const api = (path, body) => fetch(API + path, { method: 'POST', headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ ...(body || {}), sid: SID }) }).then(async r => { const x = { s: r.status, j: await r.json().catch(() => ({})) }; if (x.s === 409) otherDevice(x.j); return x; }).catch(() => ({ s: 0, j: {} }));
 
     // pieces on the page: the pill, the game bar, and a see-through canvas over the globe the game draws on
     const host = world.renderer().domElement.parentElement;
@@ -1068,7 +1076,7 @@
     // pausing: the server stops the bird where it is (also when the page is hidden or closed mid-flight)
     // stopping over water (leaving mid-flight too) means the bird is in the water: it falls in and treads water
     const wetHere = () => { const q = me && posAt(me, srv()); if (q && !drowning && isWater(q[0], q[1]) === true && !(Date.now() < noWater)) wet = true; };
-    const pauseNow = keep => (wetHere(), fetch(API + '/hunt/pause', { method: 'POST', keepalive: !!keep, headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ col: kitCol(), leaving: 1, wet: wet && !drowning, en: enKm / EN_MAX, t: srv() }) })
+    const pauseNow = keep => (wetHere(), fetch(API + '/hunt/pause', { method: 'POST', keepalive: !!keep, headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ col: kitCol(), leaving: 1, wet: wet && !drowning, en: enKm / EN_MAX, t: srv(), sid: SID }) })
       .then(r => r.json()).then(j => { if (j && j.me) { myDeps.add(j.me.depart); mine = { me: j.me, home: null, wet: j.wet || 0 }; if (on && document.hidden) me = j.me; } }).catch(() => {}));
     function leave(keep) {
       if (!on) return; on = false; if (ghOpen) openPanel(ghOpen); document.body.classList.remove('hunting'); bar.classList.remove('in'); world.controls().enableRotate = true; world.controls().enableZoom = true; world.controls().enableDamping = true; try { paint(); } catch (e) {}
@@ -1080,8 +1088,8 @@
     function landNow(quiet) {
       const t = srv(), p = posAt(me, t), h = headAt(me, t) ?? me.b1 ?? 0; landed = true;
       setMe({ from: p, to: p, b0: h, b1: h, depart: t, arrive: t }); flySent = Date.now(); flyWait++;
-      fetch(API + '/hunt/pause', { method: 'POST', headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ col: kitCol(), t }) }).then(r => r.json())
-        .then(j => { flyWait = Math.max(0, flyWait - 1); if (j && j.me && on && landed) { setMe(j.me); if (j.st) { gSt = j.st; gStAt = j.now; } } }).catch(() => { flyWait = Math.max(0, flyWait - 1); });
+      fetch(API + '/hunt/pause', { method: 'POST', headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ col: kitCol(), t, sid: SID }) }).then(r => r.json())
+        .then(j => { flyWait = Math.max(0, flyWait - 1); if (j && j.me && on && landed) { setMe(j.me, 'pause'); if (j.st) { gSt = j.st; gStAt = j.now; } } }).catch(() => { flyWait = Math.max(0, flyWait - 1); });
       if (!quiet) ghEvent('Landed', ghTown || 'here', '#fcd34d');
     }
     // the screen locks, you switch apps or close the page: you leave the game like tapping the × (your bird goes to
@@ -1101,7 +1109,7 @@
       if (r.s === 401) { leave(); toast('Sign in to take flight', true); return; }
       if (r.s === 200 && r.j.now) {
         const t1 = Date.now(); clockSample(r.j.now - (t0 + t1) / 2, t1 - t0);
-        if (sent > flySent && !flyWait && r.j.me && (!me || r.j.me.depart >= me.depart - 50)) { const q1 = me && posAt(me, srv()), q2 = posAt(r.j.me, srv()); if (!q1 || !q2 || km(q1, q2) > 0.04 || Math.abs((r.j.me.b1 ?? 0) - (me.b1 ?? 0)) > 0.01) setMe(r.j.me); }   // a flight you just set wins over an older answer; and the same flight (within 40 m) is left alone so your bird never slides
+        if (sent > flySent && !flyWait && r.j.me && (!me || r.j.me.depart >= me.depart - 50)) { const q1 = me && posAt(me, srv()), q2 = posAt(r.j.me, srv()); if (!q1 || !q2 || km(q1, q2) > 0.04 || Math.abs((r.j.me.b1 ?? 0) - (me.b1 ?? 0)) > 0.01) setMe(r.j.me, 'poll'); }   // a flight you just set wins over an older answer; and the same flight (within 40 m) is left alone so your bird never slides
         if (r.j.balance != null) setBal(r.j.balance);
         if (r.j.st) { gSt = r.j.st; gStAt = r.j.now; } mealIn(r.j);
         if (lite) hubBirds(); else { const pp = me && posAt(me, srv()); if (pp) for (const b of r.j.birds || []) { if (!b.a || met.has(b.u)) continue; const q = posAt(b, srv()); if (q && km(pp, q) < 3) { met.add(b.u); ghEvent('Met', b.u, '#6ee7b7'); } } }
