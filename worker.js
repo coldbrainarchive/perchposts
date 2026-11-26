@@ -2589,6 +2589,9 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         await env.DB.prepare(`UPDATE hunt_birds SET from_lat = ?, from_lng = ?, to_lat = ?, to_lng = ?, brg0 = ?, brg1 = ?, depart_at = ?, arrive_at = ?, flown = COALESCE(flown, 0) + ? WHERE username = ?`)
           .bind(p[0], p[1], p[0], p[1], h, h, now, now, segKm(me), username).run();
         me.flown = (me.flown || 0) + segKm(me); me.from_lat = me.to_lat = p[0]; me.from_lng = me.to_lng = p[1]; me.brg0 = me.brg1 = h; me.depart_at = me.arrive_at = now;
+        // leaving the game: no longer "playing" straight away (other phones stop showing it standing within a few seconds,
+        // instead of for the 45 s an active bird is kept as playing)
+        if (body.leaving) await env.DB.prepare(`UPDATE hunt_birds SET seen_at = ? WHERE username = ?`).bind(now - 60000, username).run();
         let wet = null;
         if (body.leaving && body.wet && nearWater(p)) {   // left the game treading water: it keeps treading on what stamina it has, then drowns
           const en = Math.max(0, Math.min(1, Number(body.en) || 0)), until = now + Math.round(en * HUNT_EN_MAX / HUNT_SWIM_KMS * 1000), mins = Math.max(1, Math.round((until - now) / 60000));
