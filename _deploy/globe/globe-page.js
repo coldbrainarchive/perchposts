@@ -1064,7 +1064,7 @@
     // right on the ground: anything drawn even a few km up slides against the map when the camera is this low
     const sc = (la, lo) => world.getScreenCoords(la, lo, 0);
     // a simple bird seen from above in the bird's colour; the beak points where it's going
-    // each player's head seen from above ("C" without eyes, the user's pick 2026-11-26): colours taken from their own
+    // each player's head seen from above ("B" size without eyes, the user's pick 2026-11-26): colours taken from their own
     // logo bird (crown, a lighter face toward the beak, the beak itself, and their crest if they have one). Admins get the
     // top hat seen from above. Worked out once per player from their logo picture.
     const heads = new Map();
@@ -1090,7 +1090,7 @@
     }
     // drawn in the bird's own (unscaled) units: the head sits over the plain bird's head and beak
     function drawHead(c, L, roll) {
-      const hx = 9.5, hy = roll, r = 5.6, rgb = v => `rgb(${v.map(Math.round).join(',')})`;
+      const hx = 9, hy = roll, r = 4.3, rgb = v => `rgb(${v.map(Math.round).join(',')})`;
       c.save(); c.translate(hx, hy);
       if (L.crest) { c.fillStyle = rgb(L.crest); for (const a of [-.5, 0, .5]) { c.save(); c.rotate(a); c.beginPath(); c.ellipse(-r * 1.15, 0, r * .95, r * .32, 0, 0, 7); c.fill(); c.restore(); } }
       c.beginPath(); c.arc(0, 0, r, 0, 7); c.fillStyle = rgb(L.crown); c.fill();
@@ -1121,8 +1121,8 @@
       shape(); c.fillStyle = cl; c.fill(); c.lineJoin = 'round'; c.lineWidth = 0.8 / k; c.strokeStyle = 'rgba(8,10,14,.35)'; c.stroke();   // a thin dark outline, so the bird stands out on busy maps
       // the lowered wing is a little in shadow
       if (ab > 0.05) { c.save(); c.beginPath(); c.rect(-30, bk > 0 ? roll + 5 : -45, 42, 40 + roll * 0); c.clip(); shape(); c.fillStyle = `rgba(0,0,0,${0.12 * ab})`; c.fill(); c.restore(); }
-      c.beginPath(); c.moveTo(12, -1.8 + roll); c.lineTo(17, roll); c.lineTo(12, 1.8 + roll); c.closePath(); c.fillStyle = dk; c.fill();   // beak
-      { const L = headInfo(name); if (L) drawHead(c, L, roll); }   // the player's own head on top, once it's ready
+      { const L = headInfo(name); if (L) drawHead(c, L, roll);   // the player's own head on top, once it's ready (it has its own beak)
+        else { c.beginPath(); c.moveTo(12, -1.8 + roll); c.lineTo(17, roll); c.lineTo(12, 1.8 + roll); c.closePath(); c.fillStyle = dk; c.fill(); } }   // beak
       c.restore(); c.restore();
     }
     // a worm: a tiny wiggling squiggle (rare purple ones are worth 5)
