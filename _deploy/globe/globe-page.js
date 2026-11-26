@@ -1046,12 +1046,16 @@
     // (a bird can be paused on someone else's phone at any moment: the dots are fetched every 8 s and a moving one is only
     // carried on for up to 8 s past the latest news of it, so a stopped bird's dot doesn't keep drifting away)
     loadMine(); loadDots(); setInterval(() => { if (!document.hidden) loadDots(); }, 8000); setInterval(() => { if (!document.hidden && !on) loadMine(); }, 30000);
-    // a stopped bird: the same bird as when it flies, wings folded, sitting in a minimal nest (a thin brown ring),
-    // breathing slowly with little z's drifting up. Same size as in the game (yours 1, others 0.8).
+    // a stopped bird sleeps in a little woven nest (twigs placed the same way every time): the bird is the same
+    // one-colour bird as when it flies, wings folded, breathing slowly, with little z's drifting up
     function drawNest(x, y, k, alpha) {
-      const c = cx; c.save(); c.globalAlpha = alpha == null ? 1 : alpha;
-      c.beginPath(); c.arc(x, y + 1.2 * k, 14.5 * k, 0, 7); c.lineWidth = 2.6 * k; c.strokeStyle = 'rgba(0,0,0,.3)'; c.stroke();
-      c.beginPath(); c.arc(x, y, 14.5 * k, 0, 7); c.lineWidth = 2.2 * k; c.strokeStyle = '#9a6a3c'; c.stroke();
+      const c = cx; c.save(); c.globalAlpha = alpha == null ? 1 : alpha; c.translate(x, y); c.scale(k * 1.15, k * 1.15);
+      c.beginPath(); c.ellipse(2, 4, 15, 12, 0, 0, 7); c.fillStyle = 'rgba(0,0,0,.28)'; c.fill();
+      c.beginPath(); c.ellipse(0, 0, 15, 12.5, 0, 0, 7); c.fillStyle = '#7a5230'; c.fill();
+      c.beginPath(); c.ellipse(0, 0.6, 10, 8, 0, 0, 7); c.fillStyle = '#3d2615'; c.fill();
+      c.lineCap = 'round';
+      for (let i = 0; i < 22; i++) { const a0 = i * 0.2856 + (i % 3) * 0.4, r = 11.2 + (i % 4) * 0.9, l = 0.5 + (i % 5) * 0.08;
+        c.beginPath(); c.ellipse(0, 0, r, r * 0.83, 0, a0, a0 + l); c.strokeStyle = i % 2 ? '#a8784a' : '#8f6238'; c.lineWidth = 1.1 + (i % 3) * 0.35; c.stroke(); }
       c.restore();
     }
     function drawSleeper(x, y, a, cl, k, t, seed, zs) {
@@ -1059,7 +1063,7 @@
       drawBird(x, y, a, '', k * br / 0.8, 1, 1, { span: 0.32, bk: 0, lift: 0 }, cl);
       if (zs) { const c = cx; c.save(); c.fillStyle = '#e2e8f0'; c.shadowColor = 'rgba(0,0,0,.85)'; c.shadowBlur = 3;
         for (let i = 0; i < 2; i++) { const u = ((t + seed + i * 1.3) % 2.6) / 2.6; c.globalAlpha = Math.sin(Math.PI * u) * 0.85;
-          c.font = `700 ${(6 + 4 * u) * Math.max(0.8, k)}px -apple-system,system-ui,sans-serif`; c.fillText('z', x + 11 * k + 8 * u, y - 10 * k - 14 * u); }
+          c.font = `700 ${(6 + 4 * u) * Math.max(0.55, k)}px -apple-system,system-ui,sans-serif`; c.fillText('z', x + 11 * k + 8 * u * k, y - 10 * k - 14 * u * k); }
         c.restore(); }
     }
     const idleAng = new Map();
@@ -1068,7 +1072,10 @@
       const dt = idleLast ? Math.min(0.1, Math.max(0, ts - idleLast) / 1000) : 0.016; idleLast = ts;
       const cr = cv.getBoundingClientRect(), c = cx; c.setTransform(DPR, 0, 0, DPR, 0, 0); c.clearRect(0, 0, W, H);
       try { world.camera().updateMatrixWorld(); } catch (e) {}
-      const v = world.pointOfView(), cosCap = Math.cos(Math.acos(1 / (1 + v.altitude)) * 0.97), tn = Date.now() + dotsOff, t = performance.now() / 1000, close = v.altitude <= ICON_ALT;
+      const v = world.pointOfView(), cosCap = Math.cos(Math.acos(1 / (1 + v.altitude)) * 0.97), tn = Date.now() + dotsOff, t = performance.now() / 1000;
+      // birds are drawn to the map's scale: exactly game size at game height, smaller as you zoom out (and bigger if you
+      // zoom in past it, up to 2x); once a bird would be too small to make out it's a dot
+      const km2 = Math.min(2, GAME_ALT / v.altitude), close = km2 >= 0.4;
       const front = (la, lo) => Math.sin(v.lat * R) * Math.sin(la * R) + Math.cos(v.lat * R) * Math.cos(la * R) * Math.cos((lo - v.lng) * R) > cosCap;
       const scr = (la, lo) => front(la, lo) ? world.getScreenCoords(la, lo, 0) : null;
       const onScr = s => s && s.x > -30 && s.x < W + 30 && s.y > -30 && s.y < H + 30;
@@ -1080,9 +1087,9 @@
         if (!close) { c.beginPath(); c.arc(s.x, s.y, 2.5, 0, 7); c.fillStyle = 'rgba(0,0,0,.3)'; c.fill();
           c.beginPath(); c.arc(s.x, s.y, 1.9, 0, 7); c.fillStyle = `rgba(${d.col[0]},${d.col[1]},${d.col[2]},.72)`; c.fill(); continue; }
         const flying = tq < d.arrive, hd = headAt(d, tq), a0 = hd != null ? hd - Math.PI / 2 : -Math.PI / 2;
-        if (!flying) { drawNest(s.x, s.y, 0.8); drawSleeper(s.x, s.y, a0, d.col, 0.8, t, d.i * 0.77, true); continue; }
+        if (!flying) { drawNest(s.x, s.y, 0.8 * km2); drawSleeper(s.x, s.y, a0, d.col, 0.8 * km2, t, d.i * 0.77, true); continue; }
         let a = idleAng.get(d.i) ?? a0; a = ease(a, a0, dt, 'dot' + d.i); idleAng.set(d.i, a);
-        drawBird(s.x, s.y, a, '', 0.8, 0.92, 0, pose('dot' + d.i, true, bankAt(d, tq), dt), d.col); }
+        drawBird(s.x, s.y, a, '', 0.8 * km2, 0.92, 0, pose('dot' + d.i, true, bankAt(d, tq), dt), d.col); }
       // you
       let show = false;
       if (mn && mp) { const s = scr(mp[0], mp[1]);
@@ -1090,12 +1097,12 @@
           if (!close) { c.beginPath(); c.arc(s.x, s.y, 5.2, 0, 7); c.fillStyle = 'rgba(0,0,0,.45)'; c.fill(); c.beginPath(); c.arc(s.x, s.y, 4.3, 0, 7); c.fillStyle = '#fff'; c.fill();
             c.beginPath(); c.arc(s.x, s.y, 3.2, 0, 7); c.fillStyle = css(cl); c.fill(); }
           else { const hd = mine.me ? headAt(mine.me, tn) : null, a = hd != null ? hd - Math.PI / 2 : -Math.PI / 2;
-            if (!tko) { drawNest(s.x, s.y, 1); drawSleeper(s.x, s.y, a, cl, 1, t, 0, true); }
+            if (!tko) { drawNest(s.x, s.y, km2); drawSleeper(s.x, s.y, a, cl, km2, t, 0, true); }
             else { // waking up: the wings open, it flaps hard and lifts off (its shadow drops away), the nest fades out
               const u = (performance.now() - tko.t0) / 1000, e = Math.min(1, u / 0.9), ez = e * e * (3 - 2 * e), sw = 1 - 1.4 * ez;
-              drawNest(s.x, s.y, 1, 1 - ez);
+              drawNest(s.x, s.y, km2, 1 - ez);
               const ps = pose('@tko', true, 0, dt * 1.6); ps.span = 0.32 + (ps.span - 0.32) * Math.min(1, u / 0.25);
-              drawBird(s.x, s.y - 6 * ez, a, mn, 1 / (1 - 0.2 * sw), 1, sw, ps, cl);
+              drawBird(s.x, s.y - 6 * ez * km2, a, mn, km2 / (1 - 0.2 * sw), 1, sw, ps, cl);
               if (u > 0.95) { tko = null; enter(); } }
             show = !tko; myBtn.style.transform = `translate(${cr.left + s.x - 24}px,${cr.top + s.y - 24}px)`; } } }
       if (myBtn.classList.contains('in') !== show) myBtn.classList.toggle('in', show);
@@ -1157,18 +1164,13 @@
       }
       // other birds
       for (const b of birds) { const q = posAt(b, now); if (!q || !front(q[0], q[1])) continue; const s = sc(q[0], q[1]); if (!s) continue;
-        if (!inView(s)) { const d = p ? km(p, q) : 0; if (d < 100) drawBirdEdge(s.x, s.y, b.u, d); continue; }
+        if (!inView(s)) { const d = p ? km(p, q) : 0; if (d < 100 && b.a) drawBirdEdge(s.x, s.y, b.u, d); continue; }
         const moving = now < b.arrive, ahead = posAt(b, now + 600), s2 = ahead && sc(ahead[0], ahead[1]);
         if (!moving) { const hd = headAt(b, now); drawNest(s.x, s.y, 0.8); drawSleeper(s.x, s.y, hd != null ? hd - Math.PI / 2 : 0, col(b.u), 0.8, t, b.u.length, true);
           const nl = nameImg(b.u); c.drawImage(nl, s.x - nl._w / 2, s.y + 22 - nl._h / 2 - 3, nl._w, nl._h); continue; }
         let a = angs.get(b.u) ?? -Math.PI / 2; if (moving && s2 && Math.hypot(s2.x - s.x, s2.y - s.y) > 0.5) a = ease(a, Math.atan2(s2.y - s.y, s2.x - s.x), dt, b.u); angs.set(b.u, a);
         drawBird(s.x, s.y, a, b.u, 0.8, 0.92, 0, pose(b.u, moving, bankAt(b, now), dt));
         const nl = nameImg(b.u); c.drawImage(nl, s.x - nl._w / 2, s.y + 26 - nl._h / 2 - 3, nl._w, nl._h); }
-      // birds asleep in their nests nearby (players who aren't playing right now): no names, just their colours
-      { const tq = Math.min(Date.now() + dotsOff, dotsAt + 8000);
-        for (const d of dots) { if (tq < d.arrive || isMine(d)) continue; const q = flyAt(d, tq); if (!q || (p && km(p, q) < 0.05) || birds.some(b => { const bq = posAt(b, now); return bq && km(bq, q) < 0.05; })) continue;
-          if (!front(q[0], q[1])) continue; const s = sc(q[0], q[1]); if (!inView(s)) continue;
-          const hd = headAt(d, tq); drawNest(s.x, s.y, 0.8); drawSleeper(s.x, s.y, hd != null ? hd - Math.PI / 2 : 0, d.col, 0.8, t, d.i * 0.77, true); } }
       // effects: catches (your bird dives, the worm is pulled up, +1 / +5 rises) and worms another bird took
       let swoop = 0;
       fx = fx.filter(f => { const age = (performance.now() - f.t0) / 1000, s = sc(f.lat, f.lng); if (!s) return age < 1.4;
