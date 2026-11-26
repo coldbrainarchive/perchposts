@@ -2452,13 +2452,22 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       return [h[0] + d * Math.cos(a) / 111.2, h[1] + d * Math.sin(a) / (111.2 * Math.cos(h[0] * R))]; };
     // the owner's page tells us its bird's colour (worked out from the name by the bird kit), for the public dots
     const colIn = typeof body.col === "string" && /^\d{1,3},\d{1,3},\d{1,3}$/.test(body.col) && body.col.split(",").every(v => +v <= 255) ? body.col : null;
+    // nests can't sit on top of each other: a perch within 0.6 km of another bird's nest (about a nest plus its name at
+    // game size) glides on along the heading in small steps until there's room (up to ~5 km)
+    const clearPerch = async (p0, h) => {
+      const { results: others = [] } = await env.DB.prepare(`SELECT from_lat, from_lng, to_lat, to_lng, brg0, brg1, depart_at, arrive_at FROM hunt_birds WHERE username != ? AND arrive_at <= ? LIMIT 5000`).bind(username, now).all();
+      const spots = others.map(b => posAt(b, now)).filter(Boolean);
+      let p = p0;
+      for (let i = 0; i < 34 && spots.some(q => km(p, q) < 0.6); i++) { const d = 0.15 * (i + 1);
+        p = [p0[0] + d * Math.cos(h) / 111.2, p0[1] + d * Math.sin(h) / (111.2 * Math.cos(p0[0] * R))]; }
+      return p; };
     try {
       let me = await env.DB.prepare(`SELECT * FROM hunt_birds WHERE username = ?`).bind(username).first();
       if (me && colIn && me.col !== colIn) { await env.DB.prepare(`UPDATE hunt_birds SET col = ? WHERE username = ?`).bind(colIn, username).run(); me.col = colIn; }
       if (url.pathname === "/hunt/state") {
         // a new bird starts over your home city; after that it always carries on from wherever it was left (paused)
         if (!me) {
-          const [la, lo] = homeFor();
+          const [la, lo] = await clearPerch(homeFor(), 1.1);
           await env.DB.prepare(`INSERT OR REPLACE INTO hunt_birds (username, from_lat, from_lng, to_lat, to_lng, depart_at, arrive_at, seen_at, spawn_at, brg0, brg1, col) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)`)
             .bind(username, la, lo, la, lo, now, now, now, now, colIn).run();
           me = { username, from_lat: la, from_lng: lo, to_lat: la, to_lng: lo, depart_at: now, arrive_at: now, seen_at: now, spawn_at: now };
@@ -2504,11 +2513,11 @@ async function handleRequest(request, env, ctx, corsHeaders) {
           worms: live.filter(w => km(p, [w.lat, w.lng]) < NEAR).map(w => ({ id: w.id, lat: w.lat, lng: w.lng, v: w.value, born: w.born_at, gone: w.gone_at })), spawned });
       }
       // your bird when you're not playing: where it is (or, before your first flight, where it will start)
-      if (url.pathname === "/hunt/me") return json({ now, me: flight(me), home: me ? null : homeFor(), role: await accountRole(username) });
+      if (url.pathname === "/hunt/me") return json({ now, me: flight(me), home: me ? null : await clearPerch(homeFor(), 1.1), role: await accountRole(username) });
       if (!me) return json({ error: "Start the hunt first" }, 400);
       // leaving the game: the bird stops right where it is, facing the way it was going, until you come back
       if (url.pathname === "/hunt/pause") {
-        const f0 = flight(me), p = posAt(me, now), h = headAt(f0, now) ?? me.brg1 ?? 0;
+        const f0 = flight(me), h = headAt(f0, now) ?? me.brg1 ?? 0, p = await clearPerch(posAt(me, now), h);
         await env.DB.prepare(`UPDATE hunt_birds SET from_lat = ?, from_lng = ?, to_lat = ?, to_lng = ?, brg0 = ?, brg1 = ?, depart_at = ?, arrive_at = ? WHERE username = ?`)
           .bind(p[0], p[1], p[0], p[1], h, h, now, now, username).run();
         return json({ now, me: { from: p, to: p, b0: h, b1: h, depart: now, arrive: now } });
