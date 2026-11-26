@@ -3,6 +3,7 @@ import { linkPreview } from "./link-preview.js";
 import NEST_WORDS from "./birds/lists.json";
 import { buildTrending } from "./trending.js";
 import LAND_MASK from "./land-mask.js";
+import { TZ_HOME, TZ_ALIAS, CC_HOME } from "./tz-homes.js";
 
 // Is this spot land? (worm hunt) Reads one row of the land map (decoded once per row and kept while the worker lives).
 let LAND_ROWS = null; const LAND_ROW = new Map();
@@ -2386,6 +2387,21 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   // near birds that are hunting (more at night and near trending stories), last ~30 s and go to the first bird that
   // reaches them. A catch only counts if the bird's own flight passes within reach of the worm — scripts can't
   // teleport. Caught worms land in the normal worm balance (a worms row from '__hunt__', no post).
+  // ── /hunt/dots ── every bird on the globe, for the tiny dots anyone sees on the zoomed-out globe: just where each
+  // flight goes (no names). Cached at the edge for 15 s.
+  if (url.pathname === "/hunt/dots" && request.method === "GET") {
+    const key = new Request("https://perchposts-hunt.cache/dots");
+    const hit = await caches.default.match(key); if (hit) return hit;
+    try {
+      const { results = [] } = await env.DB.prepare(`SELECT from_lat, from_lng, brg0, brg1, depart_at, arrive_at FROM hunt_birds LIMIT 5000`).all();
+      const r4 = x => x == null ? null : Math.round(x * 1e4) / 1e4;
+      const res = new Response(JSON.stringify({ now: Date.now(), b: results.map(b => [r4(b.from_lat), r4(b.from_lng), r4(b.brg0), r4(b.brg1), b.depart_at, b.arrive_at]) }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "public, max-age=15" } });
+      ctx.waitUntil(caches.default.put(key, res.clone()));
+      return res;
+    } catch (err) { return serverError(err); }
+  }
+
   if (url.pathname.startsWith("/hunt/") && request.method === "POST") {
     if (!username || isBot) return signInRequired();
     const HS = env.HUNT_FAST ? 1 : 0;                       // local testing only: worms appear quickly
@@ -2422,13 +2438,20 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     const posAt = (b, t) => b ? flyAt(flight(b), t) : null;
     const okLL = (la, lo) => Number.isFinite(la) && Number.isFinite(lo) && Math.abs(la) <= 85 && Math.abs(lo) <= 180;
     const flight = b => b && { from: [b.from_lat, b.from_lng], to: [b.to_lat, b.to_lng], b0: b.brg0 ?? null, b1: b.brg1 ?? null, depart: b.depart_at, arrive: b.arrive_at };
+    // a new bird starts over its player's home city: the phone's time zone (e.g. Europe/Dublin → Dublin), else the
+    // country the request comes from, else where they're looking. Nudged up to ~2 km (same for the same name), so
+    // birds from one city don't sit on top of each other.
+    const homeFor = () => { const tz = String(body.tz || "").slice(0, 64), z = TZ_HOME[tz] || TZ_HOME[TZ_ALIAS[tz]];
+      let h = z || CC_HOME[request.cf && request.cf.country] || (okLL(+body.lat, +body.lng) ? [+body.lat, +body.lng] : null) || [51.478, 0];
+      let x = 0; for (const ch of String(username)) x = (x * 31 + ch.charCodeAt(0)) >>> 0;
+      const a = (x % 3600) / 3600 * 2 * Math.PI, d = 0.5 + ((x >>> 12) % 1000) / 1000 * 1.5;
+      return [h[0] + d * Math.cos(a) / 111.2, h[1] + d * Math.sin(a) / (111.2 * Math.cos(h[0] * R))]; };
     try {
       let me = await env.DB.prepare(`SELECT * FROM hunt_birds WHERE username = ?`).bind(username).first();
       if (url.pathname === "/hunt/state") {
-        // a new bird starts where you're looking; so does one that's been away 45 s+ when you start hunting again
-        // (it can't be seen or catch anything while away, so moving it then gains nothing)
-        if (!me || (body.start && me.seen_at < now - 45000 && okLL(+body.lat, +body.lng))) {
-          const la = +body.lat, lo = +body.lng; if (!okLL(la, lo)) return json({ error: "Where are you?" }, 400);
+        // a new bird starts over your home city; after that it always carries on from wherever it was left (paused)
+        if (!me) {
+          const [la, lo] = homeFor();
           await env.DB.prepare(`INSERT OR REPLACE INTO hunt_birds (username, from_lat, from_lng, to_lat, to_lng, depart_at, arrive_at, seen_at, spawn_at, brg0, brg1) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`)
             .bind(username, la, lo, la, lo, now, now, now, now).run();
           me = { username, from_lat: la, from_lng: lo, to_lat: la, to_lng: lo, depart_at: now, arrive_at: now, seen_at: now, spawn_at: now };
@@ -2466,11 +2489,20 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         const { results: birds = [] } = await env.DB.prepare(`SELECT h.*, (SELECT m.role FROM mod_users m WHERE LOWER(m.username) = LOWER(h.username) AND m.deleted_at IS NULL LIMIT 1) AS role FROM hunt_birds h WHERE h.seen_at > ? AND h.username != ?`).bind(now - 45000, username).all();
         if (Math.random() < 0.02) ctx.waitUntil(env.DB.prepare(`DELETE FROM hunt_worms WHERE gone_at < ?`).bind(now - 3600e3).run().catch(() => {}));
         return json({ now, me: flight(me), balance: await wormBalance(username),
-          birds: birds.filter(b => km(p, posAt(b, now)) < 50).slice(0, 30).map(b => ({ u: b.username, ...(b.role === 'admin' || b.role === 'mod' ? { r: b.role } : {}), ...flight(b) })),
+          birds: birds.filter(b => km(p, posAt(b, now)) < 100).slice(0, 30).map(b => ({ u: b.username, ...(b.role === 'admin' || b.role === 'mod' ? { r: b.role } : {}), ...flight(b) })),
           role: await accountRole(username),
           worms: live.filter(w => km(p, [w.lat, w.lng]) < NEAR).map(w => ({ id: w.id, lat: w.lat, lng: w.lng, v: w.value, born: w.born_at, gone: w.gone_at })), spawned });
       }
+      // your bird when you're not playing: where it is (or, before your first flight, where it will start)
+      if (url.pathname === "/hunt/me") return json({ now, me: flight(me), home: me ? null : homeFor(), role: await accountRole(username) });
       if (!me) return json({ error: "Start the hunt first" }, 400);
+      // leaving the game: the bird stops right where it is, facing the way it was going, until you come back
+      if (url.pathname === "/hunt/pause") {
+        const f0 = flight(me), p = posAt(me, now), h = headAt(f0, now) ?? me.brg1 ?? 0;
+        await env.DB.prepare(`UPDATE hunt_birds SET from_lat = ?, from_lng = ?, to_lat = ?, to_lng = ?, brg0 = ?, brg1 = ?, depart_at = ?, arrive_at = ? WHERE username = ?`)
+          .bind(p[0], p[1], p[0], p[1], h, h, now, now, username).run();
+        return json({ now, me: { from: p, to: p, b0: h, b1: h, depart: now, arrive: now } });
+      }
       if (url.pathname === "/hunt/fly") {
         // a new heading: the bird turns from the way it's going now (gliding round), then flies straight on
         const brg = +body.brg; if (!Number.isFinite(brg) || Math.abs(brg) > 100) return json({ error: "Bad heading" }, 400);

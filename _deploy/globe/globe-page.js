@@ -869,20 +869,16 @@
     const cx = cv.getContext('2d'); let W = 0, H = 0, DPR = 1;
     const size = () => { DPR = Math.min(2, devicePixelRatio || 1); W = innerWidth; H = innerHeight; cv.width = W * DPR; cv.height = H * DPR; cv.style.width = W + 'px'; cv.style.height = H + 'px'; };
     size(); addEventListener('resize', size);
-    const pill = document.createElement('button'); pill.type = 'button'; pill.className = 'hunt-pill'; pill.innerHTML = `<span class="hf"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12.0,5.91Q10.32,6.75 10.11,9.27Q3.6,10.95 0.66,14.31Q6.96,13.47 10.32,14.31L9.48,18.09L12.0,16.83L14.52,18.09L13.68,14.31Q17.04,13.47 23.34,14.31Q20.4,10.95 13.89,9.27Q13.68,6.75 12.0,5.91Z"/></svg></span>Take flight`; document.body.appendChild(pill);
     const bar = document.createElement('div'); bar.className = 'hunt-bar';
     bar.innerHTML = `<span class="hb-n"><span class="hw">${WORM_SVG}</span><b id="huntN">–</b></span><span class="hb-t" id="huntT">Tap to fly</span><button type="button" class="hb-x" aria-label="Land (leave Take flight)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>`;
     document.body.appendChild(bar);
-    for (const el of [pill, bar]) { el.addEventListener('pointerdown', ev => ev.stopPropagation()); }
-    pill.addEventListener('click', () => { if (!tok()) { toast('Sign in to take flight', true); return; } enter(); });
+    bar.addEventListener('pointerdown', ev => ev.stopPropagation());
+    // your own bird on the globe is the way in (no button): an invisible tap target sits on it when it shows as a bird
+    const myBtn = document.createElement('button'); myBtn.type = 'button'; myBtn.className = 'hunt-me'; myBtn.setAttribute('aria-label', 'Take flight'); document.body.appendChild(myBtn);
+    myBtn.addEventListener('pointerdown', ev => ev.stopPropagation());
+    myBtn.addEventListener('click', () => { if (tok()) enter(); });
     bar.querySelector('.hb-x').addEventListener('click', () => leave());
 
-    // the pill shows only when zoomed in close (and sits just above the story cards)
-    const pillCheck = () => { const a = world.pointOfView().altitude, show = !on && a < PILL_ALT && !$('sheet').classList.contains('in');
-      if (show) { const st = $('strip'), top = st ? st.getBoundingClientRect().top : H - 120; pill.style.bottom = Math.max(16, H - top + 12) + 'px'; }
-      pill.classList.toggle('in', show);
-      if (on && a > EXIT_ALT) leave(); };
-    world.controls().addEventListener('change', pillCheck); setInterval(pillCheck, 500);
 
     // a bird's colour in the game: admins white, mods the site purple, everyone else their bird's own body colour
     // (from the same recipe as their logo bird). The beak is a darker shade of it.
@@ -895,7 +891,7 @@
 
     function enter() {
       if (on) return; on = true; loadKit(() => {});
-      document.body.classList.add('hunting'); pill.classList.remove('in'); bar.classList.add('in');
+      document.body.classList.add('hunting'); myBtn.classList.remove('in'); bar.classList.add('in');
       try { closeSheet(); focusPin(null); world.arcsData([]); world.ringsData([]); } catch (e) {}
       // the screen stays on your bird, so the map can't be dragged or pinch-zoomed during the hunt (leave with the ×)
       const c = world.controls(); c.autoRotate = false; c.enableRotate = false; c.enableZoom = false;
@@ -903,15 +899,27 @@
       $('huntN').textContent = balance == null ? '–' : balance; hintUntil = Date.now() + 4000;
       poll(true, [v.lat, v.lng]); loop();
     }
+    const TZ = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { return ''; } })();
+    // pausing: the server stops the bird where it is (also when the page is hidden or closed mid-flight)
+    const pauseNow = keep => fetch(API + '/hunt/pause', { method: 'POST', keepalive: !!keep, headers: { 'Content-Type': 'application/json', ...hdr() }, body: '{}' })
+      .then(r => r.json()).then(j => { if (j && j.me) { mine = { me: j.me, home: null }; if (on && document.hidden) me = j.me; } }).catch(() => {});
     function leave() {
       if (!on) return; on = false; document.body.classList.remove('hunting'); bar.classList.remove('in'); world.controls().enableRotate = true; world.controls().enableZoom = true; try { paint(); } catch (e) {}
-      cancelAnimationFrame(raf); clearTimeout(pollT); cx.clearRect(0, 0, cv.width, cv.height); target = null; fx = []; pillCheck();
+      cancelAnimationFrame(raf); clearTimeout(pollT); cx.clearRect(0, 0, cv.width, cv.height); target = null; fx = [];
+      if (me) mine = { me: { ...me, from: posAt(me, srv()), to: posAt(me, srv()), b0: headAt(me, srv()) ?? me.b1, b1: headAt(me, srv()) ?? me.b1, depart: srv(), arrive: srv() }, home: null };
+      pauseNow(); idleRaf = requestAnimationFrame(idle);
     }
+    addEventListener('pagehide', () => { if (on) pauseNow(true); });
+    document.addEventListener('visibilitychange', () => {
+      if (!on) { if (!document.hidden) { loadMine(); loadDots(); } return; }
+      if (document.hidden) pauseNow(true);
+      else if (me) { const h = headAt(me, srv()); flyDir(h != null ? h : (me.b1 ?? 0)); }
+    });
     async function poll(start, at) {
       clearTimeout(pollT); if (!on) return;
       if (document.hidden) { pollT = setTimeout(() => poll(), 2000); return; }
       const t0 = Date.now(), sent = t0;
-      const r = await api('/hunt/state', start ? { start: 1, lat: at[0], lng: at[1] } : {});
+      const r = await api('/hunt/state', start ? { start: 1, tz: TZ, lat: at[0], lng: at[1] } : {});
       if (!on) return;
       if (r.s === 401) { leave(); toast('Sign in to take flight', true); return; }
       if (r.s === 200 && r.j.now) {
@@ -927,7 +935,7 @@
         // starting: if your bird is still out somewhere else (you were hunting a moment ago), go to it
         // starting: your bird is already in the air — still flying from a moment ago, or it takes off on its last heading
         if (start && me) {
-          if (me.arrive <= now || me.b1 == null) { let b0 = NaN; try { b0 = parseFloat(localStorage.getItem('pp_hunt_brg')); } catch (e) {} flyDir(isFinite(b0) ? b0 : Math.random() * 6.2832); }
+          if (me.arrive <= now || me.b1 == null) { let b0 = me.b1 != null ? me.b1 : NaN; if (!isFinite(b0)) try { b0 = parseFloat(localStorage.getItem('pp_hunt_brg')); } catch (e) {} flyDir(isFinite(b0) ? b0 : Math.random() * 6.2832); }
           const v0 = world.pointOfView(); zoomIn = { la: v0.lat, lo: v0.lng, a: v0.altitude, t0: performance.now() }; }
       }
       pollT = setTimeout(() => poll(), 2000);
@@ -1016,6 +1024,50 @@
       c.beginPath(); c.moveTo(5, 0); c.lineTo(-3, -4); c.lineTo(-3, 4); c.closePath();
       c.fillStyle = gold ? 'rgba(192,132,252,.85)' : 'rgba(242,160,164,.75)'; c.fill(); c.restore();
     }
+    // ── out of the game: your bird and everyone else's on the globe ──
+    // Zoomed out, every bird is a tiny dot (anyone can see them; no names). Yours is a slightly bigger dot in your
+    // bird's colour, and once you're zoomed in a fair way it becomes your bird, flapping gently where it was left
+    // (or, before your first flight, over your home city). Tap it and the game carries on from there.
+    const ICON_ALT = 0.25;
+    let mine = null, dots = [], dotsOff = 0, idleRaf = 0, idleLast = 0;
+    const loadMine = () => { if (!tok()) { mine = null; return; }
+      api('/hunt/me', { tz: TZ }).then(r => { if (r.s !== 200 || !r.j) return; mine = { me: r.j.me, home: r.j.home };
+        const mn = myName(); if (mn) { if (r.j.role) roles.set(mn, r.j.role); else roles.delete(mn); } loadKit(() => {}); }); };
+    const loadDots = () => fetch(API + '/hunt/dots').then(r => r.json()).then(j => { if (!j || !Array.isArray(j.b)) return; dotsOff = j.now - Date.now();
+      dots = j.b.map(d => ({ from: [d[0], d[1]], to: [d[0], d[1]], b0: d[2], b1: d[3], depart: d[4], arrive: d[5] })); }).catch(() => {});
+    loadMine(); loadDots(); setInterval(() => { if (!document.hidden && !on) { loadDots(); loadMine(); } }, 30000);
+    function idle(ts) {
+      if (on) return; idleRaf = requestAnimationFrame(idle);
+      const dt = idleLast ? Math.min(0.1, Math.max(0, ts - idleLast) / 1000) : 0.016; idleLast = ts;
+      const cr = cv.getBoundingClientRect(), c = cx; c.setTransform(DPR, 0, 0, DPR, 0, 0); c.clearRect(0, 0, W, H);
+      try { world.camera().updateMatrixWorld(); } catch (e) {}
+      const v = world.pointOfView(), cosCap = Math.cos(Math.acos(1 / (1 + v.altitude)) * 0.97), tn = Date.now() + dotsOff;
+      const front = (la, lo) => Math.sin(v.lat * R) * Math.sin(la * R) + Math.cos(v.lat * R) * Math.cos(la * R) * Math.cos((lo - v.lng) * R) > cosCap;
+      const scr = (la, lo) => front(la, lo) ? world.getScreenCoords(la, lo, 0) : null;
+      const onScr = s => s && s.x > -10 && s.x < W + 10 && s.y > -10 && s.y < H + 10;
+      for (const d of dots) { const q = flyAt(d, tn); if (!q) continue; const s = scr(q[0], q[1]); if (!onScr(s)) continue;
+        c.beginPath(); c.arc(s.x, s.y, 2.6, 0, 7); c.fillStyle = 'rgba(0,0,0,.45)'; c.fill();
+        c.beginPath(); c.arc(s.x, s.y, 1.8, 0, 7); c.fillStyle = 'rgba(255,255,255,.9)'; c.fill(); }
+      let show = false;
+      const mn = myName(), mp = mine && (mine.me ? flyAt(mine.me, tn) : mine.home);
+      if (mn && mp) { const s = scr(mp[0], mp[1]);
+        if (onScr(s)) { const cl = col(mn);
+          if (v.altitude > ICON_ALT) { c.beginPath(); c.arc(s.x, s.y, 4.6, 0, 7); c.fillStyle = 'rgba(0,0,0,.5)'; c.fill(); c.beginPath(); c.arc(s.x, s.y, 3.4, 0, 7); c.fillStyle = css(cl); c.fill(); }
+          else { const hd = mine.me ? headAt(mine.me, tn) : null, a = hd != null ? hd - Math.PI / 2 : -Math.PI / 2;
+            drawBird(s.x, s.y, a, mn, 0.85, 1, 0, pose('@idle', false, 0, dt));
+            show = true; myBtn.style.transform = `translate(${cr.left + s.x - 24}px,${cr.top + s.y - 24}px)`; } } }
+      if (myBtn.classList.contains('in') !== show) myBtn.classList.toggle('in', show);
+    }
+    idleRaf = requestAnimationFrame(idle);
+    // in the game: other players within 100 km who are off the screen get an arrow at the edge with how far away they are
+    function drawBirdEdge(x, y, name, d) {
+      const m = 30, topY = 84, botY = H - 96, cx0 = W / 2, cy0 = (topY + botY) / 2, dx = x - cx0, dy = y - cy0;
+      const f = Math.min((W / 2 - m) / Math.abs(dx || 1e-6), ((botY - topY) / 2) / Math.abs(dy || 1e-6)), ex = cx0 + dx * f, ey = cy0 + dy * f, a = Math.atan2(dy, dx), cl = css(col(name));
+      const c = cx; c.save(); c.translate(ex, ey); c.save(); c.rotate(a); c.beginPath(); c.moveTo(7, 0); c.lineTo(-3, -5); c.lineTo(-3, 5); c.closePath();
+      c.fillStyle = cl; c.shadowColor = 'rgba(0,0,0,.8)'; c.shadowBlur = 3; c.fill(); c.restore();
+      c.font = '600 10px -apple-system,system-ui,sans-serif'; c.textAlign = 'center'; c.fillStyle = 'rgba(255,255,255,.9)'; c.shadowColor = 'rgba(0,0,0,.9)'; c.shadowBlur = 3;
+      c.fillText(d < 10 ? d.toFixed(1) + ' km' : Math.round(d) + ' km', -Math.cos(a) * 18, -Math.sin(a) * 18 + 3.5); c.restore();
+    }
     // the game's own smooth clock: advances by the screen's frame time and is only gently pulled toward the real clock
     // (reading the wall clock each frame wobbles by a few ms, and the bird and map wobbled with it)
     let camT = null;
@@ -1054,7 +1106,8 @@
         if (p && km(p, [q.lat, q.lng]) < CATCH_KM) tryCatch(w);
       }
       // other birds
-      for (const b of birds) { const q = posAt(b, now); if (!q || !front(q[0], q[1])) continue; const s = sc(q[0], q[1]); if (!inView(s)) continue;
+      for (const b of birds) { const q = posAt(b, now); if (!q || !front(q[0], q[1])) continue; const s = sc(q[0], q[1]); if (!s) continue;
+        if (!inView(s)) { const d = p ? km(p, q) : 0; if (d < 100) drawBirdEdge(s.x, s.y, b.u, d); continue; }
         const moving = now < b.arrive, ahead = posAt(b, now + 600), s2 = ahead && sc(ahead[0], ahead[1]);
         let a = angs.get(b.u) ?? -Math.PI / 2; if (moving && s2 && Math.hypot(s2.x - s.x, s2.y - s.y) > 0.5) a = ease(a, Math.atan2(s2.y - s.y, s2.x - s.x), dt, b.u); angs.set(b.u, a);
         drawBird(s.x, s.y, a, b.u, 0.8, 0.92, 0, pose(b.u, moving, bankAt(b, now), dt));
