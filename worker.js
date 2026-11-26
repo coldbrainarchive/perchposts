@@ -2469,6 +2469,25 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const segKm = b => b && b.brg0 != null ? SPEED * Math.max(0, Math.min(now, b.arrive_at) - b.depart_at) / 1000 : 0;
       if (me && me.home_lat == null && body.tz) { const hm = homeFor(); me.home_lat = hm[0]; me.home_lng = hm[1];
         await env.DB.prepare(`UPDATE hunt_birds SET home_lat = ?, home_lng = ? WHERE username = ?`).bind(hm[0], hm[1], username).run(); }
+      // dinner: once every 24 hours your bird eats one worm from your real balance, which fills its stamina bar (the
+      // page fills it when "ate" comes back). Days with no worm to eat are counted in "missed" (for starving, later).
+      // Missed days still move the clock on, so a bird away for 3 days eats 3 worms (if it has them) when it's back.
+      // The clock is claimed first (only one request can move it), so two at once can't charge twice.
+      const DAY = 864e5;
+      const dinner = async () => { if (!me) return null;
+        if (me.fed_at == null) { await env.DB.prepare(`UPDATE hunt_birds SET fed_at = ? WHERE username = ? AND fed_at IS NULL`).bind(now, username).run(); me.fed_at = now; return null; }
+        const days = Math.floor((now - me.fed_at) / DAY); if (days < 1) return null;
+        const claim = await env.DB.prepare(`UPDATE hunt_birds SET fed_at = ? WHERE username = ? AND fed_at = ?`).bind(me.fed_at + days * DAY, username, me.fed_at).run();
+        if (!claim.meta || !claim.meta.changes) return null; me.fed_at += days * DAY;
+        const want = Math.min(days, await wormBalance(username)), iso = new Date(now).toISOString();
+        let ate = 0;
+        if (want > 0) { const ins = env.DB.prepare(`INSERT INTO worms (id, giver, receiver, post_id, comment_id, created_at)
+            SELECT ?1, ?2, '__hunt__', NULL, NULL, ?3 WHERE COALESCE((SELECT worm_start FROM mod_users WHERE username = ?2), 0)
+              + (SELECT COUNT(*) FROM worms WHERE receiver = ?2) - (SELECT COUNT(*) FROM worms WHERE giver = ?2) >= 1`);
+          const rs = await env.DB.batch(Array.from({ length: want }, () => ins.bind(crypto.randomUUID(), username, iso)));
+          ate = rs.reduce((n, r) => n + (r.meta && r.meta.changes ? 1 : 0), 0); }
+        if (days > ate) await env.DB.prepare(`UPDATE hunt_birds SET missed = COALESCE(missed, 0) + ? WHERE username = ?`).bind(days - ate, username).run();
+        return { ate, missed: days - ate }; };
       const stats = () => { if (!me) return null; const p = posAt(me, now); let tz = null, best = 1e9;
         for (const z in TZ_HOME) { const d = km(p, TZ_HOME[z]); if (d < best) { best = d; tz = z; } }
         return { flown: Math.round(((me.flown || 0) + segKm(me)) * 1000) / 1000, home: me.home_lat != null ? [me.home_lat, me.home_lng] : null, tz, cc: TZ_CC[tz] || null }; };
@@ -2476,11 +2495,11 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         // a new bird starts over your home city; after that it always carries on from wherever it was left (paused)
         if (!me) {
           const [la, lo] = await clearPerch(homeFor(), 1.1);
-          await env.DB.prepare(`INSERT OR REPLACE INTO hunt_birds (username, from_lat, from_lng, to_lat, to_lng, depart_at, arrive_at, seen_at, spawn_at, brg0, brg1, col, flown, home_lat, home_lng) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, 0, ?, ?)`)
-            .bind(username, la, lo, la, lo, now, now, now, now, colIn, la, lo).run();
-          me = { username, from_lat: la, from_lng: lo, to_lat: la, to_lng: lo, depart_at: now, arrive_at: now, seen_at: now, spawn_at: now, flown: 0, home_lat: la, home_lng: lo };
+          await env.DB.prepare(`INSERT OR REPLACE INTO hunt_birds (username, from_lat, from_lng, to_lat, to_lng, depart_at, arrive_at, seen_at, spawn_at, brg0, brg1, col, flown, home_lat, home_lng, fed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, 0, ?, ?, ?)`)
+            .bind(username, la, lo, la, lo, now, now, now, now, colIn, la, lo, now).run();
+          me = { username, from_lat: la, from_lng: lo, to_lat: la, to_lng: lo, depart_at: now, arrive_at: now, seen_at: now, spawn_at: now, flown: 0, home_lat: la, home_lng: lo, fed_at: now };
         }
-        const p = posAt(me, now);
+        const p = posAt(me, now), meal = await dinner();
         // occasionally a worm pops up near you: about one every ~90 s of hunting at night, ~3 min by day, a bit more
         // near trending stories; never more than 2 around you at once (within 4.3 km)
         const { results: live = [] } = await env.DB.prepare(`SELECT id, lat, lng, value, born_at, gone_at FROM hunt_worms WHERE gone_at > ? AND caught_by IS NULL`).bind(now).all();
@@ -2512,7 +2531,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         await env.DB.prepare(`UPDATE hunt_birds SET seen_at = ?, spawn_at = ? WHERE username = ?`).bind(now, now, username).run();
         const { results: birds = [] } = await env.DB.prepare(`SELECT h.*, (SELECT m.role FROM mod_users m WHERE LOWER(m.username) = LOWER(h.username) AND m.deleted_at IS NULL LIMIT 1) AS role FROM hunt_birds h WHERE h.username != ? LIMIT 5000`).bind(username).all();
         if (Math.random() < 0.02) ctx.waitUntil(env.DB.prepare(`DELETE FROM hunt_worms WHERE gone_at < ?`).bind(now - 3600e3).run().catch(() => {}));
-        return json({ now, me: flight(me), st: stats(), balance: await wormBalance(username),
+        return json({ now, me: flight(me), st: stats(), balance: await wormBalance(username), ...(meal ? { meal } : {}),
           // everyone within 100 km, with names (players in the game see who's who): flying now ("a": active in the
           // last 45 s) or asleep in their nests; nearest first
           birds: birds.map(b => ({ b, d: km(p, posAt(b, now)) })).filter(x => x.d < 100).sort((x, y) => x.d - y.d).slice(0, 40)
@@ -2521,7 +2540,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
           worms: live.filter(w => km(p, [w.lat, w.lng]) < NEAR).map(w => ({ id: w.id, lat: w.lat, lng: w.lng, v: w.value, born: w.born_at, gone: w.gone_at })), spawned });
       }
       // your bird when you're not playing: where it is (or, before your first flight, where it will start)
-      if (url.pathname === "/hunt/me") return json({ now, me: flight(me), st: stats(), home: me ? null : await clearPerch(homeFor(), 1.1), role: await accountRole(username) });
+      if (url.pathname === "/hunt/me") { const meal = await dinner(); return json({ now, me: flight(me), st: stats(), ...(meal ? { meal, balance: await wormBalance(username) } : {}), home: me ? null : await clearPerch(homeFor(), 1.1), role: await accountRole(username) }); }
       if (!me) return json({ error: "Start the hunt first" }, 400);
       // leaving the game: the bird stops right where it is, facing the way it was going, until you come back
       if (url.pathname === "/hunt/pause") {

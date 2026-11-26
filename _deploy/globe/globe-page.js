@@ -912,15 +912,22 @@
       setTimeout(() => { d.style.opacity = '0'; setTimeout(() => d.remove(), 650); }, 6500); }
     // towns for "where you are" (the same list the map's names come from)
     let towns = null; const loadTowns = () => { if (towns) return; towns = []; fetch('/globe/map-data.json').then(r => r.json()).then(d => { towns = [...(d.c || []), ...(d.t || [])].map(t => [t[0], +t[1], +t[2]]); }).catch(() => { towns = null; }); };
-    // ── stamina (a TEST, 2026-11-26): flying uses it and rest refills it slowly. When it runs out mid-flight the bird
+    // ── stamina (a TEST, 2026-11-26): flying uses it and rest refills it slowly (a quarter of the bar per 24 hours).
+    // Once a day the bird has dinner: the server takes one worm from your balance and the bar is filled (mealIn). When it runs out mid-flight the bird
     // eats a worm from your real worm balance (the site's currency, the user's decision) and it's full again; with no
     // worms left it lands and can't take off until it has a worm (or has rested). The bar itself is kept on this
     // device for now; the worm it eats is spent on the server (/hunt/eat). Starving comes later. ──
-    const EN_MAX = 150, EN_REST = 50 / 3600e3;   // km of flying when full; km per ms of rest (~50 km an hour)
+    const EN_MAX = 150, EN_REST = EN_MAX / 4 / 864e5;   // km of flying when full; km per ms of rest (a quarter of the bar a day)
     let enKm = EN_MAX, enAt = Date.now(), enTired = false, eating = false;
     try { const o = JSON.parse(localStorage.getItem('pp_energy') || 'null'); if (o && isFinite(o.km)) { enKm = Math.min(EN_MAX, o.km + Math.max(0, Date.now() - o.at) * EN_REST); } } catch (e) {}
     const enSave = () => { try { localStorage.setItem('pp_energy', JSON.stringify({ km: enKm, at: Date.now() })); } catch (e) {} };
     const enAdd = km => { enKm = Math.max(0, Math.min(EN_MAX, enKm + km)); };
+    // dinner from the server (/hunt/me or /hunt/state): a full bar, told in the log (now, or as soon as you're playing)
+    let mealNote = null;
+    const mealIn = j => { const m = j && j.meal; if (!m) return; if (j.balance != null) setBal(j.balance);
+      if (m.ate > 0) { enKm = EN_MAX; enAt = Date.now(); enTired = false; enSave(); mealNote = ['Dinner', m.ate > 1 ? `ate ${m.ate} worms (one a day) · stamina full` : 'ate a worm · stamina full', '#f2a0a4']; }
+      else mealNote = ['Hungry', 'no worm for dinner · resting only', '#f87171'];
+      if (on) { ghEvent(...mealNote); mealNote = null; } };
     const outOfWorms = () => { if (!landed) landNow(); ghEvent('Out of worms', 'catch or earn a worm to fly again', '#f87171'); };
     // eat one worm: stamina back to full, then carry on (then() takes off again if you were standing)
     function eatWorm(then) {
@@ -1004,7 +1011,7 @@
       const c = world.controls(); c.autoRotate = false; c.enableRotate = false; c.enableZoom = false; c.enableDamping = false;   // no leftover drift from a swipe or pinch
       const v = world.pointOfView();
       $('huntN').textContent = balance == null ? '–' : balance; hintUntil = Date.now() + 4000;
-      ghLog.innerHTML = ''; ghTown = ''; met = new Set(); ghNext = 0; enAdd(Math.max(0, Date.now() - enAt) * EN_REST); enAt = Date.now();   // rested while you were away
+      ghLog.innerHTML = ''; ghTown = ''; met = new Set(); ghNext = 0; enAdd(Math.max(0, Date.now() - enAt) * EN_REST); enAt = Date.now(); if (mealNote) { const n = mealNote; mealNote = null; setTimeout(() => ghEvent(...n), 600); }   // rested while you were away
       // (your bird's spot is already known from the globe, so the dive down to it starts at once, not after the server answers)
       if (mine && mine.me) { me = { ...mine.me }; zoomIn = { la: v.lat, lo: v.lng, a: v.altitude, t0: performance.now() }; }
       poll(true, [v.lat, v.lng]); loop();
@@ -1043,7 +1050,7 @@
         const t1 = Date.now(); clockSample(r.j.now - (t0 + t1) / 2, t1 - t0);
         if (sent > flySent && !flyWait && r.j.me && (!me || r.j.me.depart >= me.depart - 50)) setMe(r.j.me);   // a flight you just set wins over an older answer
         if (r.j.balance != null) setBal(r.j.balance);
-        if (r.j.st) { gSt = r.j.st; gStAt = r.j.now; }
+        if (r.j.st) { gSt = r.j.st; gStAt = r.j.now; } mealIn(r.j);
         { const pp = me && posAt(me, srv()); if (pp) for (const b of r.j.birds || []) { if (!b.a || met.has(b.u)) continue; const q = posAt(b, srv()); if (q && km(pp, q) < 3) { met.add(b.u); ghEvent('Met', b.u, '#6ee7b7'); } } }
         birdsIn = true; birds = r.j.birds || []; for (const b of birds) { if (b.r) roles.set(b.u, b.r); else roles.delete(b.u); }
         { const mn = myName(); if (mn) { if (r.j.role) roles.set(mn, r.j.role); else roles.delete(mn); } }
@@ -1218,7 +1225,7 @@
     const myDeps = new Set(), isMine = d => myDeps.has(d.depart);
     const kitCol = () => { try { const n = myName(); return window._ppKit && window._ppKit.bodyCol && n ? window._ppKit.bodyCol(n).join(',') : undefined; } catch (e) { return undefined; } };
     const loadMine = () => { if (!tok()) { mine = null; return; }
-      api('/hunt/me', { tz: TZ, col: kitCol() }).then(r => { if (r.s !== 200 || !r.j) return; mine = { me: r.j.me, home: r.j.home }; if (r.j.me) myDeps.add(r.j.me.depart);
+      api('/hunt/me', { tz: TZ, col: kitCol() }).then(r => { if (r.s !== 200 || !r.j) return; mealIn(r.j); mine = { me: r.j.me, home: r.j.home }; if (r.j.me) myDeps.add(r.j.me.depart);
         const mn = myName(); if (mn) { if (r.j.role) roles.set(mn, r.j.role); else roles.delete(mn); }
         if (!window._ppKit) loadKit(() => { if (r.j.me) api('/hunt/me', { tz: TZ, col: kitCol() }); }); }); };
     const parseCol = c => { const v = typeof c === 'string' ? c.split(',').map(Number) : null; return v && v.length === 3 && v.every(x => x >= 0 && x <= 255) ? v : [214, 218, 226]; };

@@ -13,3 +13,7 @@ ALTER TABLE hunt_birds ADD COLUMN col TEXT;
 ALTER TABLE hunt_birds ADD COLUMN flown REAL DEFAULT 0;
 ALTER TABLE hunt_birds ADD COLUMN home_lat REAL;
 ALTER TABLE hunt_birds ADD COLUMN home_lng REAL;
+
+-- 2026-11-26: dinner: when the bird last ate its daily worm, and how many days it went without one (for starving, later)
+ALTER TABLE hunt_birds ADD COLUMN fed_at INTEGER;
+ALTER TABLE hunt_birds ADD COLUMN missed INTEGER DEFAULT 0;
