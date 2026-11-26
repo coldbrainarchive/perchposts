@@ -561,7 +561,7 @@
     const imagery = () => { const a = world.pointOfView().altitude;
       // zooming OUT: stop asking for new tiles (the ones already there stay; the whole-Earth image underneath has the
       // same colours) and resume once the zoom settles — otherwise every in-between level gets fetched and thrown away
-      if (te && tilesOn) { if (a > lastA * 1.004) { te.tileUrl = null; clearTimeout(outT); outT = setTimeout(() => { if (tilesOn) { te.tileUrl = TILE; const v = world.pointOfView(); world.pointOfView({ ...v, altitude: v.altitude + 1e-5 }); } }, 250); } }
+      if (te && tilesOn && !document.body.classList.contains('hunting')) { if (a > lastA * 1.004) { te.tileUrl = null; clearTimeout(outT); outT = setTimeout(() => { if (tilesOn) { te.tileUrl = TILE; const v = world.pointOfView(); world.pointOfView({ ...v, altitude: v.altitude + 1e-5 }); } }, 250); } }
       lastA = a;
       if (!tilesOn && a < ON) { tilesOn = true; keepBase(); world.globeTileEngineUrl(TILE);
         if (!tuned) { try { world.scene().traverse(o => { if (!tuned && o && Array.isArray(o.thresholds) && 'tileUrl' in o) { o.thresholds = o.thresholds.map((v, i) => 8 / Math.pow(2, i - 1)); tuned = true; te = o; tileEng = o; tileHooks(o); } }); } catch (e) {} } }
@@ -715,7 +715,7 @@
       if (!data) { if (b > 0 && !loading) { loading = true; fetch('/globe/map-data.json').then(r => r.json()).then(d => { data = d; band = -1; paths(); draw(); }).catch(() => { loading = false; }); } return; }
       paths(); if (b === 0) { shown = []; return; }
       try { world.camera().updateMatrixWorld(); } catch (e) {}
-      const la0 = pov.lat * R, lo0 = pov.lng * R, cap = Math.cos(Math.min(1.2, Math.acos(1 / (1 + a)) * 0.92));
+      const la0 = pov.lat * R, lo0 = pov.lng * R, cap = inGame() ? Math.cos(15 / 6371) : Math.cos(Math.min(1.2, Math.acos(1 / (1 + a)) * 0.92));
       const want = [];
       const cRank = [0, 2, 4, 6, 9, 9][b], tRank = [-1, -1, 1, 3, 5, 6][b];
       for (const c of data.c) if (c[3] <= cRank) want.push({ k: 'c:' + c[0], t: c[0], lat: c[1], lng: c[2], cls: 'ml-c', pr: c[3] });
@@ -834,6 +834,14 @@
     const myName = () => { try { return localStorage.getItem('_myUsername') || ''; } catch (e) { return ''; } };
     let on = false, me = null, birds = [], worms = new Map(), off = 0, balance = null, fx = [], target = null, raf = 0, pollT = 0, flySent = 0, flyWait = 0, corr = null, lastF = 0, frameMs = 16.7, zoomIn = null, extAt = 0, ang = -Math.PI / 2, angs = new Map(), asking = new Set(), seenTaken = new Set(), hintUntil = 0;
     const srv = () => Date.now() + off;
+    // Server clock: on mobile data the round trip jitters, and taking each 2-second answer as-is nudged the bird (and so
+    // the whole map) a few metres back or forward every time: the 'bounce'. Now the most trustworthy recent answer (the
+    // fastest round trip of the last 8) is the target, and the clock drifts toward it at most 3% faster or slower.
+    let offT = null, clk = [];
+    const clockSample = (o, rtt) => { clk.push({ o, rtt }); if (clk.length > 8) clk.shift();
+      const best = clk.reduce((a, b) => b.rtt < a.rtt ? b : a); offT = best.o;
+      if (clk.length === 1 || Math.abs(offT - off) > 1500) off = offT; };
+    const clockStep = dt => { if (offT == null) return; const d = offT - off, m = dt * 0.03; off += d > m ? m : d < -m ? -m : d; };
     const api = (path, body) => fetch(API + path, { method: 'POST', headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify(body || {}) }).then(async r => ({ s: r.status, j: await r.json().catch(() => ({})) })).catch(() => ({ s: 0, j: {} }));
 
     // pieces on the page: the pill, the game bar, and a see-through canvas over the globe the game draws on
@@ -882,7 +890,7 @@
       if (!on) return;
       if (r.s === 401) { leave(); toast('Sign in to take flight', true); return; }
       if (r.s === 200 && r.j.now) {
-        const t1 = Date.now(); off = r.j.now - (t0 + t1) / 2;
+        const t1 = Date.now(); clockSample(r.j.now - (t0 + t1) / 2, t1 - t0);
         if (sent > flySent && !flyWait && r.j.me && (!me || r.j.me.depart >= me.depart - 50)) setMe(r.j.me);   // a flight you just set wins over an older answer
         if (r.j.balance != null) setBal(r.j.balance);
         birds = r.j.birds || [];
@@ -982,10 +990,15 @@
       c.beginPath(); c.moveTo(5, 0); c.lineTo(-3, -4); c.lineTo(-3, 4); c.closePath();
       c.fillStyle = gold ? 'rgba(192,132,252,.85)' : 'rgba(242,160,164,.75)'; c.fill(); c.restore();
     }
-    function loop() {
+    // the game's own smooth clock: advances by the screen's frame time and is only gently pulled toward the real clock
+    // (reading the wall clock each frame wobbles by a few ms, and the bird and map wobbled with it)
+    let camT = null;
+    function loop(ts) {
       raf = requestAnimationFrame(loop); if (!on) return;
-      const now = srv(), p = me && posAt(me, now), pf = performance.now(), dt = lastF ? Math.min(0.1, (pf - lastF) / 1000) : 0.016; lastF = pf;
-      frameMs += (Math.min(50, Math.max(8, dt * 1000)) - frameMs) * 0.1;
+      const pf = ts || performance.now(), dt = lastF ? Math.min(0.1, Math.max(0, pf - lastF) / 1000) : 0.016; lastF = pf;
+      { const s0 = srv(); if (camT == null || Math.abs(s0 - camT) > 500) camT = s0; else { camT += dt * 1000; camT += (s0 - camT) * 0.04; } }
+      const now = camT, p = me && posAt(me, now);
+      frameMs += (Math.min(50, Math.max(8, dt * 1000)) - frameMs) * 0.1; clockStep(Math.min(50, dt * 1000));
       const cc = corrNow(), pv = p && [p[0] + cc[0], p[1] + cc[1]];   // where the bird is drawn (p is where it really is)
       // The globe draws the map earlier in each frame than this loop runs, so everything here is drawn with the camera the
       // map was just drawn with, and only at the end is the camera moved on for the next frame: map, bird, worms and names
@@ -1045,7 +1058,7 @@
           drawBird(s.x, s.y, ang, mine, 1, 1, swoop, pose('@me', moving, bankAt(me, now), dt)); } }
       // the screen moves with your bird (kept in the middle): aim at where it will be when the map is next drawn
       // (on entering it glides from where you were looking down to your bird at hunting height over ~1 s)
-      if (p) { const tn = srv() + frameMs, pn = posAt(me, tn), c2 = corrNow(); let la = pn[0] + c2[0], lo = pn[1] + c2[1], al = null;
+      if (p) { const tn = now + frameMs, pn = posAt(me, tn), c2 = corrNow(); let la = pn[0] + c2[0], lo = pn[1] + c2[1], al = null;
         if (zoomIn) { const k = Math.min(1, (performance.now() + frameMs - zoomIn.t0) / 1000), e = 1 - Math.pow(1 - k, 3), dl = ((lo - zoomIn.lo + 540) % 360) - 180;
           la = zoomIn.la + (la - zoomIn.la) * e; lo = zoomIn.lo + dl * e; al = zoomIn.a + (GAME_ALT - zoomIn.a) * e; if (k >= 1) zoomIn = null; }
         world.pointOfView(al == null ? { lat: la, lng: lo } : { lat: la, lng: lo, altitude: al }, 0); }
