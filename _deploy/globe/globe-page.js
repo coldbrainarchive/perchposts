@@ -925,7 +925,7 @@
     // dinner from the server (/hunt/me or /hunt/state): a full bar, told in the log (now, or as soon as you're playing)
     let mealNote = null;
     const mealIn = j => { const m = j && j.meal; if (!m) return; if (j.balance != null) setBal(j.balance);
-      if (m.ate > 0) { enKm = EN_MAX; enAt = Date.now(); enTired = false; enSave(); mealNote = ['Dinner', m.ate > 1 ? `ate ${m.ate} worms (one a day) · stamina full` : 'ate a worm · stamina full', '#f2a0a4']; }
+      if (m.ate > 0) { enKm = EN_MAX; enAt = Date.now(); enTired = false; enSave(); mealNote = ['Dinner', 'ate a worm · stamina full', '#f2a0a4']; }
       else mealNote = ['Hungry', 'no worm for dinner · resting only', '#f87171'];
       if (on) { ghEvent(...mealNote); mealNote = null; } };
     const outOfWorms = () => { if (!landed) landNow(); ghEvent('Out of worms', 'catch or earn a worm to fly again', '#f87171'); };
@@ -1043,7 +1043,7 @@
       clearTimeout(pollT); if (!on) return;
       if (document.hidden) { pollT = setTimeout(() => poll(), 2000); return; }
       const t0 = Date.now(), sent = t0;
-      const r = await api('/hunt/state', start ? { start: 1, tz: TZ, lat: at[0], lng: at[1], col: kitCol() } : { col: kitCol() });
+      const r = await api('/hunt/state', start ? { start: 1, tz: TZ, lat: at[0], lng: at[1], col: kitCol(), en: enKm / EN_MAX } : { col: kitCol(), en: enKm / EN_MAX });
       if (!on) return;
       if (r.s === 401) { leave(); toast('Sign in to take flight', true); return; }
       if (r.s === 200 && r.j.now) {
@@ -1225,9 +1225,9 @@
     const myDeps = new Set(), isMine = d => myDeps.has(d.depart);
     const kitCol = () => { try { const n = myName(); return window._ppKit && window._ppKit.bodyCol && n ? window._ppKit.bodyCol(n).join(',') : undefined; } catch (e) { return undefined; } };
     const loadMine = () => { if (!tok()) { mine = null; return; }
-      api('/hunt/me', { tz: TZ, col: kitCol() }).then(r => { if (r.s !== 200 || !r.j) return; mealIn(r.j); mine = { me: r.j.me, home: r.j.home }; if (r.j.me) myDeps.add(r.j.me.depart);
+      api('/hunt/me', { tz: TZ, col: kitCol(), en: enKm / EN_MAX }).then(r => { if (r.s !== 200 || !r.j) return; mealIn(r.j); mine = { me: r.j.me, home: r.j.home }; if (r.j.me) myDeps.add(r.j.me.depart);
         const mn = myName(); if (mn) { if (r.j.role) roles.set(mn, r.j.role); else roles.delete(mn); }
-        if (!window._ppKit) loadKit(() => { if (r.j.me) api('/hunt/me', { tz: TZ, col: kitCol() }); }); }); };
+        if (!window._ppKit) loadKit(() => { if (r.j.me) api('/hunt/me', { tz: TZ, col: kitCol(), en: enKm / EN_MAX }); }); }); };
     const parseCol = c => { const v = typeof c === 'string' ? c.split(',').map(Number) : null; return v && v.length === 3 && v.every(x => x >= 0 && x <= 255) ? v : [214, 218, 226]; };
     // (signed in, the list also has each bird's name and role, so sleeping birds show their owner's own logo bird)
     const loadDots = () => fetch(API + '/hunt/dots', { headers: hdr() }).then(r => r.json()).then(j => { if (!j || !Array.isArray(j.b)) return; dotsOff = j.now - Date.now();

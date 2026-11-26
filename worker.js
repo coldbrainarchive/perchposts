@@ -2469,25 +2469,25 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const segKm = b => b && b.brg0 != null ? SPEED * Math.max(0, Math.min(now, b.arrive_at) - b.depart_at) / 1000 : 0;
       if (me && me.home_lat == null && body.tz) { const hm = homeFor(); me.home_lat = hm[0]; me.home_lng = hm[1];
         await env.DB.prepare(`UPDATE hunt_birds SET home_lat = ?, home_lng = ? WHERE username = ?`).bind(hm[0], hm[1], username).run(); }
-      // dinner: once every 24 hours your bird eats one worm from your real balance, which fills its stamina bar (the
-      // page fills it when "ate" comes back). Days with no worm to eat are counted in "missed" (for starving, later).
-      // Missed days still move the clock on, so a bird away for 3 days eats 3 worms (if it has them) when it's back.
-      // The clock is claimed first (only one request can move it), so two at once can't charge twice.
+      // dinner: once 24 hours have passed, your bird eats ONE worm from your real balance (however long you were away)
+      // and its stamina bar is filled (the page fills it when "ate" comes back) - but only if the bar isn't already
+      // full (the page sends how full it is as "en", 0-1; the bar lives on the phone for now). A dinner with no worm to
+      // eat adds 1 to "missed" (for starving, later). The clock is claimed first (only one request can move it), so
+      // two at once can't charge twice.
       const DAY = 864e5;
       const dinner = async () => { if (!me) return null;
         if (me.fed_at == null) { await env.DB.prepare(`UPDATE hunt_birds SET fed_at = ? WHERE username = ? AND fed_at IS NULL`).bind(now, username).run(); me.fed_at = now; return null; }
-        const days = Math.floor((now - me.fed_at) / DAY); if (days < 1) return null;
-        const claim = await env.DB.prepare(`UPDATE hunt_birds SET fed_at = ? WHERE username = ? AND fed_at = ?`).bind(me.fed_at + days * DAY, username, me.fed_at).run();
-        if (!claim.meta || !claim.meta.changes) return null; me.fed_at += days * DAY;
-        const want = Math.min(days, await wormBalance(username)), iso = new Date(now).toISOString();
-        let ate = 0;
-        if (want > 0) { const ins = env.DB.prepare(`INSERT INTO worms (id, giver, receiver, post_id, comment_id, created_at)
-            SELECT ?1, ?2, '__hunt__', NULL, NULL, ?3 WHERE COALESCE((SELECT worm_start FROM mod_users WHERE username = ?2), 0)
-              + (SELECT COUNT(*) FROM worms WHERE receiver = ?2) - (SELECT COUNT(*) FROM worms WHERE giver = ?2) >= 1`);
-          const rs = await env.DB.batch(Array.from({ length: want }, () => ins.bind(crypto.randomUUID(), username, iso)));
-          ate = rs.reduce((n, r) => n + (r.meta && r.meta.changes ? 1 : 0), 0); }
-        if (days > ate) await env.DB.prepare(`UPDATE hunt_birds SET missed = COALESCE(missed, 0) + ? WHERE username = ?`).bind(days - ate, username).run();
-        return { ate, missed: days - ate }; };
+        if (now - me.fed_at < DAY) return null;
+        const en = Number(body.en), full = Number.isFinite(en) && en >= 0.995;
+        const claim = await env.DB.prepare(`UPDATE hunt_birds SET fed_at = ? WHERE username = ? AND fed_at = ?`).bind(now, username, me.fed_at).run();
+        if (!claim.meta || !claim.meta.changes) return null; me.fed_at = now;
+        if (full) return null;   // not hungry: the clock just starts again
+        const r = await env.DB.prepare(`INSERT INTO worms (id, giver, receiver, post_id, comment_id, created_at)
+          SELECT ?1, ?2, '__hunt__', NULL, NULL, ?3 WHERE COALESCE((SELECT worm_start FROM mod_users WHERE username = ?2), 0)
+            + (SELECT COUNT(*) FROM worms WHERE receiver = ?2) - (SELECT COUNT(*) FROM worms WHERE giver = ?2) >= 1`).bind(crypto.randomUUID(), username, new Date(now).toISOString()).run();
+        const ate = r.meta && r.meta.changes ? 1 : 0;
+        if (!ate) await env.DB.prepare(`UPDATE hunt_birds SET missed = COALESCE(missed, 0) + 1 WHERE username = ?`).bind(username).run();
+        return { ate, missed: 1 - ate }; };
       const stats = () => { if (!me) return null; const p = posAt(me, now); let tz = null, best = 1e9;
         for (const z in TZ_HOME) { const d = km(p, TZ_HOME[z]); if (d < best) { best = d; tz = z; } }
         return { flown: Math.round(((me.flown || 0) + segKm(me)) * 1000) / 1000, home: me.home_lat != null ? [me.home_lat, me.home_lng] : null, tz, cc: TZ_CC[tz] || null }; };
