@@ -1282,7 +1282,7 @@
     const parseCol = c => { const v = typeof c === 'string' ? c.split(',').map(Number) : null; return v && v.length === 3 && v.every(x => x >= 0 && x <= 255) ? v : [214, 218, 226]; };
     // (signed in, the list also has each bird's name and role, so sleeping birds show their owner's own logo bird)
     const loadDots = () => fetch(API + '/hunt/dots', { headers: hdr() }).then(r => r.json()).then(j => { if (!j || !Array.isArray(j.b)) return; dotsOff = j.now - Date.now();
-      dotsAt = j.now; dots = j.b.map((d, i) => ({ i, from: [d[0], d[1]], to: [d[0], d[1]], b0: d[2], b1: d[3], depart: d[4], arrive: d[5], col: parseCol(d[6]), u: d[7] || null, wet: d[9] === 1 }));
+      dotsAt = j.now; dots = j.b.map((d, i) => ({ i, from: [d[0], d[1]], to: [d[0], d[1]], b0: d[2], b1: d[3], depart: d[4], arrive: d[5], col: parseCol(d[6]), u: d[7] || null, wet: d[9] === 1, act: d[10] === 1 }));
       for (const d of j.b) if (d[7]) { if (d[8]) roles.set(d[7], d[8]); else if (d[7] !== myName()) roles.delete(d[7]); } }).catch(() => {});
     // (a bird can be paused on someone else's phone at any moment: the dots are fetched every 8 s and a moving one is only
     // carried on for up to 8 s past the latest news of it, so a stopped bird's dot doesn't keep drifting away)
@@ -1339,6 +1339,16 @@
       })().then(o => sleepy.set(key, o || 'fail')).catch(() => sleepy.set(key, 'fail'));
       return null;
     }
+    function drawTreading(x, y, a, cl, k, t, seed, name) {
+      const c = cx, T = t + seed;
+      for (let i = 0; i < 3; i++) { const ph = (T * 0.55 + i / 3) % 1; c.beginPath(); c.ellipse(x, y, (8 + ph * 24) * k, (8 + ph * 24) * k * 0.8, 0, 0, 7); c.strokeStyle = `rgba(220,236,255,${(1 - ph) * 0.42})`; c.lineWidth = 1.3; c.stroke(); }
+      const bob = Math.sin(T * 2.4) * 0.7 * k, rock = Math.sin(T * 1.7) * 0.07;
+      drawBird(x, y + bob, a + rock, name, 1.1 * k, 1, 1, { span: 0.32, bk: 0, lift: 0 }, cl);
+      c.save(); c.translate(x, y + bob); c.rotate(a + rock); const g = c.createRadialGradient(-10 * k, 0, 1, -10 * k, 0, 9 * k); g.addColorStop(0, 'rgba(30,62,92,.42)'); g.addColorStop(1, 'rgba(30,62,92,0)');
+      c.beginPath(); c.ellipse(-10 * k, 0, 9 * k, 6 * k, 0, 0, 7); c.fillStyle = g; c.fill(); c.restore();
+    }
+    // a landed player, seen by someone else: treading water if it's on water, otherwise standing (wings folded)
+    function drawLanded(x, y, a, cl, k, t, seed, name, q) { if (q && isWater(q[0], q[1]) === true) drawTreading(x, y, a, cl, k, t, seed, name); else drawBird(x, y, a, name, 1.25 * k, 0.92, 1, { span: 0.32, bk: 0, lift: 0 }, cl); }
     function drawDrowning(x, y, a, cl, k, t, seed, name) {
       const c = cx, T = t + seed;
       for (let i = 0; i < 3; i++) { const ph = (T * 0.9 + i / 3) % 1;
@@ -1404,6 +1414,7 @@
         const flying = tq < d.arrive, hd = headAt(d, tq), a0 = hd != null ? hd - Math.PI / 2 : -Math.PI / 2;
         const sk = 'o:' + (d.u || d.i), sz = 76 * Math.max(0.5, km2);
         if (!flying && d.wet) { intoSprite(sk, sz, sz, s.x, s.y, (x, y) => drawDrowning(x, y, a0, d.col, 0.8 * km2, t, d.i * 0.77, d.u)); continue; }
+        if (!flying && d.act) { intoSprite(sk, sz, sz, s.x, s.y, (x, y) => drawLanded(x, y, a0, d.col, 0.8 * km2, t, d.i * 0.77, d.u, q)); continue; }
         if (!flying) { intoSprite(sk, sz, sz, s.x, s.y, (x, y) => { drawNest(x, y, 0.8 * km2); drawSleeper(x, y, a0, d.col, 0.8 * km2, t, d.i * 0.77, true, null, d.u); }); continue; }
         let a = idleAng.get(d.i) ?? a0; a = ease(a, a0, dt, 'dot' + d.i); idleAng.set(d.i, a);
         const ps = pose('dot' + d.i, true, bankAt(d, tq), dt); intoSprite(sk, sz, sz, s.x, s.y, (x, y) => drawBird(x, y, a, d.u || '', 0.8 * km2, 0.92, 0, ps, d.col)); }
@@ -1518,7 +1529,7 @@
       for (const b of birds) { const q = posAt(b, now); if (!q || !front(q[0], q[1])) continue; const s = sc(q[0], q[1]); if (!s) continue;
         if (!inView(s)) { const d = p ? km(p, q) : 0; if (d < 100 && b.a) drawBirdEdge(s.x, s.y, b.u, d); continue; }
         const moving = now < b.arrive, ahead = posAt(b, now + 600), s2 = ahead && sc(ahead[0], ahead[1]);
-        if (!moving && b.a) { const ha = headAt(b, now), aa = ha != null ? ha - Math.PI / 2 : -Math.PI / 2; intoSprite('b:' + b.u, 76, 76, s.x, s.y, (x, y) => drawBird(x, y, aa, b.u, 1, 0.92, 1, { span: 0.32, bk: 0, lift: 0 }));
+        if (!moving && b.a) { const ha = headAt(b, now), aa = ha != null ? ha - Math.PI / 2 : -Math.PI / 2; intoSprite('b:' + b.u, 76, 76, s.x, s.y, (x, y) => drawLanded(x, y, aa, col(b.u), 0.8, t, b.u.length, b.u, q));
           pillSprite(b.u, s.x, s.y + 20); continue; }   // playing but landed: standing on the ground
         if (!moving && b.w) { const ha = headAt(b, now); intoSprite('b:' + b.u, 76, 76, s.x, s.y, (x, y) => drawDrowning(x, y, ha != null ? ha - Math.PI / 2 : 0, col(b.u), 0.8, t, b.u.length, b.u)); pillSprite(b.u, s.x, s.y + 20); continue; }
         if (!moving) { intoSprite('b:' + b.u, 76, 76, s.x, s.y, (x, y) => { drawNest(x, y, 0.8); drawSleeper(x, y, 0, col(b.u), 0.8, t, b.u.length, true, null, b.u); });

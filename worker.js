@@ -2424,11 +2424,11 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     const hit = await caches.default.match(key);
     if (hit) return named ? new Response(hit.body, { headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "private, max-age=5" } }) : hit;
     try {
-      const { results = [] } = await env.DB.prepare(`SELECT h.username, h.from_lat, h.from_lng, h.brg0, h.brg1, h.depart_at, h.arrive_at, h.col, h.wet_until, (SELECT m.role FROM mod_users m WHERE LOWER(m.username) = LOWER(h.username) AND m.deleted_at IS NULL LIMIT 1) AS role FROM hunt_birds h LIMIT 5000`).all();
+      const { results = [] } = await env.DB.prepare(`SELECT h.username, h.from_lat, h.from_lng, h.brg0, h.brg1, h.depart_at, h.arrive_at, h.col, h.wet_until, h.seen_at, (SELECT m.role FROM mod_users m WHERE LOWER(m.username) = LOWER(h.username) AND m.deleted_at IS NULL LIMIT 1) AS role FROM hunt_birds h LIMIT 5000`).all();
       const r4 = x => x == null ? null : Math.round(x * 1e4) / 1e4;
       const colOf = b => b.role === "admin" ? "155,184,185" : (b.col || null);   // every bird its real colour; admins' logo is the blue-grey admin bird
       const body = JSON.stringify({ now: Date.now(), b: results.map(b => [r4(b.from_lat), r4(b.from_lng), r4(b.brg0), r4(b.brg1), b.depart_at, b.arrive_at, colOf(b),
-        ...(named ? [b.username, b.role === "admin" || b.role === "mod" ? b.role : null] : [null, null]), b.wet_until != null && b.wet_until > Date.now() ? 1 : 0]) });   // [9]: drowning in the water
+        ...(named ? [b.username, b.role === "admin" || b.role === "mod" ? b.role : null] : [null, null]), b.wet_until != null && b.wet_until > Date.now() ? 1 : 0, b.seen_at > Date.now() - 45000 ? 1 : 0]) });   // [9]: drowning in the water; [10]: playing right now (landed = standing, not asleep)
       const res = new Response(body, { headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": `${named ? "private" : "public"}, max-age=5` } });
       ctx.waitUntil(caches.default.put(key, new Response(body, { headers: { "Content-Type": "application/json", "Cache-Control": "public, max-age=5" } })));
       return res;
