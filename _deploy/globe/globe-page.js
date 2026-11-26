@@ -600,9 +600,14 @@
     const lv = m => { const ph = m && m.geometry && m.geometry.parameters && m.geometry.parameters.phiLength; return ph ? Math.round(Math.log2(2 * Math.PI / ph)) : 0; };
     const add0 = o.add.bind(o); o.add = (...objs) => { for (const m of objs) if (m && m.isMesh) m.renderOrder = -100 + lv(m); return add0(...objs); };
     o.children.forEach(m => { if (m.isMesh) m.renderOrder = -100 + lv(m); });
+    // In the game the library is shown a slightly bigger screen (~1.6 km more on every side), so tiles are asked for
+    // a few seconds before they scroll into view instead of once they're already showing (on 5G that left a blank strip).
+    const wide = cam => { try { if (!cam || !cam.isPerspectiveCamera) return cam; const c = cam.clone(), hv = Math.tan(cam.fov * Math.PI / 360),
+      dist = cam.position.length() - world.getGlobeRadius(), R0 = world.getGlobeRadius(), hKm = dist / R0 * 6371 * hv, wKm = hKm * cam.aspect,
+      kv = (hKm + 1.6) / hKm, kh = (wKm + 1.6) / wKm; c.fov = 360 / Math.PI * Math.atan(hv * kv); c.aspect = cam.aspect * kh / kv; c.updateProjectionMatrix(); return c; } catch (e) { return cam; } };
     const up0 = o.updatePov.bind(o); let last = 0, tmr = 0;
     o.updatePov = cam => { if (!inGame()) return up0(cam); const now = performance.now(); clearTimeout(tmr);
-      if (now - last >= 120) { last = now; return up0(cam); } tmr = setTimeout(() => { last = performance.now(); up0(cam); }, 120 - (now - last)); };
+      if (now - last >= 120) { last = now; return up0(wide(cam)); } tmr = setTimeout(() => { last = performance.now(); up0(wide(cam)); }, 120 - (now - last)); };
   }
   // Night side: a see-through shell just above the map (so it also darkens the zoomed-in tiles) with a soft dusk band
   // and NASA Black Marble city lights (public domain). Built from the globe's own three.js classes; sun updates each minute.
