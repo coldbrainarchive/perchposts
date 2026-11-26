@@ -852,7 +852,7 @@
       for (let left = dt; left > 1e-4; left -= 0.01) { const h = Math.min(0.01, left); let e = want - a; e = Math.atan2(Math.sin(e), Math.cos(e)); v += (e * w * w - 2 * w * v) * h; a += v * h; }
       angV.set(key, v); return a; };
     const myName = () => { try { return localStorage.getItem('_myUsername') || ''; } catch (e) { return ''; } };
-    let on = false, me = null, birds = [], worms = new Map(), off = 0, balance = null, fx = [], target = null, raf = 0, pollT = 0, flySent = 0, flyWait = 0, corr = null, lastF = 0, frameMs = 16.7, zoomIn = null, extAt = 0, ang = -Math.PI / 2, angs = new Map(), asking = new Set(), seenTaken = new Set(), hintUntil = 0;
+    let birdsIn = false, on = false, me = null, birds = [], worms = new Map(), off = 0, balance = null, fx = [], target = null, raf = 0, pollT = 0, flySent = 0, flyWait = 0, corr = null, lastF = 0, frameMs = 16.7, zoomIn = null, extAt = 0, ang = -Math.PI / 2, angs = new Map(), asking = new Set(), seenTaken = new Set(), hintUntil = 0;
     const srv = () => Date.now() + off;
     // Server clock: on mobile data the round trip jitters, and taking each 2-second answer as-is nudged the bird (and so
     // the whole map) a few metres back or forward every time: the 'bounce'. Now the most trustworthy recent answer (the
@@ -891,11 +891,11 @@
     const css = c => `rgb(${c[0]},${c[1]},${c[2]})`, shade = c => c[0] + c[1] + c[2] > 600 ? [150, 150, 158] : c.map(x => Math.round(x * 0.55));
 
     function enter() {
-      if (on) return; on = true; loadKit(() => {});
+      if (on) return; on = true; birdsIn = false; loadKit(() => {});
       document.body.classList.add('hunting'); myBtn.classList.remove('in'); bar.classList.add('in');
       try { closeSheet(); focusPin(null); world.arcsData([]); world.ringsData([]); } catch (e) {}
       // the screen stays on your bird, so the map can't be dragged or pinch-zoomed during the hunt (leave with the ×)
-      const c = world.controls(); c.autoRotate = false; c.enableRotate = false; c.enableZoom = false;
+      const c = world.controls(); c.autoRotate = false; c.enableRotate = false; c.enableZoom = false; c.enableDamping = false;   // no leftover drift from a swipe or pinch
       const v = world.pointOfView();
       $('huntN').textContent = balance == null ? '–' : balance; hintUntil = Date.now() + 4000;
       // (your bird's spot is already known from the globe, so the dive down to it starts at once, not after the server answers)
@@ -907,7 +907,7 @@
     const pauseNow = keep => fetch(API + '/hunt/pause', { method: 'POST', keepalive: !!keep, headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ col: kitCol() }) })
       .then(r => r.json()).then(j => { if (j && j.me) { myDeps.add(j.me.depart); mine = { me: j.me, home: null }; if (on && document.hidden) me = j.me; } }).catch(() => {});
     function leave() {
-      if (!on) return; on = false; document.body.classList.remove('hunting'); bar.classList.remove('in'); world.controls().enableRotate = true; world.controls().enableZoom = true; try { paint(); } catch (e) {}
+      if (!on) return; on = false; document.body.classList.remove('hunting'); bar.classList.remove('in'); world.controls().enableRotate = true; world.controls().enableZoom = true; world.controls().enableDamping = true; try { paint(); } catch (e) {}
       cancelAnimationFrame(raf); clearTimeout(pollT); cx.clearRect(0, 0, cv.width, cv.height); target = null; fx = [];
       if (me) mine = { me: { ...me, from: posAt(me, srv()), to: posAt(me, srv()), b0: headAt(me, srv()) ?? me.b1, b1: headAt(me, srv()) ?? me.b1, depart: srv(), arrive: srv() }, home: null };
       pauseNow(); idleRaf = requestAnimationFrame(idle);
@@ -929,7 +929,7 @@
         const t1 = Date.now(); clockSample(r.j.now - (t0 + t1) / 2, t1 - t0);
         if (sent > flySent && !flyWait && r.j.me && (!me || r.j.me.depart >= me.depart - 50)) setMe(r.j.me);   // a flight you just set wins over an older answer
         if (r.j.balance != null) setBal(r.j.balance);
-        birds = r.j.birds || []; for (const b of birds) { if (b.r) roles.set(b.u, b.r); else roles.delete(b.u); }
+        birdsIn = true; birds = r.j.birds || []; for (const b of birds) { if (b.r) roles.set(b.u, b.r); else roles.delete(b.u); }
         { const mn = myName(); if (mn) { if (r.j.role) roles.set(mn, r.j.role); else roles.delete(mn); } }
         const now = srv(), ids = new Set((r.j.worms || []).map(w => w.id));
         // a worm that vanished early went to another bird: a little puff where it was
@@ -1190,6 +1190,10 @@
         let a = angs.get(b.u) ?? -Math.PI / 2; if (moving && s2 && Math.hypot(s2.x - s.x, s2.y - s.y) > 0.5) a = ease(a, Math.atan2(s2.y - s.y, s2.x - s.x), dt, b.u); angs.set(b.u, a);
         drawBird(s.x, s.y, a, b.u, 0.8, 0.92, 0, pose(b.u, moving, bankAt(b, now), dt));
         const nl = nameImg(b.u); c.drawImage(nl, s.x - nl._w / 2, s.y + 26 - nl._h / 2 - 3, nl._w, nl._h); }
+      // until the game's first answer arrives (with names), the nests the globe already knew about stay on the screen
+      if (!birdsIn) { const tq = Math.min(Date.now() + dotsOff, dotsAt + 8000);
+        for (const d of dots) { if (tq < d.arrive || isMine(d)) continue; const q = flyAt(d, tq); if (!q || (p && km(p, q) < 0.05) || !front(q[0], q[1])) continue;
+          const s = sc(q[0], q[1]); if (!inView(s)) continue; const hd = headAt(d, tq); drawNest(s.x, s.y, 0.8); drawSleeper(s.x, s.y, hd != null ? hd - Math.PI / 2 : 0, d.col, 0.8, t, d.i * 0.77, true); } }
       // effects: catches (your bird dives, the worm is pulled up, +1 / +5 rises) and worms another bird took
       let swoop = 0;
       fx = fx.filter(f => { const age = (performance.now() - f.t0) / 1000, s = sc(f.lat, f.lng); if (!s) return age < 1.4;
@@ -1218,7 +1222,9 @@
       if (p) { const tn = now + frameMs, pn = posAt(me, tn), c2 = corrNow(); let la = pn[0] + c2[0], lo = pn[1] + c2[1], al = null;
         if (zoomIn) { const k = Math.min(1, (performance.now() + frameMs - zoomIn.t0) / 1000), e = 1 - Math.pow(1 - k, 3), dl = ((lo - zoomIn.lo + 540) % 360) - 180;
           la = zoomIn.la + (la - zoomIn.la) * e; lo = zoomIn.lo + dl * e; al = zoomIn.a + (GAME_ALT - zoomIn.a) * e; if (k >= 1) zoomIn = null; }
-        world.pointOfView(al == null ? { lat: la, lng: lo } : { lat: la, lng: lo, altitude: al }, 0); }
+        // (the height is set every frame too: if anything else nudges the camera out, e.g. leftover zoom momentum from a
+        // pinch just before take-off, it's back at game height straight away)
+        world.pointOfView({ lat: la, lng: lo, altitude: al == null ? GAME_ALT : al }, 0); }
       if (pf > preAt) { preAt = pf + 400; preload(now); }
       // keep flying: a little before the far-ahead point is reached, carry on the same way
       if (p && me.b1 != null && me.arrive - now < 12000 && performance.now() > extAt) { extAt = performance.now() + 5000; flyDir(headAt(me, now)); }
