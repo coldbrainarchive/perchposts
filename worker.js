@@ -2388,7 +2388,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   // reaches them. A catch only counts if the bird's own flight passes within reach of the worm — scripts can't
   // teleport. Caught worms land in the normal worm balance (a worms row from '__hunt__', no post).
   // ── /hunt/dots ── every bird on the globe, for the tiny dots anyone sees on the zoomed-out globe: just where each
-  // flight goes (no names). Cached at the edge for 15 s.
+  // flight goes (no names). Cached at the edge for 5 s.
   if (url.pathname === "/hunt/dots" && request.method === "GET") {
     const key = new Request("https://perchposts-hunt.cache/dots");
     const hit = await caches.default.match(key); if (hit) return hit;
@@ -2396,7 +2396,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const { results = [] } = await env.DB.prepare(`SELECT from_lat, from_lng, brg0, brg1, depart_at, arrive_at FROM hunt_birds LIMIT 5000`).all();
       const r4 = x => x == null ? null : Math.round(x * 1e4) / 1e4;
       const res = new Response(JSON.stringify({ now: Date.now(), b: results.map(b => [r4(b.from_lat), r4(b.from_lng), r4(b.brg0), r4(b.brg1), b.depart_at, b.arrive_at]) }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "public, max-age=15" } });
+        { headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "public, max-age=5" } });
       ctx.waitUntil(caches.default.put(key, res.clone()));
       return res;
     } catch (err) { return serverError(err); }

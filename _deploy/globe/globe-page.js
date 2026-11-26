@@ -1029,13 +1029,15 @@
     // bird's colour, and once you're zoomed in a fair way it becomes your bird, flapping gently where it was left
     // (or, before your first flight, over your home city). Tap it and the game carries on from there.
     const ICON_ALT = 0.25;
-    let mine = null, dots = [], dotsOff = 0, idleRaf = 0, idleLast = 0;
+    let mine = null, dots = [], dotsOff = 0, dotsAt = 0, idleRaf = 0, idleLast = 0;
     const loadMine = () => { if (!tok()) { mine = null; return; }
       api('/hunt/me', { tz: TZ }).then(r => { if (r.s !== 200 || !r.j) return; mine = { me: r.j.me, home: r.j.home };
         const mn = myName(); if (mn) { if (r.j.role) roles.set(mn, r.j.role); else roles.delete(mn); } loadKit(() => {}); }); };
     const loadDots = () => fetch(API + '/hunt/dots').then(r => r.json()).then(j => { if (!j || !Array.isArray(j.b)) return; dotsOff = j.now - Date.now();
-      dots = j.b.map(d => ({ from: [d[0], d[1]], to: [d[0], d[1]], b0: d[2], b1: d[3], depart: d[4], arrive: d[5] })); }).catch(() => {});
-    loadMine(); loadDots(); setInterval(() => { if (!document.hidden && !on) { loadDots(); loadMine(); } }, 30000);
+      dotsAt = j.now; dots = j.b.map(d => ({ from: [d[0], d[1]], to: [d[0], d[1]], b0: d[2], b1: d[3], depart: d[4], arrive: d[5] })); }).catch(() => {});
+    // (a bird can be paused on someone else's phone at any moment: the dots are fetched every 8 s and a moving one is only
+    // carried on for up to 8 s past the latest news of it, so a stopped bird's dot doesn't keep drifting away)
+    loadMine(); loadDots(); setInterval(() => { if (!document.hidden && !on) loadDots(); }, 8000); setInterval(() => { if (!document.hidden && !on) loadMine(); }, 30000);
     function idle(ts) {
       if (on) return; idleRaf = requestAnimationFrame(idle);
       const dt = idleLast ? Math.min(0.1, Math.max(0, ts - idleLast) / 1000) : 0.016; idleLast = ts;
@@ -1045,7 +1047,7 @@
       const front = (la, lo) => Math.sin(v.lat * R) * Math.sin(la * R) + Math.cos(v.lat * R) * Math.cos(la * R) * Math.cos((lo - v.lng) * R) > cosCap;
       const scr = (la, lo) => front(la, lo) ? world.getScreenCoords(la, lo, 0) : null;
       const onScr = s => s && s.x > -10 && s.x < W + 10 && s.y > -10 && s.y < H + 10;
-      for (const d of dots) { const q = flyAt(d, tn); if (!q) continue; const s = scr(q[0], q[1]); if (!onScr(s)) continue;
+      for (const d of dots) { const q = flyAt(d, Math.min(tn, dotsAt + 8000)); if (!q) continue; const s = scr(q[0], q[1]); if (!onScr(s)) continue;
         c.beginPath(); c.arc(s.x, s.y, 2.6, 0, 7); c.fillStyle = 'rgba(0,0,0,.45)'; c.fill();
         c.beginPath(); c.arc(s.x, s.y, 1.8, 0, 7); c.fillStyle = 'rgba(255,255,255,.9)'; c.fill(); }
       let show = false;
@@ -1059,6 +1061,14 @@
       if (myBtn.classList.contains('in') !== show) myBtn.classList.toggle('in', show);
     }
     idleRaf = requestAnimationFrame(idle);
+    // a player's name under their bird: drawn once into a little image and then moved as a picture, so it glides with
+    // the map (text redrawn at a slightly different fraction of a pixel every frame shimmered)
+    const names = new Map();
+    function nameImg(n) { let im = names.get(n); if (im) return im;
+      im = document.createElement('canvas'); const f = '600 9.5px -apple-system,system-ui,sans-serif', m = document.createElement('canvas').getContext('2d'); m.font = f;
+      const w = Math.ceil(m.measureText(n).width) + 10, h = 18, k = Math.min(3, Math.max(2, devicePixelRatio || 1)); im.width = w * k; im.height = h * k; im._w = w; im._h = h;
+      const g = im.getContext('2d'); g.scale(k, k); g.font = f; g.textAlign = 'center'; g.fillStyle = 'rgba(255,255,255,.75)'; g.shadowColor = 'rgba(0,0,0,.9)'; g.shadowBlur = 3; g.fillText(n, w / 2, 12.5);
+      names.set(n, im); return im; }
     // in the game: other players within 100 km who are off the screen get an arrow at the edge with how far away they are
     function drawBirdEdge(x, y, name, d) {
       const m = 30, topY = 84, botY = H - 96, cx0 = W / 2, cy0 = (topY + botY) / 2, dx = x - cx0, dy = y - cy0;
@@ -1111,7 +1121,7 @@
         const moving = now < b.arrive, ahead = posAt(b, now + 600), s2 = ahead && sc(ahead[0], ahead[1]);
         let a = angs.get(b.u) ?? -Math.PI / 2; if (moving && s2 && Math.hypot(s2.x - s.x, s2.y - s.y) > 0.5) a = ease(a, Math.atan2(s2.y - s.y, s2.x - s.x), dt, b.u); angs.set(b.u, a);
         drawBird(s.x, s.y, a, b.u, 0.8, 0.92, 0, pose(b.u, moving, bankAt(b, now), dt));
-        c.save(); c.font = '600 9.5px -apple-system,system-ui,sans-serif'; c.textAlign = 'center'; c.fillStyle = 'rgba(255,255,255,.75)'; c.shadowColor = 'rgba(0,0,0,.9)'; c.shadowBlur = 3; c.fillText(b.u, s.x, s.y + 26); c.restore(); }
+        const nl = nameImg(b.u); c.drawImage(nl, s.x - nl._w / 2, s.y + 26 - nl._h / 2 - 3, nl._w, nl._h); }
       // effects: catches (your bird dives, the worm is pulled up, +1 / +5 rises) and worms another bird took
       let swoop = 0;
       fx = fx.filter(f => { const age = (performance.now() - f.t0) / 1000, s = sc(f.lat, f.lng); if (!s) return age < 1.4;
