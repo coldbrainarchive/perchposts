@@ -867,7 +867,7 @@
     // pieces on the page: the pill, the game bar, and a see-through canvas over the globe the game draws on
     const host = world.renderer().domElement.parentElement;
     const cv = document.createElement('canvas'); cv.className = 'hunt-cv'; host.appendChild(cv);
-    const cx = cv.getContext('2d'); let W = 0, H = 0, DPR = 1;
+    let cx = cv.getContext('2d'); let W = 0, H = 0, DPR = 1;
     const size = () => { DPR = Math.min(2, devicePixelRatio || 1); W = innerWidth; H = innerHeight; cv.width = W * DPR; cv.height = H * DPR; cv.style.width = W + 'px'; cv.style.height = H + 'px'; };
     size(); addEventListener('resize', size);
     const bar = document.createElement('div'); bar.className = 'hunt-bar';
@@ -1033,9 +1033,25 @@
     // stopped ones sleep curled up in a little nest. Yours sleeps in its nest where you left it (before your first
     // flight, over your home city); tap it and it wakes, flaps up out of the nest, and the game carries on from there.
     const ICON_ALT = 0.25;
-    // other birds, nests and name pills are placed on whole screen pixels: small pictures slid by fractions of a pixel get
-    // re-blurred differently every frame and seem to wiggle against the map
-    const snap = s => s && { x: Math.round(s.x * DPR) / DPR, y: Math.round(s.y * DPR) / DPR };
+    // Birds, nests and name pills that sit on the map are each drawn into their own small picture element and moved with
+    // a transform, the same way as the map's place names. (On iPhones the see-through drawing layer reaches the screen a
+    // frame apart from the map, so anything drawn on it that moves with the map shook against it; the place names never
+    // did.) The game layer keeps your own bird, which stays in the middle, and things fixed to the screen.
+    const spLayer = document.createElement('div'); spLayer.className = 'hunt-sp'; host.insertBefore(spLayer, cv);
+    const sprites = new Map(), SPR = Math.min(3, Math.max(1, devicePixelRatio || 1)); let spFrame = 0;
+    function intoSprite(key, w, h, x, y, fn) {
+      w = Math.ceil(w / 8) * 8; h = Math.ceil(h / 8) * 8;
+      let sp = sprites.get(key); if (!sp) { const el = document.createElement('canvas'); spLayer.appendChild(el); sp = { el, ctx: el.getContext('2d') }; sprites.set(key, sp); }
+      if (sp.w !== w || sp.h !== h) { sp.w = w; sp.h = h; sp.el.width = Math.ceil(w * SPR); sp.el.height = Math.ceil(h * SPR); sp.el.style.width = w + 'px'; sp.el.style.height = h + 'px'; sp.src = null; }
+      if (sp.used !== spFrame - 1 && sp.el.style.display === 'none') sp.el.style.display = '';
+      sp.used = spFrame;
+      if (fn) { const old = cx; cx = sp.ctx; try { cx.setTransform(SPR, 0, 0, SPR, 0, 0); cx.clearRect(0, 0, w, h); fn(w / 2, h / 2); } finally { cx = old; } }
+      sp.el.style.transform = `translate3d(${x - w / 2}px,${y - h / 2}px,0)`; return sp;
+    }
+    // a name pill: the pill picture only needs copying in when it changes
+    function pillSprite(n, x, y) { const nl = nameImg(n), sp = intoSprite('p:' + n, nl._w, nl._h, x, y, null);
+      if (sp.src !== nl) { sp.src = nl; const g = sp.ctx; g.setTransform(SPR, 0, 0, SPR, 0, 0); g.clearRect(0, 0, sp.w, sp.h); g.drawImage(nl, (sp.w - nl._w) / 2, (sp.h - nl._h) / 2, nl._w, nl._h); } }
+    function spritesEnd() { for (const sp of sprites.values()) if (sp.used !== spFrame && sp.el.style.display !== 'none') sp.el.style.display = 'none'; spFrame++; }
     let mine = null, dots = [], dotsOff = 0, dotsAt = 0, idleRaf = 0, idleLast = 0, tko = null;
     // (your own bird is in the public list too, maybe a few seconds out of date: it's recognised by its flights' start times)
     const myDeps = new Set(), isMine = d => myDeps.has(d.depart);
@@ -1111,9 +1127,9 @@
       cx.save(); if (alpha != null) cx.globalAlpha = alpha;
       const c = cx, br = 1 + 0.03 * Math.sin(t * 2.1 + seed), lg = name ? sleepyLogo(name) : null, adm = name && roles.get(name) === 'admin';
       const G = (col, x0, y0, r, hi, lo) => { const g = c.createRadialGradient(x0 - r * 0.35, y0 - r * 0.45, r * 0.1, x0, y0, r * 1.05); g.addColorStop(0, css(lift(col, hi))); g.addColorStop(0.65, css(col)); g.addColorStop(1, css(lift(col, lo))); return g; };
-      c.save(); c.translate(x, y); c.scale(-k, k);
+      c.save(); c.translate(x, y); c.scale(-k * br, k * br);
       c.beginPath(); c.moveTo(-7, -2); c.quadraticCurveTo(-11, 0, -7, 2); c.fillStyle = css(lift(cl, 0.75)); c.fill();                          // tail
-      c.beginPath(); c.arc(-2, 1, 8.5 * br, 0, 7); c.fillStyle = G(cl, -2, 1, 8.5, 1.18, 0.82); c.fill();                                       // body (breathing)
+      c.beginPath(); c.arc(-2, 1, 8.5, 0, 7); c.fillStyle = G(cl, -2, 1, 8.5, 1.18, 0.82); c.fill();                                            // body
       if (lg) { const hs = adm ? 22.5 : 19; c.save(); c.translate(adm ? 4.2 : 4.6, adm ? -5.2 : -4.4); c.scale(-1, 1); c.rotate(-0.3); c.drawImage(lg, -hs / 2, -hs / 2, hs, hs); c.restore(); }
       else { const hc = lift(cl, 1.4); c.beginPath(); c.arc(4.4, -3.6, 5.6, 0, 7); c.fillStyle = G(hc, 4.4, -3.6, 5.6, 1.12, 0.92); c.fill(); }   // head
       c.beginPath(); c.moveTo(-8.6, 2.6); c.quadraticCurveTo(-3.5, 9.2, 5, 3.8); c.quadraticCurveTo(1, 2.2, -2, 2.4); c.quadraticCurveTo(-6, 2.2, -8.6, 2.6); c.fillStyle = css(lift(cl, 0.86)); c.fill();   // wing
@@ -1141,13 +1157,14 @@
       // everyone else
       for (const d of dots) { const tq = Math.min(tn, dotsAt + 8000), q = flyAt(d, tq); if (!q) continue;
         if (isMine(d) || (d.u && d.u === mn) || (mp && km(mp, q) < 0.05)) continue;   // that's you
-        const s = snap(scr(q[0], q[1])); if (!onScr(s)) continue;
+        const s = scr(q[0], q[1]); if (!onScr(s)) continue;
         if (!close) { c.beginPath(); c.arc(s.x, s.y, 2.5, 0, 7); c.fillStyle = 'rgba(0,0,0,.3)'; c.fill();
           c.beginPath(); c.arc(s.x, s.y, 1.9, 0, 7); c.fillStyle = `rgba(${d.col[0]},${d.col[1]},${d.col[2]},.72)`; c.fill(); continue; }
         const flying = tq < d.arrive, hd = headAt(d, tq), a0 = hd != null ? hd - Math.PI / 2 : -Math.PI / 2;
-        if (!flying) { drawNest(s.x, s.y, 0.8 * km2); drawSleeper(s.x, s.y, a0, d.col, 0.8 * km2, t, d.i * 0.77, true, null, d.u); continue; }
+        const sk = 'o:' + (d.u || d.i), sz = 76 * Math.max(0.5, km2);
+        if (!flying) { intoSprite(sk, sz, sz, s.x, s.y, (x, y) => { drawNest(x, y, 0.8 * km2); drawSleeper(x, y, a0, d.col, 0.8 * km2, t, d.i * 0.77, true, null, d.u); }); continue; }
         let a = idleAng.get(d.i) ?? a0; a = ease(a, a0, dt, 'dot' + d.i); idleAng.set(d.i, a);
-        drawBird(s.x, s.y, a, '', 0.8 * km2, 0.92, 0, pose('dot' + d.i, true, bankAt(d, tq), dt), d.col); }
+        const ps = pose('dot' + d.i, true, bankAt(d, tq), dt); intoSprite(sk, sz, sz, s.x, s.y, (x, y) => drawBird(x, y, a, '', 0.8 * km2, 0.92, 0, ps, d.col)); }
       // you
       let show = false;
       if (mn && mp) { const s = scr(mp[0], mp[1]);
@@ -1155,16 +1172,18 @@
           if (!close) { c.beginPath(); c.arc(s.x, s.y, 5.2, 0, 7); c.fillStyle = 'rgba(0,0,0,.45)'; c.fill(); c.beginPath(); c.arc(s.x, s.y, 4.3, 0, 7); c.fillStyle = '#fff'; c.fill();
             c.beginPath(); c.arc(s.x, s.y, 3.2, 0, 7); c.fillStyle = css(cl); c.fill(); }
           else { const hd = mine.me ? headAt(mine.me, tn) : null, a = hd != null ? hd - Math.PI / 2 : -Math.PI / 2;
-            if (!tko) { drawNest(s.x, s.y, km2); drawSleeper(s.x, s.y, a, cl, km2, t, 0, true, null, mn); }
+            const msz = 96 * Math.max(0.5, km2);
+            if (!tko) intoSprite('me', msz, msz, s.x, s.y, (x, y) => { drawNest(x, y, km2); drawSleeper(x, y, a, cl, km2, t, 0, true, null, mn); });
             else { // waking up: the wings open, it flaps hard and lifts off (its shadow drops away), the nest fades out
               const u = (performance.now() - tko.t0) / 1000, e = Math.min(1, u / 0.9), ez = e * e * (3 - 2 * e), sw = 1 - 1.4 * ez;
-              drawNest(s.x, s.y, km2, 1 - ez);
               const ps = pose('@tko', true, 0, dt * 1.6), fin = Math.min(1, u / 0.25); ps.span = 0.32 + (ps.span - 0.32) * fin;
-              if (fin < 1) drawSleeper(s.x, s.y, a, cl, km2, t, 0, false, 1 - fin, mn);   // the sleeping bird uncurls into the flying one
-              drawBird(s.x, s.y - 6 * ez * km2, a, mn, km2 / (1 - 0.2 * sw), fin, sw, ps, cl);
+              intoSprite('me', msz, msz, s.x, s.y, (x, y) => { drawNest(x, y, km2, 1 - ez);
+                if (fin < 1) drawSleeper(x, y, a, cl, km2, t, 0, false, 1 - fin, mn);   // the sleeping bird uncurls into the flying one
+                drawBird(x, y - 6 * ez * km2, a, mn, km2 / (1 - 0.2 * sw), fin, sw, ps, cl); });
               if (u > 0.95) { tko = null; enter(); } }
             show = !tko; myBtn.style.transform = `translate(${cr.left + s.x - 24}px,${cr.top + s.y - 24}px)`; } } }
       if (myBtn.classList.contains('in') !== show) myBtn.classList.toggle('in', show);
+      spritesEnd();
     }
     idleRaf = requestAnimationFrame(idle);
     // a player's name under their bird: drawn once into a little image and then moved as a picture, so it glides with
@@ -1187,7 +1206,7 @@
       if (!r && !faceWait.has(nm)) { faceWait.add(nm); K.sub(nm, em, () => names.delete(n), 't'); } return null; }
     function nameImg(n) { let im = names.get(n); if (im && im._col === tagColOf(n)) return im;
       im = document.createElement('canvas'); const f = '700 9.5px -apple-system,system-ui,sans-serif', m = document.createElement('canvas').getContext('2d'); m.font = f;
-      const face = tagFace(n), tc = tagColOf(n), tw = Math.ceil(m.measureText(n).width), fw = face ? 12 : 0, pw = tw + fw + (face ? 14 : 12), w = pw + 2, h = 18, k = DPR;   // the same pixel density as the game's drawing layer, so the pill is copied 1:1
+      const face = tagFace(n), tc = tagColOf(n), tw = Math.ceil(m.measureText(n).width), fw = face ? 12 : 0, pw = tw + fw + (face ? 14 : 12), w = pw + 2, h = 18, k = Math.min(3, Math.max(2, devicePixelRatio || 1));
       im.width = w * k; im.height = h * k; im._w = w; im._h = h; im._col = tc;
       const g = im.getContext('2d'); g.scale(k, k); const x0 = 1, y0 = 1, ph = 16, r = 8;
       g.beginPath(); g.moveTo(x0 + r, y0); g.arcTo(x0 + pw, y0, x0 + pw, y0 + ph, r); g.arcTo(x0 + pw, y0 + ph, x0, y0 + ph, r); g.arcTo(x0, y0 + ph, x0, y0, r); g.arcTo(x0, y0, x0 + pw, y0, r); g.closePath();
@@ -1243,18 +1262,18 @@
         if (p && km(p, [q.lat, q.lng]) < CATCH_KM) tryCatch(w);
       }
       // other birds
-      for (const b of birds) { const q = posAt(b, now); if (!q || !front(q[0], q[1])) continue; const s = snap(sc(q[0], q[1])); if (!s) continue;
+      for (const b of birds) { const q = posAt(b, now); if (!q || !front(q[0], q[1])) continue; const s = sc(q[0], q[1]); if (!s) continue;
         if (!inView(s)) { const d = p ? km(p, q) : 0; if (d < 100 && b.a) drawBirdEdge(s.x, s.y, b.u, d); continue; }
         const moving = now < b.arrive, ahead = posAt(b, now + 600), s2 = ahead && sc(ahead[0], ahead[1]);
-        if (!moving) { const hd = headAt(b, now); drawNest(s.x, s.y, 0.8); drawSleeper(s.x, s.y, 0, col(b.u), 0.8, t, b.u.length, true, null, b.u);
-          const nl = nameImg(b.u); c.drawImage(nl, Math.round((s.x - nl._w / 2) * DPR) / DPR, Math.round((s.y + 22 - nl._h / 2 - 3) * DPR) / DPR, nl._w, nl._h); continue; }
+        if (!moving) { intoSprite('b:' + b.u, 76, 76, s.x, s.y, (x, y) => { drawNest(x, y, 0.8); drawSleeper(x, y, 0, col(b.u), 0.8, t, b.u.length, true, null, b.u); });
+          pillSprite(b.u, s.x, s.y + 19); continue; }
         let a = angs.get(b.u) ?? -Math.PI / 2; if (moving && s2 && Math.hypot(s2.x - s.x, s2.y - s.y) > 0.5) a = ease(a, Math.atan2(s2.y - s.y, s2.x - s.x), dt, b.u); angs.set(b.u, a);
-        drawBird(s.x, s.y, a, b.u, 0.8, 0.92, 0, pose(b.u, moving, bankAt(b, now), dt));
-        const nl = nameImg(b.u); c.drawImage(nl, Math.round((s.x - nl._w / 2) * DPR) / DPR, Math.round((s.y + 26 - nl._h / 2 - 3) * DPR) / DPR, nl._w, nl._h); }
+        const ps = pose(b.u, moving, bankAt(b, now), dt); intoSprite('b:' + b.u, 76, 76, s.x, s.y, (x, y) => drawBird(x, y, a, b.u, 0.8, 0.92, 0, ps));
+        pillSprite(b.u, s.x, s.y + 23); }
       // until the game's first answer arrives (with names), the nests the globe already knew about stay on the screen
       if (!birdsIn) { const tq = Math.min(Date.now() + dotsOff, dotsAt + 8000);
         for (const d of dots) { if (tq < d.arrive || isMine(d)) continue; const q = flyAt(d, tq); if (!q || (p && km(p, q) < 0.05) || !front(q[0], q[1])) continue;
-          const s = sc(q[0], q[1]); if (!inView(s)) continue; const hd = headAt(d, tq); drawNest(s.x, s.y, 0.8); drawSleeper(s.x, s.y, hd != null ? hd - Math.PI / 2 : 0, d.col, 0.8, t, d.i * 0.77, true, null, d.u); } }
+          const s = sc(q[0], q[1]); if (!inView(s)) continue; const hd = headAt(d, tq); intoSprite('o:' + (d.u || d.i), 76, 76, s.x, s.y, (x, y) => { drawNest(x, y, 0.8); drawSleeper(x, y, hd != null ? hd - Math.PI / 2 : 0, d.col, 0.8, t, d.i * 0.77, true, null, d.u); }); } }
       // effects: catches (your bird dives, the worm is pulled up, +1 / +5 rises) and worms another bird took
       let swoop = 0;
       fx = fx.filter(f => { const age = (performance.now() - f.t0) / 1000, s = sc(f.lat, f.lng); if (!s) return age < 1.4;
@@ -1291,6 +1310,7 @@
       if (p && me.b1 != null && me.arrive - now < 12000 && performance.now() > extAt) { extAt = performance.now() + 5000; flyDir(headAt(me, now)); }
       // the line under your worm count: day or night where your bird is
       const tEl = $('huntT'); if (tEl) { const hint = Date.now() < hintUntil; if (tEl.classList.contains('on') !== hint) tEl.classList.toggle('on', hint); }
+      spritesEnd();
     }
   }
 
