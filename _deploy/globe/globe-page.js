@@ -1309,7 +1309,7 @@
       const G = (col, x0, y0, r, hi, lo) => { const g = c.createRadialGradient(x0 - r * 0.35, y0 - r * 0.45, r * 0.1, x0, y0, r * 1.05); g.addColorStop(0, css(lift(col, hi))); g.addColorStop(0.65, css(col)); g.addColorStop(1, css(lift(col, lo))); return g; };
       c.save(); c.translate(x, y); c.scale(-k * br, k * br);
       // body, tail and wing are drawn smaller (BS), shrunk toward the neck so the head stays on and the same size
-      const BS = 0.92, small = f => { c.save(); c.translate(3, -1); c.scale(BS, BS); c.translate(-3, 1); f(); c.restore(); };
+      const BS = 1.0, small = f => { c.save(); c.translate(3, -1); c.scale(BS, BS); c.translate(-3, 1); f(); c.restore(); };
       small(() => {
       c.save(); c.translate(-6.5, 0.8); c.scale(1.0, 0.85); c.translate(8.5, -0.8);   // tucked 2 units further in under the body, 15% narrower (and stretched a little longer from its base)
       c.beginPath(); c.moveTo(-8.5, -2.4); c.quadraticCurveTo(-13, -2.4, -18, -5); c.quadraticCurveTo(-15.4, 0.6, -18, 6.2); c.quadraticCurveTo(-13, 4.2, -8.5, 4); c.closePath();   // tail: swept out like the flying bird's (option 4, 2026-11-26)
