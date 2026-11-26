@@ -959,12 +959,12 @@
       if (on) { ghEvent(...mealNote); mealNote = null; } };
     const outOfWorms = () => { if (!landed) landNow(); ghEvent('Out of worms', 'catch or earn a worm to fly again', '#f87171'); };
     // eat one worm: stamina back to full, then carry on (then() takes off again if you were standing)
-    function eatWorm(then, fail) {
-      if (eating) return; if (balance != null && balance < 1) { enTired = true; outOfWorms(); if (fail) fail(); return; }
+    function eatWorm(then, fail, quiet) {
+      if (eating) return; if (balance != null && balance < 1) { enTired = true; if (!quiet) outOfWorms(); if (fail) fail(); return; }
       eating = true;
       api('/hunt/eat').then(r => { eating = false;
         if (r.s === 200 && r.j.ok) { enKm = EN_MAX; enTired = false; enSave(); if (r.j.balance != null) setBal(r.j.balance); ghEvent('−1', 'Ate a worm · stamina full', '#e8555c'); if (then) then(); return; }
-        if (r.j.balance != null) setBal(r.j.balance); enTired = true; if (fail) fail(); outOfWorms(); });
+        if (r.j.balance != null) setBal(r.j.balance); enTired = true; if (fail) fail(); if (!quiet) outOfWorms(); });
     }
     // out of stamina mid-flight: the bird lands, ducks its head to gobble a worm (a big peck, then a little one), and
     // takes off again the way it was going once the worm is eaten and the animation has played
@@ -1006,8 +1006,8 @@
         if (!flying && w != null && w !== wet && !(w && Date.now() < noWater)) { wet = w; if (wet && enKm > 0 && !drowning) ghEvent('Treading water', 'uses stamina · tap to fly', '#60a5fa'); enSave(); }
         if (flying) { if (wet) { wet = false; } enAdd(-SPEED * Math.min(5000, dms) / 1000); }
         else if (wet) enAdd(-SWIM * Math.min(5000, dms)); else enAdd(dms * EN_REST);   // (rest counts all the time you were away)
-        if (flying && enKm <= 0 && !enTired) { if (w === true) { landNow(true); wet = true; drown(); } else eatStop(); }   // over water: falls in; over land: lands, eats, flies on
-        else if (!flying && wet && enKm <= 0) drown();
+        if (flying && enKm <= 0 && !enTired) { if (w === true) { landNow(true); wet = true; ghEvent('Splash', 'out of stamina over water', '#60a5fa'); } else eatStop(); }   // over water: falls in (then eats, below); over land: lands, eats, flies on
+        else if (!flying && wet && enKm <= 0 && !eating && !drowning) eatWorm(null, drown, true);   // treading water: eats a worm and keeps going; no worms left: drowns
         if (enKm > 3) enTired = false;
         const pc = enKm / EN_MAX, el = $('ghEn'); el.style.width = (pc * 100).toFixed(1) + '%';
         el.style.background = pc > .5 ? '#4ade80' : pc > .2 ? '#facc15' : '#f87171'; $('ghEnT').textContent = Math.ceil(pc * 100) + '%';
