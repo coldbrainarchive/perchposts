@@ -1309,10 +1309,11 @@
       const G = (col, x0, y0, r, hi, lo) => { const g = c.createRadialGradient(x0 - r * 0.35, y0 - r * 0.45, r * 0.1, x0, y0, r * 1.05); g.addColorStop(0, css(lift(col, hi))); g.addColorStop(0.65, css(col)); g.addColorStop(1, css(lift(col, lo))); return g; };
       c.save(); c.translate(x, y); c.scale(-k * br, k * br);
       // body, tail and wing are drawn smaller (BS), shrunk toward the neck so the head stays on and the same size
-      const BS = 0.85, small = f => { c.save(); c.translate(3, -1); c.scale(BS, BS); c.translate(-3, 1); f(); c.restore(); };
+      const BS = 0.92, small = f => { c.save(); c.translate(3, -1); c.scale(BS, BS); c.translate(-3, 1); f(); c.restore(); };
       small(() => {
-      c.beginPath(); c.moveTo(-6.6, -1.8); c.quadraticCurveTo(-10.2, 0.6, -6.6, 2.6); c.fillStyle = css(lift(cl, 0.75)); c.fill();                // tail
-      c.beginPath(); c.arc(-1.6, 1.4, 7.4, 0, 7); c.fillStyle = G(cl, -1.6, 1.4, 7.4, 1.18, 0.82); c.fill();                                    // body (smaller again, 2026-11-26)
+      c.beginPath(); c.moveTo(-8.5, -2.4); c.quadraticCurveTo(-13, -2.4, -18, -5); c.quadraticCurveTo(-15.4, 0.6, -18, 6.2); c.quadraticCurveTo(-13, 4.2, -8.5, 4); c.closePath();   // tail: swept out like the flying bird's (option 4, 2026-11-26)
+      c.fillStyle = css(lift(cl, 0.8)); c.fill(); c.lineJoin = 'round'; c.lineWidth = 0.7; c.strokeStyle = 'rgba(8,10,14,.3)'; c.stroke();
+      c.beginPath(); c.moveTo(5.6, 1.4); c.bezierCurveTo(5.6, -6.6, -3, -6.6, -7.5, -2.2); c.quadraticCurveTo(-11.4, 0.8, -7.5, 4.4); c.bezierCurveTo(-3, 9.4, 5.6, 9.4, 5.6, 1.4); c.fillStyle = G(cl, -1.6, 1.4, 7.6, 1.18, 0.82); c.fill();   // body: round at the front, a longer back running into the tail
       });
       if (lg) { const hs = adm ? 22.5 : 19; c.save(); c.translate(adm ? 4.4 : 4.6, adm ? -8.2 : -4.4); /* the admin picture has its top hat above the head, so it sits higher to put the face where everyone else's is */ c.scale(-1, 1); c.rotate(-0.3); c.drawImage(lg, -hs / 2, -hs / 2, hs, hs); c.restore(); }
       else { const hc = lift(cl, 1.4); c.beginPath(); c.arc(4.4, -3.6, 5.6, 0, 7); c.fillStyle = G(hc, 4.4, -3.6, 5.6, 1.12, 0.92); c.fill(); }   // head
