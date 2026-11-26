@@ -853,7 +853,13 @@
       let v = angV.get(key) || 0, a = cur;
       for (let left = dt; left > 1e-4; left -= 0.01) { const h = Math.min(0.01, left); let e = want - a; e = Math.atan2(Math.sin(e), Math.cos(e)); v += (e * w * w - 2 * w * v) * h; a += v * h; }
       angV.set(key, v); return a; };
-    const myName = () => { try { return localStorage.getItem('_myUsername') || ''; } catch (e) { return ''; } };
+    // who you are: read from your sign-in itself (the remembered '_myUsername' can be left over from another account you
+    // used in the same browser, which drew someone else's bird and colours for you)
+    let myTok = null, myNm = '';
+    const myName = () => { const tk = tok(); if (tk !== myTok) { myTok = tk; myNm = '';
+        try { const b = tk && tk.split('.')[1]; if (b) { const pl = JSON.parse(decodeURIComponent(escape(atob(b.replace(/-/g, '+').replace(/_/g, '/'))))); myNm = pl.username || ''; } } catch (e) {}
+        if (!myNm) try { myNm = localStorage.getItem('_myUsername') || ''; } catch (e) {} }
+      return myNm; };
     let birdsIn = false, on = false, me = null, birds = [], worms = new Map(), off = 0, balance = null, fx = [], target = null, raf = 0, pollT = 0, flySent = 0, flyWait = 0, corr = null, lastF = 0, frameMs = 16.7, zoomIn = null, extAt = 0, ang = -Math.PI / 2, angs = new Map(), asking = new Set(), seenTaken = new Set(), hintUntil = 0;
     const srv = () => Date.now() + off;
     // Server clock: on mobile data the round trip jitters, and taking each 2-second answer as-is nudged the bird (and so
