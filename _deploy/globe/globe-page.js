@@ -884,7 +884,8 @@
     // a bird's colour: its own body colour, the same as its logo bird (everyone, admins and mods too — the user's
     // choice 2026-11-26). The beak is a darker shade of it.
     const roles = new Map(), cols = new Map();
-    const col = name => { let v = cols.get(name); if (v) return v;
+    const ADMIN_COL = [155, 184, 185];   // the admin bird's blue-grey (admins' logo is that picture, not a generated bird)
+    const col = name => { if (roles.get(name) === 'admin') return ADMIN_COL; let v = cols.get(name); if (v) return v;
       try { if (window._ppKit && window._ppKit.bodyCol) { v = window._ppKit.bodyCol(name); cols.set(name, v); return v; } } catch (e) {}
       return [94, 234, 212]; };
     const css = c => `rgb(${c[0]},${c[1]},${c[2]})`, shade = c => c[0] + c[1] + c[2] > 600 ? [150, 150, 158] : c.map(x => Math.round(x * 0.55));
@@ -1046,25 +1047,45 @@
     // (a bird can be paused on someone else's phone at any moment: the dots are fetched every 8 s and a moving one is only
     // carried on for up to 8 s past the latest news of it, so a stopped bird's dot doesn't keep drifting away)
     loadMine(); loadDots(); setInterval(() => { if (!document.hidden) loadDots(); }, 8000); setInterval(() => { if (!document.hidden && !on) loadMine(); }, 30000);
-    // a stopped bird sleeps in a little woven nest (twigs placed the same way every time): the bird is the same
-    // one-colour bird as when it flies, wings folded, breathing slowly, with little z's drifting up
+    // a stopped bird sleeps in a little woven nest: twigs all round the rim and down into the bowl, with the rim's shadow
+    // falling into it for depth. The bird is curled up in its own colour: round and fluffed, one wing folded over its
+    // back, head turned and tucked onto its shoulder, breathing slowly, with little z's drifting up.
+    const lift = (cl, f) => cl.map(v => Math.max(0, Math.min(255, Math.round(v * f))));
     function drawNest(x, y, k, alpha) {
-      const c = cx; c.save(); c.globalAlpha = alpha == null ? 1 : alpha; c.translate(x, y); c.scale(k * 1.15, k * 1.15);
-      c.beginPath(); c.ellipse(2, 4, 15, 12, 0, 0, 7); c.fillStyle = 'rgba(0,0,0,.28)'; c.fill();
-      c.beginPath(); c.ellipse(0, 0, 15, 12.5, 0, 0, 7); c.fillStyle = '#7a5230'; c.fill();
-      c.beginPath(); c.ellipse(0, 0.6, 10, 8, 0, 0, 7); c.fillStyle = '#3d2615'; c.fill();
-      c.lineCap = 'round';
-      for (let i = 0; i < 22; i++) { const a0 = i * 0.2856 + (i % 3) * 0.4, r = 11.2 + (i % 4) * 0.9, l = 0.5 + (i % 5) * 0.08;
-        c.beginPath(); c.ellipse(0, 0, r, r * 0.83, 0, a0, a0 + l); c.strokeStyle = i % 2 ? '#a8784a' : '#8f6238'; c.lineWidth = 1.1 + (i % 3) * 0.35; c.stroke(); }
+      const c = cx; c.save(); c.globalAlpha = alpha == null ? 1 : alpha; c.translate(x, y); c.scale(k * 1.15, k * 1.15); c.lineCap = 'round';
+      c.beginPath(); c.ellipse(1.5, 3.5, 15.5, 12.5, 0, 0, 7); c.fillStyle = 'rgba(0,0,0,.3)'; c.fill();                                        // shadow on the ground
+      let g = c.createRadialGradient(-4, -4, 2, 0, 0, 16); g.addColorStop(0, '#94653b'); g.addColorStop(1, '#6a4425');
+      c.beginPath(); c.ellipse(0, 0, 15, 12.5, 0, 0, 7); c.fillStyle = g; c.fill();                                                             // rim
+      // the bowl: the same woven twigs, darker the deeper they go
+      c.save(); c.beginPath(); c.ellipse(0, 0.6, 10.2, 8.2, 0, 0, 7); c.clip();
+      g = c.createRadialGradient(0, 1.5, 1, 0, 0.6, 10.5); g.addColorStop(0, '#4a2e17'); g.addColorStop(1, '#6b4526'); c.fillStyle = g; c.fill();
+      for (let i = 0; i < 26; i++) { const r = 2 + (i % 5) * 1.8, a0 = i * 0.73 + (i % 4) * 0.5, l = 0.7 + (i % 3) * 0.3;
+        c.beginPath(); c.ellipse(0, 0.8, r, r * 0.8, 0, a0, a0 + l); c.strokeStyle = i % 2 ? 'rgba(140,96,58,.55)' : 'rgba(96,62,34,.6)'; c.lineWidth = 0.9 + (i % 3) * 0.25; c.stroke(); }
+      g = c.createLinearGradient(0, -8, 0, 4); g.addColorStop(0, 'rgba(0,0,0,.5)'); g.addColorStop(1, 'rgba(0,0,0,0)');                     // the rim's shadow inside
+      c.fillStyle = g; c.fillRect(-11, -9, 22, 14); c.restore();
+      for (let i = 0; i < 22; i++) { const a0 = i * 0.2856 + (i % 3) * 0.4, r = 11.2 + (i % 4) * 0.9, l = 0.5 + (i % 5) * 0.08;          // rim twigs
+        c.beginPath(); c.ellipse(0, 0, r, r * 0.83, 0, a0, a0 + l); c.strokeStyle = i % 2 ? '#b0814f' : '#8f6238'; c.lineWidth = 1.1 + (i % 3) * 0.35; c.stroke(); }
       c.restore();
     }
-    function drawSleeper(x, y, a, cl, k, t, seed, zs) {
-      const br = 1 + 0.03 * Math.sin(t * 2.1 + seed);
-      drawBird(x, y, a, '', k * br / 0.8, 1, 1, { span: 0.32, bk: 0, lift: 0 }, cl);
-      if (zs) { const c = cx; c.save(); c.fillStyle = '#e2e8f0'; c.shadowColor = 'rgba(0,0,0,.85)'; c.shadowBlur = 3;
+    function drawSleeper(x, y, a, cl, k, t, seed, zs, alpha) {
+      cx.save(); if (alpha != null) cx.globalAlpha = alpha;
+      const c = cx, br = 1 + 0.035 * Math.sin(t * 2.1 + seed), lo = lift(cl, 0.78), hi = lift(cl, 1.15), dk = shade(cl);
+      c.save(); c.translate(x, y); c.rotate(a); c.scale(k, k);
+      c.beginPath(); c.moveTo(-6.5, -2); c.quadraticCurveTo(-11.5, -2.6, -12, 0); c.quadraticCurveTo(-11.5, 2.6, -6.5, 2); c.closePath(); c.fillStyle = css(lo); c.fill();   // tail
+      c.save(); c.scale(br, br);
+      let g = c.createRadialGradient(-1.5, -3, 1, 0, 0, 10); g.addColorStop(0, css(hi)); g.addColorStop(0.7, css(cl)); g.addColorStop(1, css(lift(cl, 0.88)));
+      c.beginPath(); c.ellipse(-0.5, 0, 8.8, 7.4, 0, 0, 7); c.fillStyle = g; c.fill();                                                         // body, fluffed up
+      c.beginPath(); c.moveTo(4, 1.2); c.quadraticCurveTo(0, 7.4, -8.4, 3.2); c.quadraticCurveTo(-3, 1.6, 4, 1.2); c.fillStyle = css(lo); c.fill();   // folded wing
+      c.restore();
+      g = c.createRadialGradient(3, -4.2, 0.5, 3.6, -3, 5.2); g.addColorStop(0, css(hi)); g.addColorStop(1, css(cl));
+      c.beginPath(); c.arc(3.6, -2.8, 4.6, 0, 7); c.fillStyle = g; c.fill(); c.lineWidth = 0.6; c.strokeStyle = 'rgba(0,0,0,.18)'; c.stroke();                                                                     // head, turned onto the shoulder
+      c.beginPath(); c.moveTo(1.2, -4.9); c.lineTo(-2.4, -4.4); c.lineTo(0.9, -3.2); c.closePath(); c.fillStyle = css(dk); c.fill();            // beak tucked back
+      c.restore();
+      if (zs) { c.save(); c.fillStyle = '#e2e8f0'; c.shadowColor = 'rgba(0,0,0,.85)'; c.shadowBlur = 3;
         for (let i = 0; i < 2; i++) { const u = ((t + seed + i * 1.3) % 2.6) / 2.6; c.globalAlpha = Math.sin(Math.PI * u) * 0.85;
           c.font = `700 ${(6 + 4 * u) * Math.max(0.55, k)}px -apple-system,system-ui,sans-serif`; c.fillText('z', x + 11 * k + 8 * u * k, y - 10 * k - 14 * u * k); }
         c.restore(); }
+      cx.restore();
     }
     const idleAng = new Map();
     function idle(ts) {
@@ -1101,8 +1122,9 @@
             else { // waking up: the wings open, it flaps hard and lifts off (its shadow drops away), the nest fades out
               const u = (performance.now() - tko.t0) / 1000, e = Math.min(1, u / 0.9), ez = e * e * (3 - 2 * e), sw = 1 - 1.4 * ez;
               drawNest(s.x, s.y, km2, 1 - ez);
-              const ps = pose('@tko', true, 0, dt * 1.6); ps.span = 0.32 + (ps.span - 0.32) * Math.min(1, u / 0.25);
-              drawBird(s.x, s.y - 6 * ez * km2, a, mn, km2 / (1 - 0.2 * sw), 1, sw, ps, cl);
+              const ps = pose('@tko', true, 0, dt * 1.6), fin = Math.min(1, u / 0.25); ps.span = 0.32 + (ps.span - 0.32) * fin;
+              if (fin < 1) drawSleeper(s.x, s.y, a, cl, km2, t, 0, false, 1 - fin);   // the sleeping bird uncurls into the flying one
+              drawBird(s.x, s.y - 6 * ez * km2, a, mn, km2 / (1 - 0.2 * sw), fin, sw, ps, cl);
               if (u > 0.95) { tko = null; enter(); } }
             show = !tko; myBtn.style.transform = `translate(${cr.left + s.x - 24}px,${cr.top + s.y - 24}px)`; } } }
       if (myBtn.classList.contains('in') !== show) myBtn.classList.toggle('in', show);

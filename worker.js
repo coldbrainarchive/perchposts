@@ -2394,9 +2394,9 @@ async function handleRequest(request, env, ctx, corsHeaders) {
     const hit = await caches.default.match(key); if (hit) return hit;
     try {
       // each bird's colour (the one its own page saved) but never its name
-      const { results = [] } = await env.DB.prepare(`SELECT h.from_lat, h.from_lng, h.brg0, h.brg1, h.depart_at, h.arrive_at, h.col FROM hunt_birds h LIMIT 5000`).all();
+      const { results = [] } = await env.DB.prepare(`SELECT h.from_lat, h.from_lng, h.brg0, h.brg1, h.depart_at, h.arrive_at, h.col, (SELECT m.role FROM mod_users m WHERE LOWER(m.username) = LOWER(h.username) AND m.deleted_at IS NULL LIMIT 1) AS role FROM hunt_birds h LIMIT 5000`).all();
       const r4 = x => x == null ? null : Math.round(x * 1e4) / 1e4;
-      const colOf = b => b.col || null;   // every bird its real colour (admins and mods too)
+      const colOf = b => b.role === "admin" ? "155,184,185" : (b.col || null);   // every bird its real colour; admins' logo is the blue-grey admin bird
       const res = new Response(JSON.stringify({ now: Date.now(), b: results.map(b => [r4(b.from_lat), r4(b.from_lng), r4(b.brg0), r4(b.brg1), b.depart_at, b.arrive_at, colOf(b)]) }),
         { headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "public, max-age=5" } });
       ctx.waitUntil(caches.default.put(key, res.clone()));
