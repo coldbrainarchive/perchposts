@@ -231,7 +231,7 @@
   function loadKit(cb) {
     if (window._ppKit) return;
     if (kitCbs) { kitCbs.push(cb); return; }
-    kitCbs = [cb]; const s = document.createElement('script'); s.src = '/globe/birdkit.js?v=1402';
+    kitCbs = [cb]; const s = document.createElement('script'); s.src = '/globe/birdkit.js?v=1403';
     s.onload = () => { const l = kitCbs; kitCbs = []; l.forEach(f => f()); }; document.head.appendChild(s);
   }
   const admins = (() => { try { return new Set(JSON.parse(localStorage.getItem('_au') || '[]')); } catch (e) { return new Set(); } })();
@@ -1064,6 +1064,43 @@
     // right on the ground: anything drawn even a few km up slides against the map when the camera is this low
     const sc = (la, lo) => world.getScreenCoords(la, lo, 0);
     // a simple bird seen from above in the bird's colour; the beak points where it's going
+    // each player's head seen from above ("C" without eyes, the user's pick 2026-11-26): colours taken from their own
+    // logo bird (crown, a lighter face toward the beak, the beak itself, and their crest if they have one). Admins get the
+    // top hat seen from above. Worked out once per player from their logo picture.
+    const heads = new Map();
+    function headInfo(n) {
+      if (!n) return null; const adm = roles.get(n) === 'admin', key = (adm ? 'A:' : '') + n, v = heads.get(key);
+      if (v !== undefined) return v && v.crown ? v : null;
+      const K = window._ppKit; if (!K || !K.describe || !kitReady) return null; heads.set(key, 'wait');
+      (async () => {
+        let im; if (adm) { im = new Image(); im.src = '/admin-bird.png'; await im.decode(); }
+        else { const em = clanOf(n), g = await new Promise(res => { const x = K.get(n, em, 'f'); if (x && (x.f || x.fail)) return res(x); K.sub(n, em, () => res(K.get(n, em, 'f')), 'f'); setTimeout(() => res(null), 10000); });
+          if (!g || g.fail || !g.f) return null; im = new Image(); im.src = g.f; await im.decode(); }
+        const W = im.naturalWidth, H2 = im.naturalHeight, c = document.createElement('canvas'); c.width = W; c.height = H2; const x = c.getContext('2d'); x.drawImage(im, 0, 0);
+        const D = x.getImageData(0, 0, W, H2).data; let x0 = W, y0 = H2, x1 = 0, y1 = 0;
+        for (let yy = 0; yy < H2; yy += 2) for (let xx = 0; xx < W; xx += 2) if (D[(yy * W + xx) * 4 + 3] > 120) { if (xx < x0) x0 = xx; if (xx > x1) x1 = xx; if (yy < y0) y0 = yy; if (yy > y1) y1 = yy; }
+        const bw = x1 - x0, bh = y1 - y0, avg = (fx0, fx1, fy0, fy1) => { let r = 0, gg = 0, b = 0, k = 0;
+          for (let yy = Math.round(y0 + bh * fy0); yy < y0 + bh * fy1; yy += 2) for (let xx = Math.round(x0 + bw * fx0); xx < x0 + bw * fx1; xx += 2) { const i = (yy * W + xx) * 4; if (D[i + 3] > 200) { r += D[i]; gg += D[i + 1]; b += D[i + 2]; k++; } }
+          return k ? [r / k, gg / k, b / k] : null; };
+        if (adm) return { crown: avg(.45, .8, .62, .78) || [155, 184, 185], face: avg(.2, .45, .62, .8) || [190, 205, 210], beak: avg(0, .14, .78, .92) || [150, 150, 158], hat: true };
+        const d = K.describe(n);
+        return { crown: avg(.45, .85, .18, .38) || [120, 120, 120], face: avg(.18, .42, .38, .62) || [200, 200, 200], beak: avg(0, .12, .45, .7) || [60, 60, 60], crest: d.tops && d.tops.length ? avg(.35, .75, 0, .14) : null };
+      })().then(o => heads.set(key, o || 'fail')).catch(() => heads.set(key, 'fail'));
+      return null;
+    }
+    // drawn in the bird's own (unscaled) units: the head sits over the plain bird's head and beak
+    function drawHead(c, L, roll) {
+      const hx = 9.5, hy = roll, r = 5.6, rgb = v => `rgb(${v.map(Math.round).join(',')})`;
+      c.save(); c.translate(hx, hy);
+      if (L.crest) { c.fillStyle = rgb(L.crest); for (const a of [-.5, 0, .5]) { c.save(); c.rotate(a); c.beginPath(); c.ellipse(-r * 1.15, 0, r * .95, r * .32, 0, 0, 7); c.fill(); c.restore(); } }
+      c.beginPath(); c.arc(0, 0, r, 0, 7); c.fillStyle = rgb(L.crown); c.fill();
+      c.save(); c.beginPath(); c.arc(0, 0, r, 0, 7); c.clip(); c.beginPath(); c.ellipse(r * .75, 0, r * .75, r * .95, 0, 0, 7); c.fillStyle = rgb(L.face); c.fill(); c.restore();
+      c.beginPath(); c.arc(0, 0, r, 0, 7); c.lineWidth = .8; c.strokeStyle = 'rgba(0,0,0,.35)'; c.stroke();
+      c.beginPath(); c.moveTo(r * .92, -r * .32); c.lineTo(r * 1.75, 0); c.lineTo(r * .92, r * .32); c.closePath(); c.fillStyle = rgb(L.beak); c.fill(); c.lineWidth = .5; c.strokeStyle = 'rgba(0,0,0,.35)'; c.stroke();
+      if (L.hat) { c.beginPath(); c.arc(-r * .2, 0, r * .78, 0, 7); c.fillStyle = '#16171c'; c.fill(); c.lineWidth = 1.1; c.strokeStyle = '#d4af37'; c.stroke();   // top hat from above: crown with a gold band
+        c.beginPath(); c.arc(-r * .2, 0, r * .45, 0, 7); c.fillStyle = '#26272e'; c.fill(); }
+      c.restore();
+    }
     function drawBird(x, y, a, name, s, alpha, swoop, ps, colIn) {
       const c = cx, c0 = colIn || col(name), cl = css(c0), dk = css(shade(c0)), sw = swoop || 0, k = s * 0.8 * (1 - 0.2 * sw), bk = ps.bk, ab = Math.abs(bk), span = ps.span;
       // in a turn it glides with its wings out; seen from above, the wing it leans toward looks shorter
@@ -1085,6 +1122,7 @@
       // the lowered wing is a little in shadow
       if (ab > 0.05) { c.save(); c.beginPath(); c.rect(-30, bk > 0 ? roll + 5 : -45, 42, 40 + roll * 0); c.clip(); shape(); c.fillStyle = `rgba(0,0,0,${0.12 * ab})`; c.fill(); c.restore(); }
       c.beginPath(); c.moveTo(12, -1.8 + roll); c.lineTo(17, roll); c.lineTo(12, 1.8 + roll); c.closePath(); c.fillStyle = dk; c.fill();   // beak
+      { const L = headInfo(name); if (L) drawHead(c, L, roll); }   // the player's own head on top, once it's ready
       c.restore(); c.restore();
     }
     // a worm: a tiny wiggling squiggle (rare purple ones are worth 5)
@@ -1248,7 +1286,7 @@
         const sk = 'o:' + (d.u || d.i), sz = 76 * Math.max(0.5, km2);
         if (!flying) { intoSprite(sk, sz, sz, s.x, s.y, (x, y) => { drawNest(x, y, 0.8 * km2); drawSleeper(x, y, a0, d.col, 0.8 * km2, t, d.i * 0.77, true, null, d.u); }); continue; }
         let a = idleAng.get(d.i) ?? a0; a = ease(a, a0, dt, 'dot' + d.i); idleAng.set(d.i, a);
-        const ps = pose('dot' + d.i, true, bankAt(d, tq), dt); intoSprite(sk, sz, sz, s.x, s.y, (x, y) => drawBird(x, y, a, '', 0.8 * km2, 0.92, 0, ps, d.col)); }
+        const ps = pose('dot' + d.i, true, bankAt(d, tq), dt); intoSprite(sk, sz, sz, s.x, s.y, (x, y) => drawBird(x, y, a, d.u || '', 0.8 * km2, 0.92, 0, ps, d.col)); }
       // you
       let show = false, dotOn = false;
       if (mn && mp) { const s = scr(mp[0], mp[1]);
