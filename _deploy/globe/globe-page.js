@@ -887,7 +887,7 @@
     const size = () => { DPR = Math.min(2, devicePixelRatio || 1); W = innerWidth; H = innerHeight; cv.width = W * DPR; cv.height = H * DPR; cv.style.width = W + 'px'; cv.style.height = H + 'px'; };
     size(); addEventListener('resize', size);
     const bar = document.createElement('div'); bar.className = 'hunt-bar';
-    bar.innerHTML = `<span class="hb-n"><span class="hw">${WORM_SVG}</span><b id="huntN">–</b></span><span class="hb-t" id="huntT">Tap to fly</span><button type="button" class="hb-x" aria-label="Land (leave Take flight)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>`;
+    bar.innerHTML = `<span class="hb-n"><span class="hw">${WORM_SVG}</span><b id="huntN">–</b></span><span class="hb-t" id="huntT">Tap to fly</span><button type="button" class="hb-x" aria-label="Leave the game"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>`;
     document.body.appendChild(bar);
     bar.addEventListener('pointerdown', ev => ev.stopPropagation());
     // ── the game's two bars (the user's layout "D", 2026-11-26) ──
@@ -897,7 +897,7 @@
     const ghTop = document.createElement('div'), ghBot = document.createElement('div'), ghLog = document.createElement('div'), ghPanel = document.createElement('div');
     ghTop.className = 'gh gh-top'; ghBot.className = 'gh gh-bot'; ghLog.className = 'gh-log'; ghPanel.className = 'gh-panel';
     const RING = 2 * Math.PI * 19;
-    ghTop.innerHTML = `<button type="button" class="gh-x" aria-label="Land (leave Take flight)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    ghTop.innerHTML = `<button type="button" class="gh-x" aria-label="Leave the game"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
       <div class="gh-lvw"><div class="gh-lv"><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="19" fill="rgba(11,12,16,.35)" stroke="rgba(255,255,255,.14)" stroke-width="4"/><circle id="ghRing" cx="22" cy="22" r="19" fill="none" stroke="#c084fc" stroke-width="4" stroke-linecap="round" stroke-dasharray="0 ${RING}" transform="rotate(-90 22 22)"/></svg><small>LV</small><b id="ghLv">1</b></div><span class="gh-xpn" id="ghXpT"><em>0</em>/100 XP</span></div>
       <div class="gh-mid"><div class="gh-r1"><span class="gh-time" id="ghTime">–</span><span class="gh-worm" id="ghWormBox">${WORM_SVG}<b id="ghWorms">–</b></span></div>
         <div class="gh-en"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12z" fill="currentColor"/></svg><div class="gh-enb"><i id="ghEn"></i></div><b id="ghEnT">100%</b></div></div>`;
@@ -1028,7 +1028,7 @@
       $('ghWorms').textContent = balance == null ? '–' : balance;
     }
     // your own bird on the globe is the way in (no button): an invisible tap target sits on it when it shows as a bird
-    const myBtn = document.createElement('button'); myBtn.type = 'button'; myBtn.className = 'hunt-me'; myBtn.setAttribute('aria-label', 'Take flight'); document.body.appendChild(myBtn);
+    const myBtn = document.createElement('button'); myBtn.type = 'button'; myBtn.className = 'hunt-me'; myBtn.setAttribute('aria-label', 'Play'); document.body.appendChild(myBtn);
     // your dot, zoomed out: drawn inside the globe area (moved like the map's place names, so it stays fixed to the map on
     // phones) on a layer above the story pins; the button above is only the invisible place to tap
     const meDot = document.createElement('div'); meDot.className = 'me-dot'; host.appendChild(meDot);
@@ -1076,7 +1076,7 @@
     // pausing: the server stops the bird where it is (also when the page is hidden or closed mid-flight)
     // stopping over water (leaving mid-flight too) means the bird is in the water: it falls in and treads water
     const wetHere = () => { const q = me && posAt(me, srv()); if (q && !drowning && isWater(q[0], q[1]) === true && !(Date.now() < noWater)) wet = true; };
-    const pauseNow = keep => (wetHere(), fetch(API + '/hunt/pause', { method: 'POST', keepalive: !!keep, headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ col: kitCol(), leaving: 1, wet: wet && !drowning, en: enKm / EN_MAX, t: srv(), sid: SID }) })
+    const pauseNow = keep => (wetHere(), fetch(API + '/hunt/pause', { method: 'POST', keepalive: !!keep, headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ col: kitCol(), leaving: 1, wet: wet && !drowning, en: enKm / EN_MAX, t: srv(), sid: SID, tz: TZ }) })
       .then(r => r.json()).then(j => { if (j && j.me) { myDeps.add(j.me.depart); mine = { me: j.me, home: null, wet: j.wet || 0 }; if (on && document.hidden) me = j.me; } }).catch(() => {}));
     function leave(keep) {
       if (!on) return; on = false; if (ghOpen) openPanel(ghOpen); document.body.classList.remove('hunting'); bar.classList.remove('in'); world.controls().enableRotate = true; world.controls().enableZoom = true; world.controls().enableDamping = true; try { paint(); } catch (e) {}
@@ -1106,7 +1106,7 @@
       const lite = HUB.on && HUB.named; hubPos();
       const r = await api('/hunt/state', start ? { start: 1, tz: TZ, lat: at[0], lng: at[1], col: kitCol(), en: enKm / EN_MAX, lite } : { col: kitCol(), en: enKm / EN_MAX, lite });
       if (!on) return;
-      if (r.s === 401) { leave(); toast('Sign in to take flight', true); return; }
+      if (r.s === 401) { leave(); toast('Sign in to play', true); return; }
       if (r.s === 200 && r.j.now) {
         const t1 = Date.now(); clockSample(r.j.now - (t0 + t1) / 2, t1 - t0);
         if (sent > flySent && !flyWait && r.j.me && (!me || r.j.me.depart >= me.depart - 50)) { const q1 = me && posAt(me, srv()), q2 = posAt(r.j.me, srv()); if (!q1 || !q2 || km(q1, q2) > 0.04 || Math.abs((r.j.me.b1 ?? 0) - (me.b1 ?? 0)) > 0.01) setMe(r.j.me, 'poll'); }   // a flight you just set wins over an older answer; and the same flight (within 40 m) is left alone so your bird never slides
@@ -1285,8 +1285,16 @@
     // (your own bird is in the public list too, maybe a few seconds out of date: it's recognised by its flights' start times)
     const myDeps = new Set(), isMine = d => myDeps.has(d.depart);
     const kitCol = () => { try { const n = myName(); return window._ppKit && window._ppKit.bodyCol && n ? window._ppKit.bodyCol(n).join(',') : undefined; } catch (e) { return undefined; } };
+    // opened from a notification (/globe/?go=me): once the globe is up, fly down to your bird at game level, like
+    // tapping your dot (then tap your bird to play)
+    let goMe = /[?&]go=me\b/.test(location.search);
+    if (goMe) try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) {}
+    const goToMe = () => { if (!goMe || !mine || !mine.me || on) return;
+      if (!document.body.classList.contains('gl-ready')) { setTimeout(goToMe, 300); return; }
+      goMe = false; const q = flyAt(mine.me, Date.now() + dotsOff); if (!q) return;
+      const c = world.controls(); c.autoRotate = false; const v = world.pointOfView(); dotFly = { la0: v.lat, lo0: v.lng, a0: v.altitude, la: q[0], lo: q[1], t0: performance.now() }; };
     const loadMine = () => { if (!tok()) { mine = null; return; }
-      api('/hunt/me', { tz: TZ, col: kitCol(), en: enKm / EN_MAX }).then(r => { if (r.s !== 200 || !r.j) return; mealIn(r.j); drownedIn(r.j); mine = { me: r.j.me, home: r.j.home, wet: r.j.wet || 0 }; if (r.j.me) myDeps.add(r.j.me.depart);
+      api('/hunt/me', { tz: TZ, col: kitCol(), en: enKm / EN_MAX }).then(r => { if (r.s !== 200 || !r.j) return; mealIn(r.j); drownedIn(r.j); mine = { me: r.j.me, home: r.j.home, wet: r.j.wet || 0 }; if (r.j.me) myDeps.add(r.j.me.depart); goToMe();
         const mn = myName(); if (mn) { if (r.j.role) roles.set(mn, r.j.role); else roles.delete(mn); }
         if (!window._ppKit) loadKit(() => { if (r.j.me) api('/hunt/me', { tz: TZ, col: kitCol(), en: enKm / EN_MAX }); }); }); };
     const parseCol = c => { const v = typeof c === 'string' ? c.split(',').map(Number) : null; return v && v.length === 3 && v.every(x => x >= 0 && x <= 255) ? v : [214, 218, 226]; };
@@ -1498,7 +1506,7 @@
             show = !tko; myBtnMode = 'bird'; myBtn.style.transform = `translate(${cr.left + s.x - 24}px,${cr.top + s.y - 24}px)`; } } }
       if (myBtn.classList.contains('in') !== show) myBtn.classList.toggle('in', show);
       if (meDot.classList.contains('on') !== dotOn) meDot.classList.toggle('on', dotOn);
-      { const lb = myBtnMode === 'dot' ? 'Go to my bird' : 'Take flight'; if (myBtn.getAttribute('aria-label') !== lb) myBtn.setAttribute('aria-label', lb); }
+      { const lb = myBtnMode === 'dot' ? 'Go to my bird' : 'Play'; if (myBtn.getAttribute('aria-label') !== lb) myBtn.setAttribute('aria-label', lb); }
       spritesEnd();
     }
     idleRaf = requestAnimationFrame(idle);

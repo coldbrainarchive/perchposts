@@ -74,7 +74,7 @@ async function sinkWet(env, now) {
     await env.DB.prepare(`UPDATE hunt_birds SET drowned_at = ?, drowned_lost = ? WHERE username = ?`).bind(now, lost, b.username).run();
     await huntHub(env, null, { t: "b", u: b.username, la: hl, lo: hg, dep: now, arr: now, wet: 0 });
     await env.DB.prepare(`INSERT INTO system_notifications (id, user_id, message) VALUES (?, ?, ?)`).bind(crypto.randomUUID(), b.username,
-      JSON.stringify({ text: `Your bird ran out of stamina in the water and drowned. It washed up at home${lost ? ` and lost all ${lost} worm${lost === 1 ? "" : "s"}` : ""}.`, icon: "GLOBE" })).run();
+      JSON.stringify({ text: `${b.username} ran out of stamina in the water and drowned. It washed up at home${lost ? ` and lost all ${lost} worm${lost === 1 ? "" : "s"}` : ""}.`, icon: "GLOBE", link: "/globe/?go=me" })).run();
   }
 }
 // spend a player's whole worm balance (given to the game, like a worm eaten); returns how many
@@ -2620,8 +2620,12 @@ async function handleRequest(request, env, ctx, corsHeaders) {
           await env.DB.prepare(`UPDATE hunt_birds SET wet_until = ? WHERE username = ?`).bind(until, username).run(); wet = until;
           if (!me.wet_note_at || now - me.wet_note_at > 30 * 60000) {
             await env.DB.prepare(`UPDATE hunt_birds SET wet_note_at = ? WHERE username = ?`).bind(now, username).run();
+            // starts with the bird's name, so the notification shows the player's own bird; the exact time it runs out (in
+            // the phone's time zone) since "about N min" goes stale as the notification sits there; tapping it opens the
+            // globe and flies down to the bird
+            let by = ""; try { const tz = String(body.tz || ""); if (tz) by = ` until ${new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" }).format(new Date(until))}`; } catch (e) {}
             await env.DB.prepare(`INSERT INTO system_notifications (id, user_id, message) VALUES (?, ?, ?)`).bind(crypto.randomUUID(), username,
-              JSON.stringify({ text: `Your bird is still in the water, treading water. It has about ${mins} min of stamina left. Fly it to land in Take flight, or it drowns and washes up at home with no worms.`, icon: "GLOBE" })).run(); } }
+              JSON.stringify({ text: `${username} is still in the water. It can tread water${by} (about ${mins} min). Tap to fly it to land, or it drowns and washes up at home with no worms.`, icon: "GLOBE", link: "/globe/?go=me" })).run(); } }
         huntHub(env, ctx, { t: "b", u: username, la: p[0], lo: p[1], b0: h, b1: h, dep: at, arr: at, seen: body.leaving ? now - 60000 : now, wet: wet || 0 });   // (stamped with the tap time, like turns, so the order check holds)
         return json({ now, me: { from: p, to: p, b0: h, b1: h, depart: now, arrive: now }, st: stats(), ...(wet ? { wet } : {}) });
       }
