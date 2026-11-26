@@ -930,12 +930,24 @@
       if (on) { ghEvent(...mealNote); mealNote = null; } };
     const outOfWorms = () => { if (!landed) landNow(); ghEvent('Out of worms', 'catch or earn a worm to fly again', '#f87171'); };
     // eat one worm: stamina back to full, then carry on (then() takes off again if you were standing)
-    function eatWorm(then) {
-      if (eating) return; if (balance != null && balance < 1) { enTired = true; outOfWorms(); return; }
+    function eatWorm(then, fail) {
+      if (eating) return; if (balance != null && balance < 1) { enTired = true; outOfWorms(); if (fail) fail(); return; }
       eating = true;
       api('/hunt/eat').then(r => { eating = false;
         if (r.s === 200 && r.j.ok) { enKm = EN_MAX; enTired = false; enSave(); if (r.j.balance != null) setBal(r.j.balance); ghEvent('−1', 'Ate a worm · stamina full', '#e8555c'); if (then) then(); return; }
-        if (r.j.balance != null) setBal(r.j.balance); enTired = true; outOfWorms(); });
+        if (r.j.balance != null) setBal(r.j.balance); enTired = true; if (fail) fail(); outOfWorms(); });
+    }
+    // out of stamina mid-flight: the bird lands, ducks its head to gobble a worm (a big peck, then a little one), and
+    // takes off again the way it was going once the worm is eaten and the animation has played
+    let peck = null; const PECK_MS = 1500;
+    function eatStop() {
+      if (eating || peck) return;
+      if (balance != null && balance < 1) { enTired = true; outOfWorms(); return; }
+      const h = headAt(me, srv()) ?? me.b1 ?? 0; landNow(true);
+      const pk = peck = { t0: performance.now(), res: null };
+      const go = () => { if (peck !== pk || pk.res == null || performance.now() - pk.t0 < PECK_MS) return; peck = null; if (pk.res && on && landed) { landed = false; flyDir(h); } };
+      eatWorm(() => { pk.res = true; go(); }, () => { if (peck === pk) peck = null; });
+      setTimeout(go, PECK_MS + 30);
     }
     let gSt = null, gStAt = 0, ghNext = 0, ghTown = '', ghTownAt = 0, ghTopB = 70, ghBotT = 0, met = new Set();
     const regionName = (() => { try { return new Intl.DisplayNames(['en'], { type: 'region' }); } catch (e) { return null; } })();
@@ -963,7 +975,7 @@
       { const t = Date.now(), dms = Math.max(0, t - enAt); enAt = t;
         const flying = me && now < me.arrive && me.b1 != null && !landed;
         if (flying) enAdd(-SPEED * Math.min(5000, dms) / 1000); else enAdd(dms * EN_REST);   // (rest counts all the time you were away)
-        if (flying && enKm <= 0 && !enTired) eatWorm();   // keeps flying while the worm goes down; lands if there isn't one
+        if (flying && enKm <= 0 && !enTired) eatStop();   // lands, eats, flies on (or just lands if there's no worm)
         if (enKm > 3) enTired = false;
         const pc = enKm / EN_MAX, el = $('ghEn'); el.style.width = (pc * 100).toFixed(1) + '%';
         el.style.background = pc > .5 ? '#4ade80' : pc > .2 ? '#facc15' : '#f87171'; $('ghEnT').textContent = Math.ceil(pc * 100) + '%';
@@ -1026,12 +1038,12 @@
       if (me) mine = { me: { ...me, from: posAt(me, srv()), to: posAt(me, srv()), b0: headAt(me, srv()) ?? me.b1, b1: headAt(me, srv()) ?? me.b1, depart: srv(), arrive: srv() }, home: null };
       pauseNow(); enSave(); idleRaf = requestAnimationFrame(idle);
     }
-    function landNow() {
+    function landNow(quiet) {
       const t = srv(), p = posAt(me, t), h = headAt(me, t) ?? me.b1 ?? 0; landed = true;
       setMe({ from: p, to: p, b0: h, b1: h, depart: t, arrive: t }); flySent = Date.now(); flyWait++;
       fetch(API + '/hunt/pause', { method: 'POST', headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ col: kitCol() }) }).then(r => r.json())
         .then(j => { flyWait = Math.max(0, flyWait - 1); if (j && j.me && on && landed) { setMe(j.me); if (j.st) { gSt = j.st; gStAt = j.now; } } }).catch(() => { flyWait = Math.max(0, flyWait - 1); });
-      ghEvent('Landed', ghTown || 'here', '#fcd34d');
+      if (!quiet) ghEvent('Landed', ghTown || 'here', '#fcd34d');
     }
     addEventListener('pagehide', () => { try { if (on) pauseNow(true); } catch (e) {} });
     document.addEventListener('visibilitychange', () => {
@@ -1137,9 +1149,9 @@
       return null;
     }
     // drawn in the bird's own (unscaled) units: the head sits over the plain bird's head and beak
-    function drawHead(c, L, roll) {
+    function drawHead(c, L, roll, dip) {
       const hx = 9, hy = roll, r = 4.3, rgb = v => `rgb(${v.map(Math.round).join(',')})`;
-      c.save(); c.translate(hx, hy);
+      c.save(); c.translate(hx + 7 * (dip || 0), hy); if (dip) c.scale(1 - 0.3 * dip, 1 - 0.3 * dip);   // ducking down to the ground: forward and a little further away
       if (L.crest) { c.fillStyle = rgb(L.crest); for (const a of [-.5, 0, .5]) { c.save(); c.rotate(a); c.beginPath(); c.ellipse(-r * 1.15, 0, r * .95, r * .32, 0, 0, 7); c.fill(); c.restore(); } }
       c.beginPath(); c.arc(0, 0, r, 0, 7); c.fillStyle = rgb(L.crown); c.fill();
       c.save(); c.beginPath(); c.arc(0, 0, r, 0, 7); c.clip(); c.beginPath(); c.ellipse(r * .75, 0, r * .75, r * .95, 0, 0, 7); c.fillStyle = rgb(L.face); c.fill(); c.restore();
@@ -1169,8 +1181,8 @@
       shape(); c.fillStyle = cl; c.fill(); c.lineJoin = 'round'; c.lineWidth = 0.8 / k; c.strokeStyle = 'rgba(8,10,14,.35)'; c.stroke();   // a thin dark outline, so the bird stands out on busy maps
       // the lowered wing is a little in shadow
       if (ab > 0.05) { c.save(); c.beginPath(); c.rect(-30, bk > 0 ? roll + 5 : -45, 42, 40 + roll * 0); c.clip(); shape(); c.fillStyle = `rgba(0,0,0,${0.12 * ab})`; c.fill(); c.restore(); }
-      { const L = headInfo(name); if (L) drawHead(c, L, roll);   // the player's own head on top, once it's ready (it has its own beak)
-        else { c.beginPath(); c.moveTo(12, -1.8 + roll); c.lineTo(17, roll); c.lineTo(12, 1.8 + roll); c.closePath(); c.fillStyle = dk; c.fill(); } }   // beak
+      { const L = headInfo(name), dp = ps.dip || 0; if (L) drawHead(c, L, roll, dp);   // the player's own head on top, once it's ready (it has its own beak)
+        else { c.save(); c.translate(7 * dp, 0); c.beginPath(); c.moveTo(12, -1.8 + roll); c.lineTo(17, roll); c.lineTo(12, 1.8 + roll); c.closePath(); c.fillStyle = dk; c.fill(); c.restore(); } }   // beak
       c.restore(); c.restore();
     }
     // a worm: a tiny wiggling squiggle (rare purple ones are worth 5)
@@ -1470,11 +1482,16 @@
       if (p) { const s = sc(pv[0], pv[1]);
         if (s) { const moving = now < me.arrive, ah = posAt(me, now + 600), s2 = ah && sc(ah[0] + cc[0], ah[1] + cc[1]);
           if (moving && s2 && Math.hypot(s2.x - s.x, s2.y - s.y) > 0.5) ang = ease(ang, Math.atan2(s2.y - s.y, s2.x - s.x), dt, '@me');
-          else if (!moving) { // sitting still: the beak slowly turns toward the nearest worm
+          else if (!moving && !peck) { // sitting still: the beak slowly turns toward the nearest worm
             let best = null, bd = 1e9; for (const w of worms.values()) { if (!w.at) continue; const d = km(p, w.at); if (d < bd) { bd = d; best = w; } }
             const ws = best && sc(best.at[0], best.at[1]);
             if (ws) { const want = Math.atan2(ws.y - s.y, ws.x - s.x); let d = want - ang; d = Math.atan2(Math.sin(d), Math.cos(d)); ang += d * 0.06; } }
-          if (landed && !moving && !swoop) drawBird(s.x, s.y, ang, mine, 1.25, 1, 1, { span: 0.32, bk: 0, lift: 0 });   // landed: wings folded, standing on the ground
+          if (landed && !moving && !swoop) { let dip = 0;
+            if (peck) { const u = Math.min(1, (performance.now() - peck.t0) / PECK_MS);   // a big peck, then a little one
+              dip = u < .5 ? Math.sin(Math.PI * u / .5) : u < .85 ? .55 * Math.sin(Math.PI * (u - .5) / .35) : 0;
+              if (u < .42) { const e = u < .15 ? 1 : 1 - (u - .15) / .27, wx = s.x + Math.cos(ang) * 22, wy = s.y + Math.sin(ang) * 22;   // the worm lying out in front of the beak, slurped up from the end nearest it
+                cx.save(); cx.translate(wx, wy); cx.rotate(ang + Math.PI); cx.scale(.8, .8); drawWorm(0, 0, { v: 1 }, t, Math.max(.05, e)); cx.restore(); } }
+            drawBird(s.x, s.y, ang, mine, 1.25, 1, 1, { span: 0.32, bk: 0, lift: 0, dip }); }   // landed: wings folded, standing on the ground
           else drawBird(s.x, s.y, ang, mine, 1, 1, swoop, pose('@me', moving, bankAt(me, now), dt)); } }
       // the screen moves with your bird (kept in the middle): aim at where it will be when the map is next drawn
       // (on entering it glides from where you were looking down to your bird at hunting height over ~1 s)
