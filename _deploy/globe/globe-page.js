@@ -1095,7 +1095,8 @@
       clearTimeout(pollT); if (!on) return;
       if (document.hidden) { pollT = setTimeout(() => poll(), 2000); return; }
       const t0 = Date.now(), sent = t0;
-      const r = await api('/hunt/state', start ? { start: 1, tz: TZ, lat: at[0], lng: at[1], col: kitCol(), en: enKm / EN_MAX } : { col: kitCol(), en: enKm / EN_MAX });
+      const lite = HUB.on && HUB.named; hubPos();
+      const r = await api('/hunt/state', start ? { start: 1, tz: TZ, lat: at[0], lng: at[1], col: kitCol(), en: enKm / EN_MAX, lite } : { col: kitCol(), en: enKm / EN_MAX, lite });
       if (!on) return;
       if (r.s === 401) { leave(); toast('Sign in to take flight', true); return; }
       if (r.s === 200 && r.j.now) {
@@ -1103,9 +1104,9 @@
         if (sent > flySent && !flyWait && r.j.me && (!me || r.j.me.depart >= me.depart - 50)) { const q1 = me && posAt(me, srv()), q2 = posAt(r.j.me, srv()); if (!q1 || !q2 || km(q1, q2) > 0.04 || Math.abs((r.j.me.b1 ?? 0) - (me.b1 ?? 0)) > 0.01) setMe(r.j.me); }   // a flight you just set wins over an older answer; and the same flight (within 40 m) is left alone so your bird never slides
         if (r.j.balance != null) setBal(r.j.balance);
         if (r.j.st) { gSt = r.j.st; gStAt = r.j.now; } mealIn(r.j);
-        { const pp = me && posAt(me, srv()); if (pp) for (const b of r.j.birds || []) { if (!b.a || met.has(b.u)) continue; const q = posAt(b, srv()); if (q && km(pp, q) < 3) { met.add(b.u); ghEvent('Met', b.u, '#6ee7b7'); } } }
-        birdsIn = true; birds = r.j.birds || []; for (const b of birds) { if (b.r) roles.set(b.u, b.r); else roles.delete(b.u); }
-        { const mn = myName(); if (mn) { if (r.j.role) roles.set(mn, r.j.role); else roles.delete(mn); } }
+        if (lite) hubBirds(); else { const pp = me && posAt(me, srv()); if (pp) for (const b of r.j.birds || []) { if (!b.a || met.has(b.u)) continue; const q = posAt(b, srv()); if (q && km(pp, q) < 3) { met.add(b.u); ghEvent('Met', b.u, '#6ee7b7'); } } }
+        if (!lite) { birdsIn = true; birds = r.j.birds || []; for (const b of birds) { if (b.r) roles.set(b.u, b.r); else roles.delete(b.u); } }
+        if ('role' in r.j) { const mn = myName(); if (mn) { if (r.j.role) roles.set(mn, r.j.role); else roles.delete(mn); } }
         const now = srv(), ids = new Set((r.j.worms || []).map(w => w.id));
         // a worm that vanished early went to another bird: a little puff where it was
         for (const [id, w] of worms) if (!ids.has(id) && w.gone > now + 800 && !w.mine && w.at) fx.push({ k: 'poof', lat: w.at[0], lng: w.at[1], t0: performance.now(), gold: w.v > 1 });
@@ -1116,7 +1117,7 @@
           if (me.arrive <= now || me.b1 == null) { let b0 = me.b1 != null ? me.b1 : NaN; if (!isFinite(b0)) try { b0 = parseFloat(localStorage.getItem('pp_hunt_brg')); } catch (e) {} flyDir(isFinite(b0) ? b0 : Math.random() * 6.2832); }
           if (!zoomIn) { const v0 = world.pointOfView(); zoomIn = { la: v0.lat, lo: v0.lng, a: v0.altitude, t0: performance.now() }; } }
       }
-      pollT = setTimeout(() => poll(), 2000);
+      pollT = setTimeout(() => poll(), HUB.on && HUB.named ? 6000 : 2000);
     }
     function setBal(n) { const el = $('huntN'); if (balance != null && n > balance) { const wb = $('ghWormBox'); if (wb) { wb.classList.remove('bump'); void wb.offsetWidth; wb.classList.add('bump'); } el.parentElement.classList.remove('bump'); void el.offsetWidth; el.parentElement.classList.add('bump'); } balance = n; el.textContent = n; }
 
@@ -1287,7 +1288,49 @@
       for (const d of j.b) if (d[7]) { if (d[8]) roles.set(d[7], d[8]); else if (d[7] !== myName()) roles.delete(d[7]); } }).catch(() => {});
     // (a bird can be paused on someone else's phone at any moment: the dots are fetched every 8 s and a moving one is only
     // carried on for up to 8 s past the latest news of it, so a stopped bird's dot doesn't keep drifting away)
-    loadMine(); loadDots(); setInterval(() => { if (!document.hidden) loadDots(); }, 8000); setInterval(() => { if (!document.hidden && !on) loadMine(); }, 30000);
+    // ── the live hub (2026-11-26): one WebSocket to the server's HuntHub, which pushes every bird change (turns,
+    // landings, leaving, drowning) and worms coming up / being caught the moment they happen. While it's connected the
+    // globe stops polling /hunt/dots and the game's /hunt/state check becomes a light one every 6 s that skips reading
+    // everyone; if it drops, both go back to polling until it reconnects. ──
+    const HUB = { ws: null, on: false, named: false, birds: new Map(), idx: new Map(), n: 0, retry: 0 };
+    function hubConnect() {
+      if (HUB.ws) return; let ws; try { ws = new WebSocket(API.replace(/^http/, 'ws') + '/hunt/ws'); } catch (e) { return; }
+      HUB.ws = ws;
+      ws.onopen = () => { HUB.retry = 0; if (tok()) ws.send(JSON.stringify({ t: 'auth', token: tok() })); hubPos(); };
+      ws.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch (er) { return; } hubMsg(m); };
+      ws.onclose = () => { if (HUB.ws === ws) { HUB.ws = null; HUB.on = false; HUB.named = false; setTimeout(hubConnect, Math.min(30000, 1000 * 2 ** HUB.retry++)); } };
+      ws.onerror = () => {};
+    }
+    function hubPos() { const w = HUB.ws; if (!w || w.readyState !== 1) return; const q = on && me ? posAt(me, srv()) : null; try { w.send(JSON.stringify({ t: 'pos', game: !!(on && q), la: q ? q[0] : null, lo: q ? q[1] : null })); } catch (e) {} }
+    function hubMsg(m) {
+      if (m.now) { dotsOff = m.now - Date.now(); dotsAt = m.now; }
+      if (m.t === 'snap') { HUB.birds = new Map(m.b.map(b => [b.k, b])); HUB.on = true; HUB.named = !!m.named; hubDots(); if (on) hubBirds(); return; }
+      if (m.t === 'b') { HUB.birds.set(m.b.k, m.b); hubDots(); if (on) hubBirds(); return; }
+      if (!on || !HUB.named) return;
+      if (m.t === 'w+' && m.w && me) { const q = posAt(me, srv()); if (q && km(q, [m.w.lat, m.w.lng]) < 25 && !worms.has(m.w.id)) worms.set(m.w.id, { ...m.w, seen: performance.now() }); return; }
+      if (m.t === 'w-') { const w = worms.get(m.id); if (!w) return; if (!w.mine && m.by !== myName() && w.at) fx.push({ k: 'poof', lat: w.at[0], lng: w.at[1], t0: performance.now(), gold: w.v > 1 }); worms.delete(m.id); }
+    }
+    // the globe's birds from the hub (same shape as /hunt/dots gives)
+    function hubDots() {
+      const now = Date.now() + dotsOff; dotsAt = now;
+      dots = [...HUB.birds.values()].map(b => { let i = HUB.idx.get(b.k); if (i == null) HUB.idx.set(b.k, i = HUB.n++);
+        if (b.u) { if (b.r) roles.set(b.u, b.r); else if (b.u !== myName()) roles.delete(b.u); }
+        return { i, from: [b.la, b.lo], to: [b.la, b.lo], b0: b.b0, b1: b.b1, depart: b.dep, arrive: b.arr, col: parseCol(b.col), u: b.u || null, wet: b.wet > now, act: b.seen > now - 45000 }; });
+    }
+    // the game's nearby birds from the hub (same shape as /hunt/state gives): within 100 km, nearest 40
+    function hubBirds() {
+      if (!HUB.named || !me) return; const now = srv(), pp = posAt(me, now), mn = myName(); if (!pp) return;
+      const list = [];
+      for (const b of HUB.birds.values()) { if (!b.u || b.u === mn) continue; const f = { from: [b.la, b.lo], to: [b.la, b.lo], b0: b.b0, b1: b.b1, depart: b.dep, arrive: b.arr }, q = posAt(f, now); if (!q) continue;
+        const d = km(pp, q); if (d < 100) list.push({ d, b: { u: b.u, ...(b.seen > now - 45000 ? { a: 1 } : {}), ...(b.wet > now ? { w: 1 } : {}), ...(b.r ? { r: b.r } : {}), ...f } }); }
+      birds = list.sort((x, y) => x.d - y.d).slice(0, 40).map(x => x.b); birdsIn = true;
+      for (const b of birds) { if (b.r) roles.set(b.u, b.r); else roles.delete(b.u);
+        if (b.a && !met.has(b.u)) { const q = posAt(b, now); if (q && km(pp, q) < 3) { met.add(b.u); ghEvent('Met', b.u, '#6ee7b7'); } } }
+    }
+    // timestamps age (playing = seen in the last 45 s, water clocks run out): refresh now and then
+    setInterval(() => { if (HUB.on) { hubDots(); if (on) hubBirds(); } }, 3000);
+    hubConnect();
+    loadMine(); loadDots(); setInterval(() => { if (!document.hidden && !HUB.on) loadDots(); }, 8000); setInterval(() => { if (!document.hidden && !on) loadMine(); }, 30000);
     // a stopped bird sleeps in a little woven nest: twigs all round the rim and down into the bowl, with the rim's shadow
     // falling into it for depth. The bird is curled up in its own colour: round and fluffed, one wing folded over its
     // back, head turned and tucked onto its shoulder, breathing slowly, with little z's drifting up.

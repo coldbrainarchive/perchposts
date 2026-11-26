@@ -72,6 +72,7 @@ async function sinkWet(env, now) {
     if (!claim.meta || !claim.meta.changes) continue;
     const lost = await huntWipeWorms(env, b.username, now);
     await env.DB.prepare(`UPDATE hunt_birds SET drowned_at = ?, drowned_lost = ? WHERE username = ?`).bind(now, lost, b.username).run();
+    await huntHub(env, null, { t: "b", u: b.username, la: hl, lo: hg, dep: now, arr: now, wet: 0 });
     await env.DB.prepare(`INSERT INTO system_notifications (id, user_id, message) VALUES (?, ?, ?)`).bind(crypto.randomUUID(), b.username,
       JSON.stringify({ text: `Your bird ran out of stamina in the water and drowned. It washed up at home${lost ? ` and lost all ${lost} worm${lost === 1 ? "" : "s"}` : ""}.`, icon: "GLOBE" })).run();
   }
@@ -2418,6 +2419,11 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   // ── /hunt/dots ── every bird on the globe, for the birds and dots on the globe outside the game. Signed-out visitors
   // get colours only (no names, so nobody can see roughly where a player lives); signed-in players also get each bird's
   // name and role, so the globe can draw everyone's own logo bird asleep in its nest. Cached at the edge for 5 s.
+  // the live connection (see HuntHub at the bottom of this file)
+  if (url.pathname === "/hunt/ws" && request.method === "GET") {
+    if (!env.HUNT) return json({ error: "Not available" }, 404);
+    return env.HUNT.get(env.HUNT.idFromName("world")).fetch(new Request("https://hub/ws", request));
+  }
   if (url.pathname === "/hunt/dots" && request.method === "GET") {
     const named = !!(username && !isBot), key = new Request(`https://perchposts-hunt.cache/dots${named ? "-n" : ""}`);
     ctx.waitUntil(sinkWet(env, Date.now()).catch(() => {}));
@@ -2494,11 +2500,11 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       await sinkWet(env, now);   // anyone (you too) whose time in the water ran out while away
       let me = await env.DB.prepare(`SELECT * FROM hunt_birds WHERE username = ?`).bind(username).first();
       // playing again: a bird that was left in the water is yours to save now (the page keeps its stamina)
-      if (me && me.wet_until != null && (url.pathname === "/hunt/state" || url.pathname === "/hunt/fly")) { await env.DB.prepare(`UPDATE hunt_birds SET wet_until = NULL WHERE username = ?`).bind(username).run(); me.wet_until = null; }
+      if (me && me.wet_until != null && (url.pathname === "/hunt/state" || url.pathname === "/hunt/fly")) { await env.DB.prepare(`UPDATE hunt_birds SET wet_until = NULL WHERE username = ?`).bind(username).run(); me.wet_until = null; huntHub(env, ctx, { t: "b", u: username, wet: 0 }); }
       // in the water and right by it (the coarse land map, with a 4 km margin for the page's sharper one)
       const nearWater = p => { const ring = d => [0, 1, 2, 3, 4, 5].map(i => [p[0] + d * Math.cos(i * Math.PI / 3) / 111.2, p[1] + d * Math.sin(i * Math.PI / 3) / (111.2 * Math.cos(p[0] * R))]);
         return !(isLand(p[0], p[1]) && ring(4).every(q => isLand(q[0], q[1]))); };
-      if (me && colIn && me.col !== colIn) { await env.DB.prepare(`UPDATE hunt_birds SET col = ? WHERE username = ?`).bind(colIn, username).run(); me.col = colIn; }
+      if (me && colIn && me.col !== colIn) { await env.DB.prepare(`UPDATE hunt_birds SET col = ? WHERE username = ?`).bind(colIn, username).run(); me.col = colIn; if (!isAdmin) huntHub(env, ctx, { t: "b", u: username, col: colIn }); }
       // the game's bars: how far you've flown (stored total + the flight you're on), where home is, and the time zone and
       // country under your bird (the nearest time-zone city, so it can be off right next to a border)
       const segKm = b => b && b.brg0 != null ? SPEED * Math.max(0, Math.min(now, b.arrive_at) - b.depart_at) / 1000 : 0;
@@ -2533,6 +2539,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
           await env.DB.prepare(`INSERT OR REPLACE INTO hunt_birds (username, from_lat, from_lng, to_lat, to_lng, depart_at, arrive_at, seen_at, spawn_at, brg0, brg1, col, flown, home_lat, home_lng, fed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, 0, ?, ?, ?)`)
             .bind(username, la, lo, la, lo, now, now, now, now, colIn, la, lo, now).run();
           me = { username, from_lat: la, from_lng: lo, to_lat: la, to_lng: lo, depart_at: now, arrive_at: now, seen_at: now, spawn_at: now, flown: 0, home_lat: la, home_lng: lo, fed_at: now };
+          { const rl = await accountRole(username); huntHub(env, ctx, { t: "b", ...huntRec({ ...me, col: colIn, role: rl }) }); }
         }
         const p = posAt(me, now), meal = await dinner();
         // occasionally a worm pops up near you: about one every ~90 s of hunting at night, ~3 min by day, a bit more
@@ -2560,18 +2567,22 @@ async function handleRequest(request, env, ctx, corsHeaders) {
             for (let k = 0; k < 10 && !spot; k++) { const q = ring(base, Math.random() * 2 * Math.PI, (r0 + Math.random() * (r1 - r0)) / 6371);
               if (Math.abs(q[0]) < 84 && isLand(q[0], q[1]) && [0, 1, 2, 3, 4, 5].every(i => { const e = ring(q, i * Math.PI / 3, 0.5 / 6371); return isLand(e[0], e[1]); })) spot = q; }
             const gold = Math.random() < 0.06, w = spot && { id: crypto.randomUUID(), lat: spot[0], lng: spot[1], value: gold ? 5 : 1, born_at: now, gone_at: now + (gold ? GOLD_LIFE : LIFE) };
-            if (w) { await env.DB.prepare(`INSERT INTO hunt_worms (id, lat, lng, value, born_at, gone_at) VALUES (?, ?, ?, ?, ?, ?)`).bind(w.id, w.lat, w.lng, w.value, w.born_at, w.gone_at).run(); live.push(w); spawned = w.id; }
+            if (w) { await env.DB.prepare(`INSERT INTO hunt_worms (id, lat, lng, value, born_at, gone_at) VALUES (?, ?, ?, ?, ?, ?)`).bind(w.id, w.lat, w.lng, w.value, w.born_at, w.gone_at).run(); live.push(w); spawned = w.id;
+              huntHub(env, ctx, { t: "w+", w: { id: w.id, lat: w.lat, lng: w.lng, v: w.value, born: w.born_at, gone: w.gone_at } }); }
           }
         }
         await env.DB.prepare(`UPDATE hunt_birds SET seen_at = ?, spawn_at = ? WHERE username = ?`).bind(now, now, username).run();
-        const { results: birds = [] } = await env.DB.prepare(`SELECT h.*, (SELECT m.role FROM mod_users m WHERE LOWER(m.username) = LOWER(h.username) AND m.deleted_at IS NULL LIMIT 1) AS role FROM hunt_birds h WHERE h.username != ? LIMIT 5000`).bind(username).all();
+        huntHub(env, ctx, { t: "b", u: username, seen: now, seenOnly: true });
+        // with the live connection, the page gets everyone from the hub: skip reading every bird (the costly part)
+        const lite = !!body.lite;
+        const { results: birds = [] } = lite ? { results: [] } : await env.DB.prepare(`SELECT h.*, (SELECT m.role FROM mod_users m WHERE LOWER(m.username) = LOWER(h.username) AND m.deleted_at IS NULL LIMIT 1) AS role FROM hunt_birds h WHERE h.username != ? LIMIT 5000`).bind(username).all();
         if (Math.random() < 0.02) ctx.waitUntil(env.DB.prepare(`DELETE FROM hunt_worms WHERE gone_at < ?`).bind(now - 3600e3).run().catch(() => {}));
         return json({ now, me: flight(me), st: stats(), balance: await wormBalance(username), ...(meal ? { meal } : {}),
           // everyone within 100 km, with names (players in the game see who's who): flying now ("a": active in the
           // last 45 s) or asleep in their nests; nearest first
           birds: birds.map(b => ({ b, d: km(p, posAt(b, now)) })).filter(x => x.d < 100).sort((x, y) => x.d - y.d).slice(0, 40)
             .map(({ b }) => ({ u: b.username, ...(b.seen_at > now - 45000 ? { a: 1 } : {}), ...(b.wet_until != null && b.wet_until > now ? { w: 1 } : {}), ...(b.role === 'admin' || b.role === 'mod' ? { r: b.role } : {}), ...flight(b) })),
-          role: await accountRole(username),
+          ...(lite ? {} : { role: await accountRole(username) }),
           worms: live.filter(w => km(p, [w.lat, w.lng]) < NEAR).map(w => ({ id: w.id, lat: w.lat, lng: w.lng, v: w.value, born: w.born_at, gone: w.gone_at })), spawned });
       }
       // your bird when you're not playing: where it is (or, before your first flight, where it will start)
@@ -2600,6 +2611,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
             await env.DB.prepare(`UPDATE hunt_birds SET wet_note_at = ? WHERE username = ?`).bind(now, username).run();
             await env.DB.prepare(`INSERT INTO system_notifications (id, user_id, message) VALUES (?, ?, ?)`).bind(crypto.randomUUID(), username,
               JSON.stringify({ text: `Your bird is still in the water, treading water. It has about ${mins} min of stamina left. Fly it to land in Take flight, or it drowns and washes up at home with no worms.`, icon: "GLOBE" })).run(); } }
+        huntHub(env, ctx, { t: "b", u: username, la: p[0], lo: p[1], b0: h, b1: h, dep: now, arr: now, seen: body.leaving ? now - 60000 : now, wet: wet || 0 });
         return json({ now, me: { from: p, to: p, b0: h, b1: h, depart: now, arrive: now }, st: stats(), ...(wet ? { wet } : {}) });
       }
       if (url.pathname === "/hunt/fly") {
@@ -2609,6 +2621,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         const f = fTurn({ from: p, to: p, b0: h == null ? brg : h, b1: brg, depart: at }); f.arrive = at + Math.round(flyFor(f._T));
         await env.DB.prepare(`UPDATE hunt_birds SET from_lat = ?, from_lng = ?, to_lat = ?, to_lng = ?, brg0 = ?, brg1 = ?, depart_at = ?, arrive_at = ?, seen_at = ?, flown = COALESCE(flown, 0) + ? WHERE username = ?`)
           .bind(p[0], p[1], p[0], p[1], f.b0, f.b1, at, f.arrive, now, segKm(me), username).run();
+        huntHub(env, ctx, { t: "b", u: username, la: p[0], lo: p[1], b0: f.b0, b1: f.b1, dep: at, arr: f.arrive, seen: now, wet: 0 });
         return json({ now, me: { from: p, to: p, b0: f.b0, b1: f.b1, depart: at, arrive: f.arrive } });
       }
       if (url.pathname === "/hunt/drown") {
@@ -2622,6 +2635,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
           .bind(h[0], h[1], h[0], h[1], b, b, now, now, segKm(me), username).run();
         me.flown = (me.flown || 0) + segKm(me); me.from_lat = me.to_lat = h[0]; me.from_lng = me.to_lng = h[1]; me.brg0 = me.brg1 = b; me.depart_at = me.arrive_at = now;
         const lost = await huntWipeWorms(env, username, now);   // washes up with no worms (it only drowns with none, but just in case)
+        huntHub(env, ctx, { t: "b", u: username, la: h[0], lo: h[1], b0: b, b1: b, dep: now, arr: now, wet: 0 });
         return json({ now, me: flight(me), st: stats(), lost, balance: 0 });
       }
       if (url.pathname === "/hunt/eat") {
@@ -2649,6 +2663,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         if (!up.meta || !up.meta.changes) return json({ taken: true }, 409);
         const iso = new Date(now).toISOString(), ins = env.DB.prepare(`INSERT INTO worms (id, giver, receiver, post_id, comment_id, created_at) VALUES (?, '__hunt__', ?, NULL, NULL, ?)`);
         await env.DB.batch(Array.from({ length: w.value }, () => ins.bind(crypto.randomUUID(), username, iso)));
+        huntHub(env, ctx, { t: "w-", id: w.id, by: username });
         return json({ ok: true, value: w.value, balance: await wormBalance(username) });
       }
       return json({ error: "Not found" }, 404);
@@ -4423,4 +4438,95 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   }
 
   return new Response("OK", { headers: corsHeaders });
+}
+
+// ── Take flight: the live hub ─────────────────────────────────────────────────
+// One Durable Object ("world") that every globe and game page keeps a WebSocket open to. It holds every bird in memory
+// (loaded from hunt_birds when it wakes) and pushes each change the moment it happens: a turn, a landing, leaving,
+// drowning, a worm coming up or being caught. The game's rules and the database stay in the normal /hunt/* routes,
+// which tell the hub after each change (huntHub below), so nothing here decides anything. Phones that can't connect
+// fall back to polling /hunt/dots and the full /hunt/state like before.
+// Signed-out viewers get colours and paths only, keyed by an opaque id (like /hunt/dots); a page that sends a valid
+// login token gets names and roles. Uses hibernation, so idle connections cost nothing.
+const HUNT_ROLE_SQL = `(SELECT m.role FROM mod_users m WHERE LOWER(m.username) = LOWER(h.username) AND m.deleted_at IS NULL LIMIT 1)`;
+const huntRec = b => ({ u: b.username, la: b.from_lat, lo: b.from_lng, b0: b.brg0 ?? null, b1: b.brg1 ?? null, dep: b.depart_at, arr: b.arrive_at,
+  col: b.role === "admin" ? "155,184,185" : (b.col || null), r: b.role === "admin" || b.role === "mod" ? b.role : null, wet: b.wet_until || 0, seen: b.seen_at || 0 });
+// tell the hub about a change (after the database has it); never holds up the request
+function huntHub(env, ctx, ev) {
+  if (!env.HUNT) return;
+  const p = env.HUNT.get(env.HUNT.idFromName("world")).fetch("https://hub/event", { method: "POST", body: JSON.stringify(ev) }).catch(() => {});
+  if (ctx) ctx.waitUntil(p);
+  return p;
+}
+export class HuntHub {
+  constructor(state, env) { this.state = state; this.env = env; this.birds = null; this.keys = new Map(); }
+  async load() {
+    if (this.birds) return;
+    const { results = [] } = await this.env.DB.prepare(`SELECT h.username, h.from_lat, h.from_lng, h.brg0, h.brg1, h.depart_at, h.arrive_at, h.col, h.wet_until, h.seen_at, ${HUNT_ROLE_SQL} AS role FROM hunt_birds h LIMIT 5000`).all();
+    const m = new Map(); for (const b of results) m.set(b.username, huntRec(b)); this.birds = m;
+  }
+  // signed-out viewers see an id that can't be turned back into a name
+  async key(u) {
+    let k = this.keys.get(u); if (k) return k;
+    const kk = await crypto.subtle.importKey("raw", new TextEncoder().encode("hunt-key:" + (this.env.JWT_SECRET || "")), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const s = new Uint8Array(await crypto.subtle.sign("HMAC", kk, new TextEncoder().encode(u)));
+    k = "k" + Array.from(s.slice(0, 6), x => x.toString(16).padStart(2, "0")).join(""); this.keys.set(u, k); return k;
+  }
+  async out(b, named) {
+    const r5 = x => x == null ? null : Math.round(x * 1e5) / 1e5;
+    const o = { k: named ? b.u : await this.key(b.u), la: r5(b.la), lo: r5(b.lo), b0: b.b0, b1: b.b1, dep: b.dep, arr: b.arr, col: b.col, wet: b.wet, seen: b.seen };
+    if (named) { o.u = b.u; if (b.r) o.r = b.r; }
+    return o;
+  }
+  async snap(named) { await this.load(); const b = []; for (const x of this.birds.values()) b.push(await this.out(x, named)); return JSON.stringify({ t: "snap", now: Date.now(), named: !!named, b }); }
+  async fetch(req) {
+    const url = new URL(req.url);
+    if (url.pathname === "/ws") {
+      if (req.headers.get("Upgrade") !== "websocket") return new Response("Expected a WebSocket", { status: 426 });
+      const pair = new WebSocketPair();
+      this.state.acceptWebSocket(pair[1]);
+      pair[1].serializeAttachment({ u: null, game: false, la: null, lo: null });
+      pair[1].send(await this.snap(false));
+      return new Response(null, { status: 101, webSocket: pair[0] });
+    }
+    if (url.pathname === "/event" && req.method === "POST") { await this.apply(await req.json().catch(() => ({}))); return new Response("ok"); }
+    return new Response("Not found", { status: 404 });
+  }
+  async webSocketMessage(ws, msg) {
+    let m; try { m = JSON.parse(msg); } catch (e) { return; }
+    const att = ws.deserializeAttachment() || {};
+    if (m.t === "auth" && typeof m.token === "string") {   // a signed-in page: check the token like every other route does
+      const user = await verifyJWT(m.token, this.env.JWT_SECRET).catch(() => null);
+      if (!user || !user.sub) return;
+      const acc = await this.env.DB.prepare(`SELECT username, deleted_at, password_changed_at FROM mod_users WHERE id = ?`).bind(user.sub).first();
+      if (!acc || acc.deleted_at || (acc.password_changed_at && (!user.iat || user.iat * 1000 < Date.parse(acc.password_changed_at)))) return;
+      att.u = acc.username || user.username; ws.serializeAttachment(att); ws.send(await this.snap(true)); return;
+    }
+    if (m.t === "pos") { att.game = !!m.game; att.la = Number.isFinite(+m.la) ? +m.la : null; att.lo = Number.isFinite(+m.lo) ? +m.lo : null; ws.serializeAttachment(att); return; }
+    if (m.t === "ping") ws.send(JSON.stringify({ t: "pong", now: Date.now() }));
+  }
+  webSocketClose(ws, code) { try { ws.close(code, "bye"); } catch (e) {} }
+  webSocketError() {}
+  async apply(ev) {
+    await this.load();
+    const socks = this.state.getWebSockets(), now = Date.now();
+    const near = (att, la, lo, d) => att.game && att.la != null && Math.abs(att.la - la) < d / 111 && Math.abs(att.lo - lo) < d / (111 * Math.cos(la * Math.PI / 180) + 1e-6);
+    if (ev.t === "b" && ev.u) {   // a bird changed: merge it in and send it on
+      const cur = this.birds.get(ev.u) || { u: ev.u, la: 0, lo: 0, b0: null, b1: null, dep: now, arr: now, col: null, r: null, wet: 0, seen: 0 };
+      if (ev.seenOnly) { const was = cur.seen; cur.seen = ev.seen; this.birds.set(ev.u, cur); if (now - was < 20000) return; }   // "still playing": only told every 20 s
+      else { for (const k of ["la", "lo", "b0", "b1", "dep", "arr", "col", "r", "wet", "seen"]) if (k in ev) cur[k] = ev[k]; this.birds.set(ev.u, cur); }
+      const named = JSON.stringify({ t: "b", now, b: await this.out(cur, true) }), anon = JSON.stringify({ t: "b", now, b: await this.out(cur, false) });
+      for (const ws of socks) { try { ws.send((ws.deserializeAttachment() || {}).u ? named : anon); } catch (e) {} }
+      return;
+    }
+    if (ev.t === "w+" && ev.w) {   // a worm came up: players in the game within 30 km
+      const s = JSON.stringify({ t: "w+", now, w: ev.w });
+      for (const ws of socks) { const a = ws.deserializeAttachment() || {}; if (a.u && near(a, ev.w.lat, ev.w.lng, 30)) try { ws.send(s); } catch (e) {} }
+      return;
+    }
+    if (ev.t === "w-" && ev.id) {   // a worm was caught
+      const s = JSON.stringify({ t: "w-", now, id: ev.id, by: ev.by || null });
+      for (const ws of socks) { const a = ws.deserializeAttachment() || {}; if (a.u && a.game) try { ws.send(s); } catch (e) {} }
+    }
+  }
 }

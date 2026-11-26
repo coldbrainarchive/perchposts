@@ -26,3 +26,12 @@ TURNSTILE_HOSTNAMES = "perchposts.com"
 [[services]]
 binding = "MEDIA_SVC"
 service = "perchposts-media"
+
+# Take flight's live hub: one Durable Object every globe/game page keeps a WebSocket open to (HuntHub in worker.js)
+[[durable_objects.bindings]]
+name = "HUNT"
+class_name = "HuntHub"
+
+[[migrations]]
+tag = "hunt-hub-v1"
+new_sqlite_classes = ["HuntHub"]
