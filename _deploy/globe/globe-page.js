@@ -803,18 +803,26 @@
     // how far the bird is leaning into a turn (−1 left … 1 right): it tips in as the turn starts and levels out after
     const bankAt = (f, t) => { if (!f || f.b0 == null || f.b1 == null) return 0; fTurn(f); const u = (t - f.depart) / 1000, T = f._T;
       return T < 0.05 || u < 0 || u > T ? 0 : f._s * Math.min(1, T * TURN / 0.9); };
-    // each bird's wings: flapping keeps its own rhythm; when a turn starts it finishes the beat it's in (until the wings
-    // are fully out), then holds them out and leans into the turn smoothly, and picks the beat back up after
+    // each bird's wings, made to look like a real bird: nothing switches on or off. The flapping has a strength (1 = full
+    // beats, 0 = gliding) that eases up and down, so on a turn the beats fade out and slow while the wings float out
+    // to a glide, and the lean grows as the flapping fades (a spring, so it tips in and levels out softly). Flying
+    // straight it flap-glides like small birds do: a few beats, then a short glide.
     const poses = new Map();
     function pose(id, moving, want, dt) {
-      let P = poses.get(id); if (!P) { P = { ph: Math.random() * 6.283, hold: false, bk: 0 }; poses.set(id, P); }
-      const rate = moving ? 13 : 4, top = Math.PI / 2, turning = Math.abs(want) > 0.02;
-      if (!P.hold) { const before = P.ph; P.ph += dt * rate;
-        if (turning && Math.floor((before - top) / 6.2832) !== Math.floor((P.ph - top) / 6.2832)) { P.ph = top + 6.2832 * Math.floor((P.ph - top) / 6.2832); P.hold = true; } }
-      else if (!turning && Math.abs(P.bk) < 0.15) P.hold = false;
-      P.bk += ((P.hold && turning ? want : 0) - P.bk) * (1 - Math.exp(-dt / 0.14));
-      const f = Math.sin(P.ph), span = moving ? 0.55 + 0.45 * (0.5 + 0.5 * f) : 0.9 + 0.1 * (0.5 + 0.5 * f);
-      return { span: P.hold ? (moving ? 1 : 1) : span, bk: P.bk };
+      let P = poses.get(id); if (!P) { P = { ph: Math.random() * 6.283, A: 1, bk: 0, bv: 0, beats: 0, nb: 4 + Math.random() * 4, glide: 0 }; poses.set(id, P); }
+      const turning = Math.abs(want) > 0.02;
+      if (P.glide > 0) P.glide -= dt;
+      const tA = turning || P.glide > 0 ? 0 : 1;
+      P.A += (tA - P.A) * (1 - Math.exp(-dt / (tA < P.A ? 0.11 : 0.2)));
+      const before = P.ph; P.ph += dt * (moving ? 13 : 4) * (0.45 + 0.55 * P.A);
+      if (Math.floor(before / 6.2832) !== Math.floor(P.ph / 6.2832)) { P.beats++;
+        if (moving && !turning && P.beats >= P.nb) { P.beats = 0; P.nb = 4 + Math.random() * 4; P.glide = 0.45 + Math.random() * 0.5; } }
+      if (turning) P.beats = 0;
+      // the lean follows a soft spring toward (turn amount x how far the flapping has faded)
+      const tb = turning ? want * (1 - P.A) : 0, w = 10;
+      for (let left = dt; left > 1e-4; left -= 0.01) { const h = Math.min(0.01, left); P.bv += ((tb - P.bk) * w * w - 2 * w * P.bv) * h; P.bk += P.bv * h; }
+      const f = 0.5 + 0.5 * Math.sin(P.ph), flapSpan = moving ? 0.55 + 0.45 * f : 0.9 + 0.1 * f;
+      return { span: 0.97 + (flapSpan - 0.97) * P.A, bk: Math.max(-1, Math.min(1, P.bk)), lift: P.A * (f - 0.5) };
     }
     // Load ahead: map tiles a few km in front of the bird (and either side) are fetched and decoded in the background
     // before they scroll on screen, so the map doesn't hitch decoding them mid-frame. Kept to the last 300.
@@ -959,7 +967,7 @@
         c.quadraticCurveTo(0, 20 * qR, 4, 4.5 + roll);
         c.quadraticCurveTo(10, 4 + roll, 12, roll); c.closePath(); };
       c.save(); c.globalAlpha = alpha;
-      const so = (8 - 7 * sw) * s;
+      const so = (8 - 7 * sw) * s * (1 + 0.12 * (ps.lift || 0));   // the shadow bobs a little with each beat
       c.save(); c.translate(x + so * 0.4, y + so); c.rotate(a); c.scale(k, k); c.fillStyle = 'rgba(0,0,0,.22)'; shape(); c.fill(); c.restore();
       c.save(); c.translate(x, y); c.rotate(a); c.scale(k, k);
       shape(); c.fillStyle = cl; c.fill();
