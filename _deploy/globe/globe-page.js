@@ -1316,8 +1316,8 @@
       c.fillStyle = css(lift(cl, 0.8)); c.fill(); c.lineJoin = 'round'; c.lineWidth = 0.7; c.strokeStyle = 'rgba(8,10,14,.3)'; c.stroke(); c.restore();
       c.beginPath(); c.moveTo(5.6, 1.4); c.bezierCurveTo(5.6, -6.6, -3, -6.6, -7.5, -2.2); c.quadraticCurveTo(-11.4, 0.8, -7.5, 4.4); c.bezierCurveTo(-3, 9.4, 5.6, 9.4, 5.6, 1.4); c.fillStyle = G(cl, -1.6, 1.4, 7.6, 1.18, 0.82); c.fill();   // body: round at the front, a longer back running into the tail
       });
-      if (lg) { const hs = adm ? 22.5 : 19; c.save(); c.translate(adm ? 4.4 : 4.6, adm ? -8.2 : -4.4); /* the admin picture has its top hat above the head, so it sits higher to put the face where everyone else's is */ c.scale(-1, 1); c.rotate(-0.3); c.drawImage(lg, -hs / 2, -hs / 2, hs, hs); c.restore(); }
-      else { const hc = lift(cl, 1.4); c.beginPath(); c.arc(4.4, -3.6, 5.6, 0, 7); c.fillStyle = G(hc, 4.4, -3.6, 5.6, 1.12, 0.92); c.fill(); }   // head
+      if (lg) { const hs = adm ? 20.7 : 17.5;   /* 8% smaller, 2026-11-26 */ c.save(); c.translate(adm ? 4.4 : 4.6, adm ? -8.2 : -4.4); /* the admin picture has its top hat above the head, so it sits higher to put the face where everyone else's is */ c.scale(-1, 1); c.rotate(-0.3); c.drawImage(lg, -hs / 2, -hs / 2, hs, hs); c.restore(); }
+      else { const hc = lift(cl, 1.4); c.beginPath(); c.arc(4.4, -3.6, 5.15, 0, 7); c.fillStyle = G(hc, 4.4, -3.6, 5.15, 1.12, 0.92); c.fill(); }   // head
       small(() => { c.beginPath(); c.moveTo(-8.4, 2.2); c.quadraticCurveTo(-3.2, 10, 5.4, 3.6); c.quadraticCurveTo(1, 1.6, -1.8, 1.9); c.quadraticCurveTo(-5.8, 1.7, -8.4, 2.2); c.fillStyle = css(lift(cl, 0.86)); c.fill(); });   // wing
       c.restore();
       if (zs) { c.save(); c.fillStyle = '#e2e8f0'; c.shadowColor = 'rgba(0,0,0,.85)'; c.shadowBlur = 3;
