@@ -1058,10 +1058,10 @@
       c.beginPath(); c.ellipse(0, 0, 15, 12.5, 0, 0, 7); c.fillStyle = g; c.fill();                                                             // rim
       // the bowl: the same woven twigs, darker the deeper they go
       c.save(); c.beginPath(); c.ellipse(0, 0.6, 10.2, 8.2, 0, 0, 7); c.clip();
-      g = c.createRadialGradient(0, 1.5, 1, 0, 0.6, 10.5); g.addColorStop(0, '#4a2e17'); g.addColorStop(1, '#6b4526'); c.fillStyle = g; c.fill();
+      g = c.createRadialGradient(0, 1.5, 1, 0, 0.6, 10.5); g.addColorStop(0, '#6f4a28'); g.addColorStop(1, '#8a5f37'); c.fillStyle = g; c.fill();
       for (let i = 0; i < 26; i++) { const r = 2 + (i % 5) * 1.8, a0 = i * 0.73 + (i % 4) * 0.5, l = 0.7 + (i % 3) * 0.3;
-        c.beginPath(); c.ellipse(0, 0.8, r, r * 0.8, 0, a0, a0 + l); c.strokeStyle = i % 2 ? 'rgba(140,96,58,.55)' : 'rgba(96,62,34,.6)'; c.lineWidth = 0.9 + (i % 3) * 0.25; c.stroke(); }
-      g = c.createLinearGradient(0, -8, 0, 4); g.addColorStop(0, 'rgba(0,0,0,.5)'); g.addColorStop(1, 'rgba(0,0,0,0)');                     // the rim's shadow inside
+        c.beginPath(); c.ellipse(0, 0.8, r, r * 0.8, 0, a0, a0 + l); c.strokeStyle = i % 2 ? 'rgba(170,122,78,.6)' : 'rgba(110,74,42,.55)'; c.lineWidth = 0.9 + (i % 3) * 0.25; c.stroke(); }
+      g = c.createLinearGradient(0, -8, 0, 4); g.addColorStop(0, 'rgba(0,0,0,.3)'); g.addColorStop(1, 'rgba(0,0,0,0)');                     // the rim's shadow inside
       c.fillStyle = g; c.fillRect(-11, -9, 22, 14); c.restore();
       for (let i = 0; i < 22; i++) { const a0 = i * 0.2856 + (i % 3) * 0.4, r = 11.2 + (i % 4) * 0.9, l = 0.5 + (i % 5) * 0.08;          // rim twigs
         c.beginPath(); c.ellipse(0, 0, r, r * 0.83, 0, a0, a0 + l); c.strokeStyle = i % 2 ? '#b0814f' : '#8f6238'; c.lineWidth = 1.1 + (i % 3) * 0.35; c.stroke(); }
