@@ -860,7 +860,7 @@
         try { const b = tk && tk.split('.')[1]; if (b) { const pl = JSON.parse(decodeURIComponent(escape(atob(b.replace(/-/g, '+').replace(/_/g, '/'))))); myNm = pl.username || ''; } } catch (e) {}
         if (!myNm) try { myNm = localStorage.getItem('_myUsername') || ''; } catch (e) {} }
       return myNm; };
-    let birdsIn = false, on = false, me = null, birds = [], worms = new Map(), off = 0, balance = null, fx = [], target = null, raf = 0, pollT = 0, flySent = 0, flyWait = 0, corr = null, lastF = 0, frameMs = 16.7, zoomIn = null, extAt = 0, ang = -Math.PI / 2, angs = new Map(), asking = new Set(), seenTaken = new Set(), hintUntil = 0;
+    let landed = false, birdsIn = false, on = false, me = null, birds = [], worms = new Map(), off = 0, balance = null, fx = [], target = null, raf = 0, pollT = 0, flySent = 0, flyWait = 0, corr = null, lastF = 0, frameMs = 16.7, zoomIn = null, extAt = 0, ang = -Math.PI / 2, angs = new Map(), asking = new Set(), seenTaken = new Set(), hintUntil = 0;
     const srv = () => Date.now() + off;
     // Server clock: on mobile data the round trip jitters, and taking each 2-second answer as-is nudged the bird (and so
     // the whole map) a few metres back or forward every time: the 'bounce'. Now the most trustworthy recent answer (the
@@ -961,7 +961,7 @@
     const css = c => `rgb(${c[0]},${c[1]},${c[2]})`, shade = c => c[0] + c[1] + c[2] > 600 ? [150, 150, 158] : c.map(x => Math.round(x * 0.55));
 
     function enter() {
-      if (on) return; on = true; birdsIn = false; loadKit(() => {});
+      if (on) return; on = true; birdsIn = false; landed = false; loadKit(() => {});
       document.body.classList.add('hunting'); myBtn.classList.remove('in'); bar.classList.add('in');
       try { closeSheet(); focusPin(null); world.arcsData([]); world.ringsData([]); } catch (e) {}
       // the screen stays on your bird, so the map can't be dragged or pinch-zoomed during the hunt (leave with the ×)
@@ -983,11 +983,18 @@
       if (me) mine = { me: { ...me, from: posAt(me, srv()), to: posAt(me, srv()), b0: headAt(me, srv()) ?? me.b1, b1: headAt(me, srv()) ?? me.b1, depart: srv(), arrive: srv() }, home: null };
       pauseNow(); idleRaf = requestAnimationFrame(idle);
     }
+    function landNow() {
+      const t = srv(), p = posAt(me, t), h = headAt(me, t) ?? me.b1 ?? 0; landed = true;
+      setMe({ from: p, to: p, b0: h, b1: h, depart: t, arrive: t }); flySent = Date.now(); flyWait++;
+      fetch(API + '/hunt/pause', { method: 'POST', headers: { 'Content-Type': 'application/json', ...hdr() }, body: JSON.stringify({ col: kitCol() }) }).then(r => r.json())
+        .then(j => { flyWait = Math.max(0, flyWait - 1); if (j && j.me && on && landed) { setMe(j.me); if (j.st) { gSt = j.st; gStAt = j.now; } } }).catch(() => { flyWait = Math.max(0, flyWait - 1); });
+      ghEvent('Landed', ghTown || 'here', '#fcd34d');
+    }
     addEventListener('pagehide', () => { try { if (on) pauseNow(true); } catch (e) {} });
     document.addEventListener('visibilitychange', () => {
       if (!on) { if (!document.hidden) { loadMine(); loadDots(); } return; }
       if (document.hidden) pauseNow(true);
-      else if (me) { const h = headAt(me, srv()); flyDir(h != null ? h : (me.b1 ?? 0)); }
+      else if (me && !landed) { const h = headAt(me, srv()); flyDir(h != null ? h : (me.b1 ?? 0)); }
     });
     async function poll(start, at) {
       clearTimeout(pollT); if (!on) return;
@@ -1037,8 +1044,10 @@
       if (d.n > 1 || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 10 || Date.now() - d.t > 400 || !me) return;
       // tap anywhere: the bird turns and flies that way (and keeps going)
       const r = can.getBoundingClientRect(), g = groundAt(e.clientX - r.left, e.clientY - r.top, r); if (!g) return;
-      // a tap right on the bird (within 14 px on screen) has no direction to give, so it's skipped
-      const p = posAt(me, srv()), bs = sc(p[0], p[1]); if (bs && Math.hypot(e.clientX - r.left - bs.x, e.clientY - r.top - bs.y) < 14) return;
+      // a tap on your own bird lands it right where it is (wings folded, standing on the ground); tap anywhere else to
+      // take off that way
+      const p = posAt(me, srv()), bs = sc(p[0], p[1]); if (bs && Math.hypot(e.clientX - r.left - bs.x, e.clientY - r.top - bs.y) < 26) { if (!landed) landNow(); return; }
+      landed = false;
       flyDir(bearing(p, [g.lat, g.lng])); target = { lat: g.lat, lng: g.lng, t0: performance.now() };
     });
 
@@ -1346,6 +1355,8 @@
       for (const b of birds) { const q = posAt(b, now); if (!q || !front(q[0], q[1])) continue; const s = sc(q[0], q[1]); if (!s) continue;
         if (!inView(s)) { const d = p ? km(p, q) : 0; if (d < 100 && b.a) drawBirdEdge(s.x, s.y, b.u, d); continue; }
         const moving = now < b.arrive, ahead = posAt(b, now + 600), s2 = ahead && sc(ahead[0], ahead[1]);
+        if (!moving && b.a) { const ha = headAt(b, now), aa = ha != null ? ha - Math.PI / 2 : -Math.PI / 2; intoSprite('b:' + b.u, 76, 76, s.x, s.y, (x, y) => drawBird(x, y, aa, b.u, 1, 0.92, 1, { span: 0.32, bk: 0, lift: 0 }));
+          pillSprite(b.u, s.x, s.y + 20); continue; }   // playing but landed: standing on the ground
         if (!moving) { intoSprite('b:' + b.u, 76, 76, s.x, s.y, (x, y) => { drawNest(x, y, 0.8); drawSleeper(x, y, 0, col(b.u), 0.8, t, b.u.length, true, null, b.u); });
           pillSprite(b.u, s.x, s.y + 17); continue; }
         let a = angs.get(b.u) ?? -Math.PI / 2; if (moving && s2 && Math.hypot(s2.x - s.x, s2.y - s.y) > 0.5) a = ease(a, Math.atan2(s2.y - s.y, s2.x - s.x), dt, b.u); angs.set(b.u, a);
@@ -1377,7 +1388,8 @@
             let best = null, bd = 1e9; for (const w of worms.values()) { if (!w.at) continue; const d = km(p, w.at); if (d < bd) { bd = d; best = w; } }
             const ws = best && sc(best.at[0], best.at[1]);
             if (ws) { const want = Math.atan2(ws.y - s.y, ws.x - s.x); let d = want - ang; d = Math.atan2(Math.sin(d), Math.cos(d)); ang += d * 0.06; } }
-          drawBird(s.x, s.y, ang, mine, 1, 1, swoop, pose('@me', moving, bankAt(me, now), dt)); } }
+          if (landed && !moving && !swoop) drawBird(s.x, s.y, ang, mine, 1.25, 1, 1, { span: 0.32, bk: 0, lift: 0 });   // landed: wings folded, standing on the ground
+          else drawBird(s.x, s.y, ang, mine, 1, 1, swoop, pose('@me', moving, bankAt(me, now), dt)); } }
       // the screen moves with your bird (kept in the middle): aim at where it will be when the map is next drawn
       // (on entering it glides from where you were looking down to your bird at hunting height over ~1 s)
       if (p) { const tn = now + frameMs, pn = posAt(me, tn), c2 = corrNow(); let la = pn[0] + c2[0], lo = pn[1] + c2[1], al = null;
@@ -1388,7 +1400,7 @@
         world.pointOfView({ lat: la, lng: lo, altitude: al == null ? GAME_ALT : al }, 0); }
       if (pf > preAt) { preAt = pf + 400; preload(now); }
       // keep flying: a little before the far-ahead point is reached, carry on the same way
-      if (p && me.b1 != null && me.arrive - now < 12000 && performance.now() > extAt) { extAt = performance.now() + 5000; flyDir(headAt(me, now)); }
+      if (p && !landed && me.b1 != null && me.arrive - now < 12000 && performance.now() > extAt) { extAt = performance.now() + 5000; flyDir(headAt(me, now)); }
       // the line under your worm count: day or night where your bird is
       const tEl = $('huntT'); if (tEl) { const hint = Date.now() < hintUntil; if (tEl.classList.contains('on') !== hint) tEl.classList.toggle('on', hint); }
       spritesEnd();

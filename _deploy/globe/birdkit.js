@@ -735,5 +735,5 @@ function bodyCol(n) {
   v = okToRgb(L, C, h).map(x => Math.round(x * 255)); bcols.set(n, v); return v;
 }
 
-return{get,sub,tagCol,bodyCol,ready,eye};})();
+return{get,sub,tagCol,bodyCol,ready,eye,describe:n=>kitT.describe(n)};})();
 window._ppKit=_ppKit;
