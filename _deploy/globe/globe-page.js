@@ -1130,7 +1130,7 @@
       c.save(); c.translate(x, y); c.scale(-k * br, k * br);
       c.beginPath(); c.moveTo(-6.6, -1.8); c.quadraticCurveTo(-10.2, 0.6, -6.6, 2.6); c.fillStyle = css(lift(cl, 0.75)); c.fill();                // tail
       c.beginPath(); c.arc(-1.6, 1.4, 7.4, 0, 7); c.fillStyle = G(cl, -1.6, 1.4, 7.4, 1.18, 0.82); c.fill();                                    // body (a little smaller, 2026-11-26)
-      if (lg) { const hs = adm ? 22.5 : 19; c.save(); c.translate(adm ? 4.2 : 4.6, adm ? -5.2 : -4.4); c.scale(-1, 1); c.rotate(-0.3); c.drawImage(lg, -hs / 2, -hs / 2, hs, hs); c.restore(); }
+      if (lg) { const hs = adm ? 22.5 : 19; c.save(); c.translate(adm ? 4.4 : 4.6, adm ? -8.2 : -4.4); /* the admin picture has its top hat above the head, so it sits higher to put the face where everyone else's is */ c.scale(-1, 1); c.rotate(-0.3); c.drawImage(lg, -hs / 2, -hs / 2, hs, hs); c.restore(); }
       else { const hc = lift(cl, 1.4); c.beginPath(); c.arc(4.4, -3.6, 5.6, 0, 7); c.fillStyle = G(hc, 4.4, -3.6, 5.6, 1.12, 0.92); c.fill(); }   // head
       c.beginPath(); c.moveTo(-8.4, 2.2); c.quadraticCurveTo(-3.2, 10, 5.4, 3.6); c.quadraticCurveTo(1, 1.6, -1.8, 1.9); c.quadraticCurveTo(-5.8, 1.7, -8.4, 2.2); c.fillStyle = css(lift(cl, 0.86)); c.fill();   // wing
       c.restore();
