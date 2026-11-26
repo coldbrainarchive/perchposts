@@ -2540,6 +2540,17 @@ async function handleRequest(request, env, ctx, corsHeaders) {
           .bind(p[0], p[1], p[0], p[1], f.b0, f.b1, now, f.arrive, now, segKm(me), username).run();
         return json({ now, me: { from: p, to: p, b0: f.b0, b1: f.b1, depart: now, arrive: f.arrive } });
       }
+      if (url.pathname === "/hunt/eat") {
+        // your bird ran out of stamina and eats one worm from your real balance. Spent like a worm given to the game
+        // ('__hunt__', no post); the insert only happens if you still have one, so two at once can't go below zero
+        const iso = new Date(now).toISOString();
+        const r = await env.DB.prepare(`INSERT INTO worms (id, giver, receiver, post_id, comment_id, created_at)
+          SELECT ?1, ?2, '__hunt__', NULL, NULL, ?3 WHERE COALESCE((SELECT worm_start FROM mod_users WHERE username = ?2), 0)
+            + (SELECT COUNT(*) FROM worms WHERE receiver = ?2) - (SELECT COUNT(*) FROM worms WHERE giver = ?2) >= 1`).bind(crypto.randomUUID(), username, iso).run();
+        const balance = await wormBalance(username);
+        if (!r.meta || !r.meta.changes) return json({ none: true, balance }, 409);
+        return json({ ok: true, balance });
+      }
       if (url.pathname === "/hunt/catch") {
         const w = await env.DB.prepare(`SELECT * FROM hunt_worms WHERE id = ?`).bind(String(body.id || "")).first();
         if (!w) return json({ error: "No worm" }, 404);

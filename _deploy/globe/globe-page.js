@@ -890,9 +890,8 @@
     ghTop.className = 'gh gh-top'; ghBot.className = 'gh gh-bot'; ghLog.className = 'gh-log'; ghPanel.className = 'gh-panel';
     const RING = 2 * Math.PI * 19;
     ghTop.innerHTML = `<button type="button" class="gh-x" aria-label="Land (leave Take flight)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
-      <div class="gh-lv"><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="19" fill="rgba(21,23,29,.92)" stroke="rgba(255,255,255,.12)" stroke-width="4"/><circle id="ghRing" cx="22" cy="22" r="19" fill="none" stroke="#c084fc" stroke-width="4" stroke-linecap="round" stroke-dasharray="0 ${RING}" transform="rotate(-90 22 22)"/></svg><small>LV</small><b id="ghLv">1</b></div>
+      <div class="gh-lvw"><div class="gh-lv"><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="19" fill="rgba(21,23,29,.92)" stroke="rgba(255,255,255,.12)" stroke-width="4"/><circle id="ghRing" cx="22" cy="22" r="19" fill="none" stroke="#c084fc" stroke-width="4" stroke-linecap="round" stroke-dasharray="0 ${RING}" transform="rotate(-90 22 22)"/></svg><small>LV</small><b id="ghLv">1</b></div><span class="gh-xpn" id="ghXpT"><em>0</em>/100 XP</span></div>
       <div class="gh-mid"><div class="gh-r1"><span class="gh-time" id="ghTime">–</span><span class="gh-worm" id="ghWormBox">${WORM_SVG}<b id="ghWorms">–</b></span></div>
-        <div class="gh-xp"><i id="ghXp"></i></div><div class="gh-r2"><span id="ghLvT">LEVEL 1</span><span id="ghXpT">0 / 100 XP</span></div>
         <div class="gh-en"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12z" fill="currentColor"/></svg><div class="gh-enb"><i id="ghEn"></i></div><b id="ghEnT">100%</b></div></div>`;
     ghBot.innerHTML = `<div class="gh-place"><b id="ghPlace">–</b><small id="ghCountry">&nbsp;</small></div>
       <div class="gh-stat"><b id="ghFlown">0 km</b><small>FLOWN</small></div>
@@ -913,13 +912,24 @@
       setTimeout(() => { d.style.opacity = '0'; setTimeout(() => d.remove(), 650); }, 6500); }
     // towns for "where you are" (the same list the map's names come from)
     let towns = null; const loadTowns = () => { if (towns) return; towns = []; fetch('/globe/map-data.json').then(r => r.json()).then(d => { towns = [...(d.c || []), ...(d.t || [])].map(t => [t[0], +t[1], +t[2]]); }).catch(() => { towns = null; }); };
-    // ── energy (a TEST, 2026-11-26): flying uses it, worms and rest refill it. Kept on this device for now; the plan is
-    // to move it to the server and have flying spend worms from your balance (the user's decision). ──
-    const EN_MAX = 150, EN_REST = 50 / 3600e3, EN_WORM = 25;   // km of flying when full; km per ms of rest (~50 km an hour); km per worm
-    let enKm = EN_MAX, enAt = Date.now(), enTired = false;
+    // ── stamina (a TEST, 2026-11-26): flying uses it and rest refills it slowly. When it runs out mid-flight the bird
+    // eats a worm from your real worm balance (the site's currency, the user's decision) and it's full again; with no
+    // worms left it lands and can't take off until it has a worm (or has rested). The bar itself is kept on this
+    // device for now; the worm it eats is spent on the server (/hunt/eat). Starving comes later. ──
+    const EN_MAX = 150, EN_REST = 50 / 3600e3;   // km of flying when full; km per ms of rest (~50 km an hour)
+    let enKm = EN_MAX, enAt = Date.now(), enTired = false, eating = false;
     try { const o = JSON.parse(localStorage.getItem('pp_energy') || 'null'); if (o && isFinite(o.km)) { enKm = Math.min(EN_MAX, o.km + Math.max(0, Date.now() - o.at) * EN_REST); } } catch (e) {}
     const enSave = () => { try { localStorage.setItem('pp_energy', JSON.stringify({ km: enKm, at: Date.now() })); } catch (e) {} };
     const enAdd = km => { enKm = Math.max(0, Math.min(EN_MAX, enKm + km)); };
+    const outOfWorms = () => { if (!landed) landNow(); ghEvent('Out of worms', 'catch or earn a worm to fly again', '#f87171'); };
+    // eat one worm: stamina back to full, then carry on (then() takes off again if you were standing)
+    function eatWorm(then) {
+      if (eating) return; if (balance != null && balance < 1) { enTired = true; outOfWorms(); return; }
+      eating = true;
+      api('/hunt/eat').then(r => { eating = false;
+        if (r.s === 200 && r.j.ok) { enKm = EN_MAX; enTired = false; enSave(); if (r.j.balance != null) setBal(r.j.balance); ghEvent('−1', 'Ate a worm · stamina full', '#f2a0a4'); if (then) then(); return; }
+        if (r.j.balance != null) setBal(r.j.balance); enTired = true; outOfWorms(); });
+    }
     let gSt = null, gStAt = 0, ghNext = 0, ghTown = '', ghTownAt = 0, ghTopB = 70, ghBotT = 0, met = new Set();
     const regionName = (() => { try { return new Intl.DisplayNames(['en'], { type: 'region' }); } catch (e) { return null; } })();
     const flag = cc => cc && cc.length === 2 ? String.fromCodePoint(...[...cc.toUpperCase()].map(ch => 127397 + ch.charCodeAt(0))) : '';
@@ -946,7 +956,7 @@
       { const t = Date.now(), dms = Math.max(0, t - enAt); enAt = t;
         const flying = me && now < me.arrive && me.b1 != null && !landed;
         if (flying) enAdd(-SPEED * Math.min(5000, dms) / 1000); else enAdd(dms * EN_REST);   // (rest counts all the time you were away)
-        if (flying && enKm <= 0 && !enTired) { enTired = true; landNow(); ghEvent('Tired', 'rest or catch a worm to fly again', '#f87171'); }
+        if (flying && enKm <= 0 && !enTired) eatWorm();   // keeps flying while the worm goes down; lands if there isn't one
         if (enKm > 3) enTired = false;
         const pc = enKm / EN_MAX, el = $('ghEn'); el.style.width = (pc * 100).toFixed(1) + '%';
         el.style.background = pc > .5 ? '#4ade80' : pc > .2 ? '#facc15' : '#f87171'; $('ghEnT').textContent = Math.ceil(pc * 100) + '%';
@@ -1074,17 +1084,18 @@
       // the way it's facing, or tap anywhere else to take off that way
       const p = posAt(me, srv()), bs = sc(p[0], p[1]);
       if (bs && Math.hypot(e.clientX - r.left - bs.x, e.clientY - r.top - bs.y) < 26) {
-        if (!landed) landNow(); else if (enKm > 0.5) { landed = false; const h = headAt(me, srv()); flyDir(h != null ? h : (me.b1 ?? 0)); } else ghEvent('Tired', 'not enough energy to fly yet', '#f87171');
+        const up = () => { landed = false; const h = headAt(me, srv()); flyDir(h != null ? h : (me.b1 ?? 0)); };
+        if (!landed) landNow(); else if (enKm > 0.5) up(); else eatWorm(up);
         return; }
-      if (landed && enKm <= 0.5) { ghEvent('Tired', 'not enough energy to fly yet', '#f87171'); return; }
-      landed = false;
-      flyDir(bearing(p, [g.lat, g.lng])); target = { lat: g.lat, lng: g.lng, t0: performance.now() };
+      const go = () => { landed = false; flyDir(bearing(p, [g.lat, g.lng])); target = { lat: g.lat, lng: g.lng, t0: performance.now() }; };
+      if (landed && enKm <= 0.5) { eatWorm(go); return; }
+      go();
     });
 
     async function tryCatch(w) {
       if (asking.has(w.id)) return; asking.add(w.id);
       const r = await api('/hunt/catch', { id: w.id });
-      if (r.s === 200 && r.j.ok) { w.mine = true; worms.delete(w.id); ghEvent('+' + (r.j.value || 1), r.j.value > 1 ? 'Caught a rare worm' : 'Caught a worm', r.j.value > 1 ? '#c084fc' : '#f2a0a4'); enAdd(EN_WORM * (r.j.value || 1)); enSave(); fx.push({ k: 'catch', lat: w.at ? w.at[0] : w.lat, lng: w.at ? w.at[1] : w.lng, t0: performance.now(), v: r.j.value }); if (r.j.balance != null) setBal(r.j.balance); return; }
+      if (r.s === 200 && r.j.ok) { w.mine = true; worms.delete(w.id); ghEvent('+' + (r.j.value || 1), r.j.value > 1 ? 'Caught a rare worm' : 'Caught a worm', r.j.value > 1 ? '#c084fc' : '#f2a0a4'); fx.push({ k: 'catch', lat: w.at ? w.at[0] : w.lat, lng: w.at ? w.at[1] : w.lng, t0: performance.now(), v: r.j.value }); if (r.j.balance != null) setBal(r.j.balance); return; }
       if (r.s === 409) { worms.delete(w.id); if (!seenTaken.has(w.id)) { seenTaken.add(w.id); fx.push({ k: 'poof', lat: w.at ? w.at[0] : w.lat, lng: w.at ? w.at[1] : w.lng, t0: performance.now(), by: r.j.by, gold: w.v > 1 }); } return; }
       if (r.s === 410 || r.s === 404) { worms.delete(w.id); return; }
       setTimeout(() => asking.delete(w.id), 800);   // not close enough on the server's clock yet: try again in a moment
