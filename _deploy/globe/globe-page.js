@@ -1067,16 +1067,51 @@
         c.beginPath(); c.ellipse(0, 0, r, r * 0.83, 0, a0, a0 + l); c.strokeStyle = i % 2 ? '#b0814f' : '#8f6238'; c.lineWidth = 1.1 + (i % 3) * 0.35; c.stroke(); }
       c.restore();
     }
-    function drawSleeper(x, y, a, cl, k, t, seed, zs, alpha) {
-      // curled up like a ball (the user's pick, "J10"): a round body in the bird's colour with a little tail nub, and a big
-      // soft, much lighter head resting on the front of it
+    // each player's own logo bird with its eyes shut, for their sleeper (made once per player): the sign-up nest's eyelid
+    // (same spot, coloured from the feathers just above the eye, with a soft edge) and a smooth sleepy lash line, then
+    // trimmed to the bird. Admins use the admin bird (top hat) picture, like their logo everywhere else.
+    const sleepy = new Map(), ADMIN_EYE = { x: 160, y: 272, r: 30, w: 369, h: 438 };
+    function sleepyLogo(n) {
+      const adm = roles.get(n) === 'admin', key = (adm ? 'A:' : '') + n, v = sleepy.get(key);
+      if (v !== undefined) return v instanceof HTMLCanvasElement ? v : null;
+      const K = window._ppKit; if (!K || !K.eye) return null; sleepy.set(key, 'wait');
+      (async () => {
+        let src, e;
+        if (adm) { const im = new Image(); im.src = '/admin-bird.png'; await im.decode(); const W = Math.max(im.width, im.height), sx = W / ADMIN_EYE.h;
+          src = document.createElement('canvas'); src.width = src.height = W; src.getContext('2d').drawImage(im, (W - im.width) / 2, (W - im.height) / 2);
+          e = { x: ADMIN_EYE.x * sx + (W - im.width) / 2, y: ADMIN_EYE.y * sx + (W - im.height) / 2, r: ADMIN_EYE.r * sx, W }; }
+        else { const em = clanOf(n), g = await new Promise(res => { const x = K.get(n, em, 'f'); if (x && (x.f || x.fail)) return res(x); K.sub(n, em, () => res(K.get(n, em, 'f')), 'f'); setTimeout(() => res(null), 10000); });
+          if (!g || g.fail || !g.f) return null; src = new Image(); src.src = g.f; await src.decode(); e = K.eye(em); }
+        const W = e.W, c = document.createElement('canvas'); c.width = c.height = W; const x = c.getContext('2d'); x.drawImage(src, 0, 0, W, W);
+        let R = 0, G = 0, B = 0, m = 0;
+        for (const [dx, dy] of [[0, -1.32], [-.45, -1.25], [.45, -1.25], [0, -1.45]]) { const q = x.getImageData(Math.round(e.x + dx * e.r), Math.round(e.y + dy * e.r), 1, 1).data; if (q[3] > 200) { R += q[0]; G += q[1]; B += q[2]; m++; } }
+        const c0 = m ? [R / m | 0, G / m | 0, B / m | 0] : [200, 200, 200], d = e.r * 2.3;
+        x.save(); x.shadowColor = css(c0); x.shadowBlur = d * .18;
+        const gr = x.createRadialGradient(e.x, e.y - d * .22, d * .05, e.x, e.y, d * .52); gr.addColorStop(0, css(c0.map(v => Math.min(255, v * 1.06 | 0)))); gr.addColorStop(.6, css(c0)); gr.addColorStop(1, css(c0.map(v => v * .9 | 0)));
+        x.beginPath(); x.arc(e.x, e.y, d / 2, 0, 7); x.fillStyle = gr; x.fill(); x.restore();
+        x.save(); x.lineCap = 'round'; x.strokeStyle = 'rgba(40,30,26,.78)'; const L = d * .34, yy = e.y + d * .02;
+        x.beginPath(); x.moveTo(e.x - L, yy); x.quadraticCurveTo(e.x, yy + d * .26, e.x + L, yy); x.lineWidth = Math.max(1.6, d * .065); x.stroke();
+        x.beginPath(); x.moveTo(e.x - L * .55, yy + d * .07); x.quadraticCurveTo(e.x, yy + d * .2, e.x + L * .55, yy + d * .07); x.lineWidth = Math.max(1.6, d * .09); x.stroke(); x.restore();
+        const D = x.getImageData(0, 0, W, W).data; let x0 = W, y0 = W, x1 = 0, y1 = 0;
+        for (let yy2 = 0; yy2 < W; yy2++) for (let xx = 0; xx < W; xx++) if (D[(yy2 * W + xx) * 4 + 3] > 40) { if (xx < x0) x0 = xx; if (xx > x1) x1 = xx; if (yy2 < y0) y0 = yy2; if (yy2 > y1) y1 = yy2; }
+        const side = Math.max(x1 - x0, y1 - y0) * 1.04, o = document.createElement('canvas'); o.width = o.height = Math.max(1, Math.ceil(side));
+        o.getContext('2d').drawImage(c, (x0 + x1) / 2 - side / 2, (y0 + y1) / 2 - side / 2, side, side, 0, 0, side, side); return o;
+      })().then(o => sleepy.set(key, o || 'fail')).catch(() => sleepy.set(key, 'fail'));
+      return null;
+    }
+    function drawSleeper(x, y, a, cl, k, t, seed, zs, alpha, name) {
+      // asleep in the nest ("B5", the user's pick): a round body in the bird's colour with a little tail, the player's own
+      // logo bird as the head with its eyes shut (a plain soft head when we don't know whose bird it is), and a wing
+      // wrapped round the front like a blanket. Head on the left with the beak pointing out of the nest; breathing slowly.
       cx.save(); if (alpha != null) cx.globalAlpha = alpha;
-      const c = cx, br = 1 + 0.035 * Math.sin(t * 2.1 + seed);
-      const G = (col, x0, r, hi, lo) => { const g = c.createRadialGradient(x0 - r * 0.35, -r * 0.45, r * 0.1, x0, 0, r * 1.05); g.addColorStop(0, css(lift(col, hi))); g.addColorStop(0.65, css(col)); g.addColorStop(1, css(lift(col, lo))); return g; };
-      c.save(); c.translate(x, y); c.rotate(a); c.scale(k * br, k * br);
-      c.beginPath(); c.moveTo(-7, -2); c.quadraticCurveTo(-11, 0, -7, 2); c.fillStyle = css(lift(cl, 0.75)); c.fill();   // tail nub
-      c.beginPath(); c.arc(0, 0, 8.5, 0, 7); c.fillStyle = G(cl, 0, 8.5, 1.18, 0.82); c.fill();                          // body
-      const hc = lift(cl, 1.4); c.beginPath(); c.arc(3.4, 0, 5.4, 0, 7); c.fillStyle = G(hc, 3.4, 5.4, 1.12, 0.92); c.fill();   // head
+      const c = cx, br = 1 + 0.03 * Math.sin(t * 2.1 + seed), lg = name ? sleepyLogo(name) : null, adm = name && roles.get(name) === 'admin';
+      const G = (col, x0, y0, r, hi, lo) => { const g = c.createRadialGradient(x0 - r * 0.35, y0 - r * 0.45, r * 0.1, x0, y0, r * 1.05); g.addColorStop(0, css(lift(col, hi))); g.addColorStop(0.65, css(col)); g.addColorStop(1, css(lift(col, lo))); return g; };
+      c.save(); c.translate(x, y); c.scale(-k * br, k * br);
+      c.beginPath(); c.moveTo(-7, -2); c.quadraticCurveTo(-11, 0, -7, 2); c.fillStyle = css(lift(cl, 0.75)); c.fill();                          // tail
+      c.beginPath(); c.arc(-2, 1, 8.5, 0, 7); c.fillStyle = G(cl, -2, 1, 8.5, 1.18, 0.82); c.fill();                                            // body
+      if (lg) { const hs = adm ? 22.5 : 19; c.save(); c.translate(adm ? 4.2 : 4.6, adm ? -5.2 : -4.4); c.scale(-1, 1); c.rotate(-0.3); c.drawImage(lg, -hs / 2, -hs / 2, hs, hs); c.restore(); }
+      else { const hc = lift(cl, 1.4); c.beginPath(); c.arc(4.4, -3.6, 5.6, 0, 7); c.fillStyle = G(hc, 4.4, -3.6, 5.6, 1.12, 0.92); c.fill(); }   // head
+      c.beginPath(); c.moveTo(-8.6, 2.6); c.quadraticCurveTo(-3.5, 9.2, 5, 3.8); c.quadraticCurveTo(1, 2.2, -2, 2.4); c.quadraticCurveTo(-6, 2.2, -8.6, 2.6); c.fillStyle = css(lift(cl, 0.86)); c.fill();   // wing
       c.restore();
       if (zs) { c.save(); c.fillStyle = '#e2e8f0'; c.shadowColor = 'rgba(0,0,0,.85)'; c.shadowBlur = 3;
         for (let i = 0; i < 2; i++) { const u = ((t + seed + i * 1.3) % 2.6) / 2.6; c.globalAlpha = Math.sin(Math.PI * u) * 0.85;
@@ -1115,12 +1150,12 @@
           if (!close) { c.beginPath(); c.arc(s.x, s.y, 5.2, 0, 7); c.fillStyle = 'rgba(0,0,0,.45)'; c.fill(); c.beginPath(); c.arc(s.x, s.y, 4.3, 0, 7); c.fillStyle = '#fff'; c.fill();
             c.beginPath(); c.arc(s.x, s.y, 3.2, 0, 7); c.fillStyle = css(cl); c.fill(); }
           else { const hd = mine.me ? headAt(mine.me, tn) : null, a = hd != null ? hd - Math.PI / 2 : -Math.PI / 2;
-            if (!tko) { drawNest(s.x, s.y, km2); drawSleeper(s.x, s.y, a, cl, km2, t, 0, true); }
+            if (!tko) { drawNest(s.x, s.y, km2); drawSleeper(s.x, s.y, a, cl, km2, t, 0, true, null, mn); }
             else { // waking up: the wings open, it flaps hard and lifts off (its shadow drops away), the nest fades out
               const u = (performance.now() - tko.t0) / 1000, e = Math.min(1, u / 0.9), ez = e * e * (3 - 2 * e), sw = 1 - 1.4 * ez;
               drawNest(s.x, s.y, km2, 1 - ez);
               const ps = pose('@tko', true, 0, dt * 1.6), fin = Math.min(1, u / 0.25); ps.span = 0.32 + (ps.span - 0.32) * fin;
-              if (fin < 1) drawSleeper(s.x, s.y, a, cl, km2, t, 0, false, 1 - fin);   // the sleeping bird uncurls into the flying one
+              if (fin < 1) drawSleeper(s.x, s.y, a, cl, km2, t, 0, false, 1 - fin, mn);   // the sleeping bird uncurls into the flying one
               drawBird(s.x, s.y - 6 * ez * km2, a, mn, km2 / (1 - 0.2 * sw), fin, sw, ps, cl);
               if (u > 0.95) { tko = null; enter(); } }
             show = !tko; myBtn.style.transform = `translate(${cr.left + s.x - 24}px,${cr.top + s.y - 24}px)`; } } }
@@ -1198,7 +1233,7 @@
       for (const b of birds) { const q = posAt(b, now); if (!q || !front(q[0], q[1])) continue; const s = sc(q[0], q[1]); if (!s) continue;
         if (!inView(s)) { const d = p ? km(p, q) : 0; if (d < 100 && b.a) drawBirdEdge(s.x, s.y, b.u, d); continue; }
         const moving = now < b.arrive, ahead = posAt(b, now + 600), s2 = ahead && sc(ahead[0], ahead[1]);
-        if (!moving) { const hd = headAt(b, now); drawNest(s.x, s.y, 0.8); drawSleeper(s.x, s.y, hd != null ? hd - Math.PI / 2 : 0, col(b.u), 0.8, t, b.u.length, true);
+        if (!moving) { const hd = headAt(b, now); drawNest(s.x, s.y, 0.8); drawSleeper(s.x, s.y, 0, col(b.u), 0.8, t, b.u.length, true, null, b.u);
           const nl = nameImg(b.u); c.drawImage(nl, s.x - nl._w / 2, s.y + 22 - nl._h / 2 - 3, nl._w, nl._h); continue; }
         let a = angs.get(b.u) ?? -Math.PI / 2; if (moving && s2 && Math.hypot(s2.x - s.x, s2.y - s.y) > 0.5) a = ease(a, Math.atan2(s2.y - s.y, s2.x - s.x), dt, b.u); angs.set(b.u, a);
         drawBird(s.x, s.y, a, b.u, 0.8, 0.92, 0, pose(b.u, moving, bankAt(b, now), dt));
