@@ -119,12 +119,14 @@ for r in recs: r["rarity"] = tier(r["eggWeight"])
 
 # home countries, weighted like a population: how big a share of a country's bird sightings this species is (evens out countries
 # full of birdwatchers, like the US), times the square root of the country's size (so a bird common across Canada outweighs one
-# common across Belgium). Countries with few sightings are smoothed (+100k), stray visitors (vagrants) dropped.
+# common across Belgium; size counts a little less than a square root, so huge countries don't win on size alone).
+# Countries with few sightings are smoothed (+100k), stray visitors (vagrants) dropped.
 for r in recs:
     g = gb.get(r["sci"])
     if not g: r["countries"] = None; continue
     c = g["c"]; tot = sum(c.values()) or 1
-    w = {k: v / (effort.get(k, 0) + 1e5) * math.sqrt(area.get(k, 2e3)) for k, v in c.items() if v >= max(3, .002 * tot)}
+    # ZZ / XZ = GBIF's "unknown country" and "high seas" codes: not a home
+    w = {k: v / (effort.get(k, 0) + 1e5) * area.get(k, 2e3) ** .35 for k, v in c.items() if v >= max(3, .002 * tot) and k not in ("ZZ", "XZ", "QO")}
     s = sum(w.values()) or 1
     r["countries"] = {k: round(v / s, 4) for k, v in sorted(w.items(), key=lambda x: -x[1]) if v / s >= .002}
     r["sightings"] = g["n"]
