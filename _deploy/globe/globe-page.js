@@ -520,25 +520,73 @@
     c.addEventListener('change', vis); setTimeout(vis, 50); setInterval(vis, 500);
     world.renderer().domElement.addEventListener('pointerdown', () => { c.autoRotate = false; });
     c.addEventListener('change', () => { if (inGame()) return; if (!olQ) olQ = requestAnimationFrame(() => { olQ = 0; overviewLabels(); }); });
-    // double-tap: zoom in on that spot; when already close, zoom back out to the whole globe
-    // no text-selection highlight from double-taps (Safari selects the whole page otherwise)
+    // no text-selection highlight from double-taps (Safari selects the whole page otherwise), and no page zoom
     document.addEventListener('dblclick', ev => { ev.preventDefault(); try { getSelection().removeAllRanges(); } catch (er) {} });
-    (function doubleTap() {
-      const cv = world.renderer().domElement; let down = null, last = null;
-      cv.addEventListener('pointerdown', e => { down = { x: e.clientX, y: e.clientY, t: Date.now() }; });
-      cv.addEventListener('pointerup', e => {
-        if (!down || document.body.classList.contains('hunting') || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 10 || Date.now() - down.t > 350) { down = null; return; }
-        const now = Date.now();
-        if (last && now - last.t < 330 && Math.hypot(e.clientX - last.x, e.clientY - last.y) < 40) {
-          last = null; pinTapAt = now;
-          try { getSelection().removeAllRanges(); } catch (er) {}
-          const pov = world.pointOfView(), r = cv.getBoundingClientRect();
-          if (pov.altitude < 0.75) { world.pointOfView({ altitude: HOME_ALT() }, 700); return; }
-          const g = world.toGlobeCoords(e.clientX - r.left, e.clientY - r.top);
-          world.pointOfView({ ...(g ? { lat: g.lat, lng: g.lng } : {}), altitude: Math.max(0.6, pov.altitude * 0.5) }, 700);
-        } else last = { x: e.clientX, y: e.clientY, t: now };
-        down = null;
+    document.addEventListener('gesturestart', ev => ev.preventDefault());
+    // ── Google-Maps-style zooming on the globe (2026-11-27; never in the game, where the view stays locked) ──
+    // double-tap: 2× closer toward the spot, and again, all the way down to game height (no jump back out); double-tap,
+    // hold and slide: down zooms in, up zooms out; two-finger tap: 2× further out; pinch works anywhere on the screen,
+    // even if a finger lands on a story card or panel (we handle two fingers ourselves; the globe's own two-finger zoom
+    // is off, and nothing scrolls or spins while two fingers are down). Our own per-frame moves (the library's animated
+    // camera can stall on iPhone).
+    (function zoomGestures() {
+      const ZMIN = innerWidth < 600 ? 0.0016 : 0.00135, ZMAX = 4, clampA = a => Math.max(ZMIN, Math.min(ZMAX, a));
+      const ctl = () => world.controls(), playing = () => document.body.classList.contains('hunting');
+      try { ctl().touches.TWO = -1; } catch (e) {}
+      const can = world.renderer().domElement;
+      // the spot on the ground under a screen point (the ray from the camera meets the globe itself, not the night layer)
+      const geoAt = (x, y) => { try { const r = can.getBoundingClientRect(), cam = world.camera(); cam.updateMatrixWorld(); const V = cam.position.constructor, rad = world.getGlobeRadius();
+        const o = cam.position.clone(), d = new V((x - r.left) / r.width * 2 - 1, -((y - r.top) / r.height) * 2 + 1, 0.5).unproject(cam).sub(o).normalize();
+        const b = o.dot(d), c = o.dot(o) - rad * rad, disc = b * b - c; if (disc < 0) return null;
+        const q = o.add(d.multiplyScalar(-b - Math.sqrt(disc))), g = world.toGeoCoords({ x: q.x, y: q.y, z: q.z }); return g && isFinite(g.lat) ? g : null; } catch (e) { return null; } };
+      // the new centre that keeps spot g where it is on screen when zooming by k (flat maths: right up close, and far
+      // out we only drift part of the way toward it)
+      const around = (g, la, lo, k, far) => { if (!g) return { lat: la, lng: lo }; if (far) k = 1 - (1 - k) * 0.5; let dl = lo - g.lng; dl = ((dl + 540) % 360) - 180; return { lat: g.lat + (la - g.lat) * k, lng: g.lng + dl * k }; };
+      let anim = null;
+      function zoomTo(c, alt, ms) { const v = world.pointOfView(); anim = { la0: v.lat, lo0: v.lng, a0: v.altitude, la: c.lat, lo: c.lng, a: clampA(alt), t0: performance.now(), ms }; ctl().autoRotate = false; requestAnimationFrame(step); }
+      function step() { const z = anim; if (!z || playing()) { anim = null; return; } const u = Math.min(1, (performance.now() - z.t0) / z.ms), e = 1 - Math.pow(1 - u, 3);
+        let dl = z.lo - z.lo0; dl = ((dl + 540) % 360) - 180;
+        world.pointOfView({ lat: z.la0 + (z.la - z.la0) * e, lng: z.lo0 + dl * e, altitude: Math.exp(Math.log(z.a0) + (Math.log(z.a) - Math.log(z.a0)) * e) }, 0);   // evenly in steps of scale, so every zoom looks the same speed
+        if (u < 1) requestAnimationFrame(step); else anim = null; }
+      // where the next step starts from: a zoom still running counts as already there (fast double-taps add up)
+      const base = () => anim ? { lat: anim.la, lng: anim.lo, altitude: anim.a } : world.pointOfView();
+      // ── one finger: double-tap, and double-tap-hold-slide ──
+      let down = null, tap1 = null, dz = null, touches = 0;
+      can.addEventListener('pointerdown', e => {
+        if (playing() || (e.pointerType === 'mouse' && e.button)) return;
+        down = { x: e.clientX, y: e.clientY, t: Date.now(), id: e.pointerId };
+        if (tap1 && down.t - tap1.t < 330 && Math.hypot(e.clientX - tap1.x, e.clientY - tap1.y) < 40 && touches <= 1) {
+          const v = base(); dz = { id: e.pointerId, x: e.clientX, y: e.clientY, a0: v.altitude, la0: v.lat, lo0: v.lng, g: geoAt(e.clientX, e.clientY), moved: false };
+          anim = null; tap1 = null; ctl().enableRotate = false; ctl().autoRotate = false;
+        } else anim = null;
       });
+      addEventListener('pointermove', e => { if (!dz || e.pointerId !== dz.id) return; const dy = e.clientY - dz.y; if (!dz.moved && Math.abs(dy) < 8) return; dz.moved = true;
+        const a = clampA(dz.a0 * Math.exp(-dy / 110)), c = around(dz.g, dz.la0, dz.lo0, a / dz.a0, dz.a0 > 1.2);   // slide down: closer; up: further
+        world.pointOfView({ ...c, altitude: a }, 0); }, true);
+      addEventListener('pointerup', e => {
+        if (dz && e.pointerId === dz.id) { const d = dz; dz = null; down = null; if (!playing()) ctl().enableRotate = true;
+          if (!d.moved) { pinTapAt = Date.now(); try { getSelection().removeAllRanges(); } catch (er) {}   // a plain double-tap: one step closer toward the spot
+            const a = clampA(d.a0 * 0.5); if (a < d.a0) zoomTo(around(d.g, d.la0, d.lo0, a / d.a0, d.a0 > 1.2), a, 360); }
+          return; }
+        if (!down || e.pointerId !== down.id) return; const q = down; down = null;
+        if (!playing() && touches <= 1 && Math.hypot(e.clientX - q.x, e.clientY - q.y) < 10 && Date.now() - q.t < 300) tap1 = { x: e.clientX, y: e.clientY, t: Date.now() }; else tap1 = null;
+      }, true);
+      // ── two fingers, anywhere on the screen: pinch, and two-finger tap ──
+      const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY), mid = t => [(t[0].clientX + t[1].clientX) / 2, (t[0].clientY + t[1].clientY) / 2];
+      let pz = null;
+      document.addEventListener('touchstart', e => { touches = e.touches.length; if (playing() || e.touches.length !== 2) return;
+        anim = null; dz = null; tap1 = null; const v = world.pointOfView(), m = mid(e.touches);
+        pz = { d0: dist(e.touches), a0: v.altitude, la0: v.lat, lo0: v.lng, g: geoAt(m[0], m[1]), m0: m, t0: Date.now(), moved: 0 };
+        ctl().enableRotate = false; ctl().autoRotate = false; document.body.classList.add('pinching'); }, { capture: true, passive: true });
+      document.addEventListener('touchmove', e => { if (!pz) return; if (e.cancelable) e.preventDefault(); if (e.touches.length < 2) return;   // (nothing under the fingers scrolls meanwhile)
+        const d = dist(e.touches), m = mid(e.touches); pz.moved = Math.max(pz.moved, Math.abs(d - pz.d0), Math.hypot(m[0] - pz.m0[0], m[1] - pz.m0[1]));
+        const a = clampA(pz.a0 * pz.d0 / Math.max(1, d)); world.pointOfView({ ...around(pz.g, pz.la0, pz.lo0, a / pz.a0, pz.a0 > 1.2), altitude: a }, 0); }, { capture: true, passive: false });
+      const end = e => { touches = e.touches.length;
+        if (pz && e.touches.length < 2) { const z = pz; pz = null;
+          if (Date.now() - z.t0 < 300 && z.moved < 12) { const v = world.pointOfView(); zoomTo({ lat: v.lat, lng: v.lng }, v.altitude * 2, 360); } }   // a two-finger tap: one step further out
+        if (e.touches.length === 0) { document.body.classList.remove('pinching'); if (!playing() && !dz) ctl().enableRotate = true; } };
+      document.addEventListener('touchend', end, { capture: true, passive: true });
+      document.addEventListener('touchcancel', end, { capture: true, passive: true });
     })();
     // Imagery is Sentinel-2 cloudless (EOX, CC BY-NC-SA) at every zoom, so nothing changes colour as you zoom:
     // a whole-Earth image (4K; computers swap to 8K once it has loaded in the background), then map tiles through
