@@ -2437,7 +2437,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       if (!chk || Date.now() - Date.parse(chk.at) > 60000) { await stampCheck(env, name, null); await env.DB.prepare(`INSERT OR REPLACE INTO stamps (username, k, at, d) VALUES (?, '_chk', ?, NULL)`).bind(name, new Date().toISOString()).run(); }
       const [no, st] = await Promise.all([
         env.DB.prepare(`SELECT COUNT(*) AS n FROM mod_users WHERE created_at <= ?`).bind(acc.created_at).first(),
-        env.DB.prepare(`SELECT k, at, d FROM stamps WHERE username = ? AND k != '_chk' ORDER BY at`).bind(name).all()]);
+        env.DB.prepare(`SELECT k, at, d FROM stamps WHERE username = ? AND substr(k, 1, 1) != '_' ORDER BY at`).bind(name).all()]);
       return json({ u: name, no: no ? no.n : 0, issued: acc.created_at, role: acc.role === "admin" || acc.role === "mod" ? acc.role : null,
         stamps: (st.results || []).map(r => ({ k: r.k, at: r.at, d: r.d ? JSON.parse(r.d) : null, label: stampLabel(r.k) })) });
     } catch (err) { return serverError(err); }
@@ -2713,6 +2713,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         const iso = new Date(now).toISOString(), ins = env.DB.prepare(`INSERT INTO worms (id, giver, receiver, post_id, comment_id, created_at) VALUES (?, '__hunt__', ?, NULL, NULL, ?)`);
         await env.DB.batch(Array.from({ length: w.value }, () => ins.bind(crypto.randomUUID(), username, iso)));
         huntHub(env, ctx, { t: "w-", id: w.id, by: username });
+        ctx.waitUntil(stampCheck(env, username, ["ranks"]));
         return json({ ok: true, value: w.value, balance: await wormBalance(username) });
       }
       return json({ error: "Not found" }, 404);
@@ -2753,7 +2754,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const col = commentId ? "comment_id" : "post_id", id = commentId || postId;
       const r = await env.DB.prepare(`SELECT COUNT(*) AS n, SUM(CASE WHEN giver = ? THEN 1 ELSE 0 END) AS m FROM worms WHERE ${col} = ?`).bind(username, id).first();
       const pr = postId ? (await postResp([postId], username))[postId] : null;
-      ctx.waitUntil(Promise.all([stampCheck(env, username, ["worms"]), stampCheck(env, receiver, ["worms"])]));
+      ctx.waitUntil(Promise.all([stampCheck(env, username, ["worms"]), stampCheck(env, receiver, ["worms", "ranks"])]));
       return json({ success: true, worms: r?.n || 0, mine: r?.m || 0, given: count, balance: have - count, ...(pr ? { score: pr.n, myVote: pr.m } : {}) });
     } catch (err) {
       return serverError(err);
@@ -4595,11 +4596,14 @@ export class HuntHub {
 // username indexes (never the whole posts table). The first time a bird is checked, everything it has already
 // earned is filled in quietly (row "_chk"); after that each new stamp sends a bell notification.
 // k: tag:<Tag>:1|50|100, post1, chirp1, huddle, generous, rewarded, tagged, popular, chatterbox, nightowl, streak,
-// globetrotter, cage, staff
+// globetrotter, cage, staff, rank:<Rank> (the first time a bird reached each rank; no stamp for Endangered)
+// ranks go by worm count, like the site's rank list (_RANKS in the site bundle) - keep the two in step
+const STAMP_RANKS = [["Hatchling", 0], ["Nestling", 10], ["Fledgling", 25], ["Forager", 50], ["Bird of Prey", 100], ["Mixed-Flock Attendant", 200],
+  ["Seasoned Migrant", 300], ["Continental Migrant", 500], ["Peak Plumage", 700], ["Master Layer", 900], ["Legendary Brood", 1500]];
 const STAMP_TAGS = ["General", "Sports", "Science", "Nature", "Entertainment", "Random", "Announcements"];
 const STAMP_NAMES = { post1: "First post", chirp1: "First chirp", huddle: "Huddle up", generous: "Generous", rewarded: "Rewarded", tagged: "Tagged",
   popular: "Popular", chatterbox: "Chatterbox", nightowl: "Night owl", streak: "7-day streak", globetrotter: "Globetrotter", cage: "Detained", staff: "Staff" };
-const stampLabel = k => { const t = String(k).split(":"); return t[0] === "tag" ? `${t[1]} · ${t[2] === "1" ? "first post" : t[2] + " posts"}` : STAMP_NAMES[k] || k; };
+const stampLabel = k => { const t = String(k).split(":"); return t[0] === "rank" ? `${t[1]} rank` : t[0] === "tag" ? `${t[1]} · ${t[2] === "1" ? "first post" : t[2] + " posts"}` : STAMP_NAMES[k] || k; };
 async function stampAward(env, name, list, quiet) {
   list = list.filter(s => s && s.k && s.at); if (!name || !list.length) return [];
   const rs = await env.DB.batch(list.map(s => env.DB.prepare(`INSERT OR IGNORE INTO stamps (username, k, at, d) VALUES (?, ?, ?, ?)`).bind(name, s.k, s.at, s.d ? JSON.stringify(s.d) : null)));
@@ -4644,6 +4648,17 @@ async function stampFind(env, name, parts) {
     const g = await env.DB.prepare(`SELECT MIN(created_at) AS at FROM worms WHERE giver = ? AND receiver != '__hunt__'`).bind(name).first(); if (g && g.at) out.push({ k: "generous", at: g.at });
     const r = await env.DB.prepare(`SELECT MIN(created_at) AS at FROM worms WHERE receiver = ? AND giver != '__hunt__'`).bind(name).first(); if (r && r.at) out.push({ k: "rewarded", at: r.at });
   }
+  if (has("ranks")) {   // replay the bird's worms in order: the moment its count first reached each rank
+    const acc = await env.DB.prepare(`SELECT worm_start, created_at FROM mod_users WHERE username = ? AND deleted_at IS NULL LIMIT 1`).bind(name).first();
+    if (acc) {
+      const { results: ws = [] } = await env.DB.prepare(`SELECT created_at, 1 AS v FROM worms WHERE receiver = ?1 UNION ALL SELECT created_at, -1 AS v FROM worms WHERE giver = ?1 ORDER BY created_at LIMIT 100000`).bind(name).all();
+      let bal = Number(acc.worm_start) || 0, ri = 0;
+      const reach = at => { while (ri < STAMP_RANKS.length && bal >= STAMP_RANKS[ri][1]) {   // a few ms apart so they stay in rank order
+        out.push({ k: `rank:${STAMP_RANKS[ri][0]}`, at: new Date(Date.parse(at) + ri).toISOString() }); ri++; } };
+      if (acc.created_at) reach(acc.created_at);
+      for (const w of ws) { bal += w.v; if (ri < STAMP_RANKS.length && bal >= STAMP_RANKS[ri][1]) reach(w.created_at); }
+    }
+  }
   if (has("tagged")) {
     const t = await env.DB.prepare(`SELECT message, created_at FROM system_notifications WHERE user_id = ? AND message LIKE '%"icon":"AT"%' ORDER BY created_at LIMIT 1`).bind(name).first();
     if (t) { let by = null; try { by = String(JSON.parse(t.message).text || "").split(" ")[0] || null; } catch (e) {} out.push({ k: "tagged", at: t.created_at, d: by ? { by } : null }); }
@@ -4663,6 +4678,9 @@ async function stampFind(env, name, parts) {
 async function stampCheck(env, name, parts) {
   if (!name || name === "__system__" || /Bot$/.test(name)) return [];
   try {
+    // rank stamps came later (2026-11-27): birds that already had stamps get theirs filled in quietly once
+    const rk = await env.DB.prepare(`SELECT at FROM stamps WHERE username = ? AND k = '_chk_rank'`).bind(name).first();
+    if (!rk) { await stampAward(env, name, await stampFind(env, name, ["ranks"]), true); await env.DB.prepare(`INSERT OR REPLACE INTO stamps (username, k, at, d) VALUES (?, '_chk_rank', ?, NULL)`).bind(name, new Date().toISOString()).run(); }
     const init = await env.DB.prepare(`SELECT at FROM stamps WHERE username = ? AND k = '_chk'`).bind(name).first();
     if (!init) { await stampAward(env, name, await stampFind(env, name, null), true); await env.DB.prepare(`INSERT OR REPLACE INTO stamps (username, k, at, d) VALUES (?, '_chk', ?, NULL)`).bind(name, new Date().toISOString()).run(); if (!parts) return []; }
     return await stampAward(env, name, await stampFind(env, name, parts), false);
