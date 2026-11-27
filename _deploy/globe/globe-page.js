@@ -1455,8 +1455,18 @@
       cx.restore();
     }
     const idleAng = new Map();
+    // The birds, nests and your dot are placed right after the globe draws each frame, with the camera it just drew
+    // with: placed in a separate frame callback they could use the camera from the frame before, and while the globe
+    // spins between stories your dot trailed behind (out over the sea) and caught up when it stopped. The frame
+    // callback still moves the camera for the dot fly-down, and draws by itself if the globe ever stops drawing.
+    let lastRenderAt = 0;
+    { const r = world.renderer(), o = r.render.bind(r); r.render = (sc, cam) => { o(sc, cam); lastRenderAt = performance.now(); if (!on && idleRaf) { try { idleDraw(lastRenderAt); } catch (e) {} } }; }
     function idle(ts) {
       if (on) return; idleRaf = requestAnimationFrame(idle); dotFlyStep();
+      if (performance.now() - lastRenderAt > 200) idleDraw(ts);
+    }
+    function idleDraw(ts) {
+      if (on) return;
       const dt = idleLast ? Math.min(0.1, Math.max(0, ts - idleLast) / 1000) : 0.016; idleLast = ts;
       const cr = cv.getBoundingClientRect(), c = cx; c.setTransform(DPR, 0, 0, DPR, 0, 0); c.clearRect(0, 0, W, H);
       try { world.camera().updateMatrixWorld(); } catch (e) {}
