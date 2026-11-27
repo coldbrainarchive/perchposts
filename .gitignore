@@ -29,3 +29,4 @@ dist-ssr
 species/raw/
 species/out/
 species/.venv/
+species/bin/
