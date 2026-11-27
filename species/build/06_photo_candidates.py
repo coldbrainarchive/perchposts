@@ -18,16 +18,26 @@ def _slot():
     with _lock:
         now = time.time(); wait = max(0, _next[0] - now); _next[0] = max(now, _next[0]) + 1.0
     if wait: time.sleep(wait)
+def _pause(secs):
+    # everyone waits: pushes the shared clock forward so no thread sends anything until the pause is over
+    with _lock: _next[0] = max(_next[0], time.time() + secs)
 def get(params):
-    _slot()
     url = "https://api.inaturalist.org/v1/observations?" + urllib.parse.urlencode(params)
-    for tries in range(6):
-        try: return json.load(urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "species-db-build/1.0"}), timeout=90))
+    tries = 0
+    while True:
+        _slot()
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "species-db-build/1.0"}), timeout=90) as r:
+                return json.load(r)
         except urllib.error.HTTPError as e:
-            if e.code == 429: time.sleep(float(e.headers.get("Retry-After") or 10) + 1); continue
-            time.sleep(4 * (tries + 1))
-        except Exception: time.sleep(4 * (tries + 1))
-    return None
+            if e.code == 429:
+                # over the limit (likely the daily one): pause everything 5 minutes, then try again; never give up,
+                # so a refusal is never saved as "no photos"
+                print("429, pausing 5 min", time.strftime("%H:%M"), flush=True); _pause(300); continue
+            tries += 1
+        except Exception: tries += 1
+        if tries >= 6: raise RuntimeError("failed: " + url)
+        time.sleep(4 * tries)
 
 def pull(taxon, extra, n):
     j = get({"taxon_id": taxon, "quality_grade": "research", "photos": "true", "photo_license": "cc0,cc-by,cc-by-sa",
@@ -55,6 +65,8 @@ def one(sci):
 n = 0
 with ThreadPoolExecutor(3) as ex:
     for fut in as_completed([ex.submit(one, s_) for s_ in todo]):
-        sci, rec = fut.result(); done[sci] = rec; n += 1
+        try: sci, rec = fut.result()
+        except Exception as e: print("skipped (will retry next run):", e, flush=True); continue
+        done[sci] = rec; n += 1
         if n % 100 == 0: json.dump(done, open(OUT, "w")); print(n, "/", len(todo), time.strftime("%H:%M"), flush=True)
 json.dump(done, open(OUT, "w")); print("done", len(done), flush=True)
