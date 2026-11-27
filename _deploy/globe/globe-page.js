@@ -1536,11 +1536,11 @@
           c.beginPath(); c.arc(s.x, s.y, 2.6, 0, 7); c.fillStyle = css(d.col); c.fill(); continue; }
         const flying = tq < d.arrive, hd = headAt(d, tq), a0 = hd != null ? hd - Math.PI / 2 : -Math.PI / 2;
         const sk = 'o:' + (d.u || d.i), sz = 76 * Math.max(0.5, km2);
-        if (!flying && d.wet) { intoSprite(sk, sz, sz, s.x, s.y, (x, y) => drawDrowning(x, y, a0, d.col, 0.8 * km2, t, d.i * 0.77, d.u)); continue; }
-        if (!flying && d.act) { intoSprite(sk, sz, sz, s.x, s.y, (x, y) => drawLanded(x, y, a0, d.col, 0.8 * km2, t, d.i * 0.77, d.u, q)); continue; }
+        if (!flying && d.wet) { intoSprite(sk, sz, sz, s.x, s.y, (x, y) => drawDrowning(x, y, a0, d.col, km2, t, d.i * 0.77, d.u)); continue; }
+        if (!flying && d.act) { intoSprite(sk, sz, sz, s.x, s.y, (x, y) => drawLanded(x, y, a0, d.col, km2, t, d.i * 0.77, d.u, q)); continue; }
         if (!flying) { intoSprite(sk, sz, sz, s.x, s.y, (x, y) => { drawNest(x, y, 0.8 * km2); drawSleeper(x, y, a0, d.col, 0.8 * km2, t, d.i * 0.77, true, null, d.u); }); continue; }
         let a = idleAng.get(d.i) ?? a0; a = ease(a, a0, dt, 'dot' + d.i); idleAng.set(d.i, a);
-        const ps = pose('dot' + d.i, true, bankAt(d, tq), dt); intoSprite(sk, sz, sz, s.x, s.y, (x, y) => drawBird(x, y, a, d.u || '', 0.8 * km2, 0.92, 0, ps, d.col)); }
+        const ps = pose('dot' + d.i, true, bankAt(d, tq), dt); intoSprite(sk, sz, sz, s.x, s.y, (x, y) => drawBird(x, y, a, d.u || '', km2, 0.92, 0, ps, d.col)); }
       // you
       let show = false, dotOn = false;
       if (mn && mp) { const s = scr(mp[0], mp[1]);
@@ -1553,7 +1553,7 @@
           else { const hd = mine.me ? headAt(mine.me, tn) : null, a = hd != null ? hd - Math.PI / 2 : -Math.PI / 2;
             const msz = 96 * Math.max(0.5, km2);
             const myWet = mine.wet && mine.wet > Date.now() + dotsOff;
-            if (!tko && myWet) intoSprite('me', msz, msz, s.x, s.y, (x, y) => drawDrowning(x, y, a, cl, 0.8 * km2, t, 0, mn));
+            if (!tko && myWet) intoSprite('me', msz, msz, s.x, s.y, (x, y) => drawDrowning(x, y, a, cl, km2, t, 0, mn));
             else if (!tko) intoSprite('me', msz, msz, s.x, s.y, (x, y) => { drawNest(x, y, 0.8 * km2); drawSleeper(x, y, a, cl, 0.8 * km2, t, 0, true, null, mn); });   // same size as everyone else's nest
             else { // waking up: the wings open, it flaps hard and lifts off (its shadow drops away), the nest fades out
               const u = (performance.now() - tko.t0) / 1000, e = Math.min(1, u / 0.9), ez = e * e * (3 - 2 * e), sw = 1 - 1.4 * ez;
@@ -1652,18 +1652,18 @@
       for (const b of birds) { const q = posAt(b, now); if (!q || !front(q[0], q[1])) continue; const s = sc(q[0], q[1]); if (!s) continue;
         if (!inView(s)) { const d = p ? km(p, q) : 0; if (d < 100 && b.a) drawBirdEdge(s.x, s.y, b.u, d); continue; }
         const moving = now < b.arrive, ahead = posAt(b, now + 600), s2 = ahead && sc(ahead[0], ahead[1]);
-        if (!moving && b.a) { const ha = headAt(b, now), aa = ha != null ? ha - Math.PI / 2 : -Math.PI / 2; intoSprite('b:' + b.u, 76, 76, s.x, s.y, (x, y) => drawLanded(x, y, aa, col(b.u), 0.8, t, b.u.length, b.u, q));
+        if (!moving && b.a) { const ha = headAt(b, now), aa = ha != null ? ha - Math.PI / 2 : -Math.PI / 2; intoSprite('b:' + b.u, 76, 76, s.x, s.y, (x, y) => drawLanded(x, y, aa, col(b.u), 1, t, b.u.length, b.u, q));
           pillSprite(b.u, s.x, s.y + 20); continue; }   // playing but landed: standing on the ground
-        if (!moving && b.w) { const ha = headAt(b, now); intoSprite('b:' + b.u, 76, 76, s.x, s.y, (x, y) => drawDrowning(x, y, ha != null ? ha - Math.PI / 2 : 0, col(b.u), 0.8, t, b.u.length, b.u)); pillSprite(b.u, s.x, s.y + 20); continue; }
+        if (!moving && b.w) { const ha = headAt(b, now); intoSprite('b:' + b.u, 76, 76, s.x, s.y, (x, y) => drawDrowning(x, y, ha != null ? ha - Math.PI / 2 : 0, col(b.u), 1, t, b.u.length, b.u)); pillSprite(b.u, s.x, s.y + 20); continue; }
         if (!moving) { intoSprite('b:' + b.u, 76, 76, s.x, s.y, (x, y) => { drawNest(x, y, 0.8); drawSleeper(x, y, 0, col(b.u), 0.8, t, b.u.length, true, null, b.u); });
           pillSprite(b.u, s.x, s.y + 17); continue; }
         let a = angs.get(b.u) ?? -Math.PI / 2; if (moving && s2 && Math.hypot(s2.x - s.x, s2.y - s.y) > 0.5) a = ease(a, Math.atan2(s2.y - s.y, s2.x - s.x), dt, b.u); angs.set(b.u, a);
-        const ps = pose(b.u, moving, bankAt(b, now), dt); intoSprite('b:' + b.u, 76, 76, s.x, s.y, (x, y) => drawBird(x, y, a, b.u, 0.8, 0.92, 0, ps));
+        const ps = pose(b.u, moving, bankAt(b, now), dt); intoSprite('b:' + b.u, 76, 76, s.x, s.y, (x, y) => drawBird(x, y, a, b.u, 1, 0.92, 0, ps));   // the same size as your own bird
         pillSprite(b.u, s.x, s.y + 20); }
       // until the game's first answer arrives (with names), the nests the globe already knew about stay on the screen
       if (!birdsIn) { const tq = Math.min(Date.now() + dotsOff, dotsAt + 8000);
         for (const d of dots) { if (tq < d.arrive || isMine(d) || (d.u && d.u === myName())) continue; const q = flyAt(d, tq); if (!q || (p && km(p, q) < 0.05) || !front(q[0], q[1])) continue;
-          const s = sc(q[0], q[1]); if (!inView(s)) continue; const hd = headAt(d, tq); intoSprite('o:' + (d.u || d.i), 76, 76, s.x, s.y, (x, y) => { if (d.wet) { drawDrowning(x, y, hd != null ? hd - Math.PI / 2 : 0, d.col, 0.8, t, d.i * 0.77, d.u); return; } drawNest(x, y, 0.8); drawSleeper(x, y, hd != null ? hd - Math.PI / 2 : 0, d.col, 0.8, t, d.i * 0.77, true, null, d.u); }); } }
+          const s = sc(q[0], q[1]); if (!inView(s)) continue; const hd = headAt(d, tq); intoSprite('o:' + (d.u || d.i), 76, 76, s.x, s.y, (x, y) => { if (d.wet) { drawDrowning(x, y, hd != null ? hd - Math.PI / 2 : 0, d.col, 1, t, d.i * 0.77, d.u); return; } drawNest(x, y, 0.8); drawSleeper(x, y, hd != null ? hd - Math.PI / 2 : 0, d.col, 0.8, t, d.i * 0.77, true, null, d.u); }); } }
       // effects: catches (your bird dives, the worm is pulled up, +1 / +5 rises) and worms another bird took
       let swoop = 0;
       fx = fx.filter(f => { const age = (performance.now() - f.t0) / 1000, s = sc(f.lat, f.lng); if (!s) return age < 1.4;
