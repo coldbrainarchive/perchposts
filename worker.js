@@ -2508,7 +2508,11 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       // each page load); requests from any other device's game get "other": true and that page goes back to the globe
       const sid = typeof body.sid === "string" ? body.sid.slice(0, 64) : null;
       if (me && sid && url.pathname === "/hunt/state" && body.start) { await env.DB.prepare(`UPDATE hunt_birds SET sess = ? WHERE username = ?`).bind(sid, username).run(); me.sess = sid; }
-      else if (me && sid && me.sess && me.sess !== sid && ["/hunt/state", "/hunt/fly", "/hunt/pause", "/hunt/catch", "/hunt/drown"].includes(url.pathname)) return json({ other: true, error: "Your bird is being flown on another device" }, 409);
+      else if (me && sid && me.sess && me.sess !== sid && ["/hunt/state", "/hunt/fly", "/hunt/pause", "/hunt/catch", "/hunt/drown"].includes(url.pathname)) {
+        // only refused while that other device is really flying it (active in the last 20 s); otherwise this device
+        // just takes over (a take-off can reach us before the "start" that claims the bird)
+        if (body.leaving || (me.seen_at && me.seen_at > now - 20000)) return json({ other: true, error: "Your bird is being flown on another device" }, 409);
+        await env.DB.prepare(`UPDATE hunt_birds SET sess = ? WHERE username = ?`).bind(sid, username).run(); me.sess = sid; }
       // the page reports a big jump of its own bird (for tracking down glitches); kept small
       if (url.pathname === "/hunt/diag") {
         await env.DB.prepare(`INSERT INTO hunt_diag (at, username, data) VALUES (?, ?, ?)`).bind(now, username, JSON.stringify(body.d || {}).slice(0, 2000)).run();

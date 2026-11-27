@@ -868,7 +868,7 @@
         try { const b = tk && tk.split('.')[1]; if (b) { const pl = JSON.parse(decodeURIComponent(escape(atob(b.replace(/-/g, '+').replace(/_/g, '/'))))); myNm = pl.username || ''; } } catch (e) {}
         if (!myNm) try { myNm = localStorage.getItem('_myUsername') || ''; } catch (e) {} }
       return myNm; };
-    let landed = false, birdsIn = false, on = false, me = null, birds = [], worms = new Map(), off = 0, balance = null, fx = [], target = null, raf = 0, pollT = 0, flySent = 0, flyWait = 0, corr = null, lastF = 0, frameMs = 16.7, zoomIn = null, extAt = 0, ang = -Math.PI / 2, angs = new Map(), asking = new Set(), seenTaken = new Set(), hintUntil = 0;
+    let started = false, landed = false, birdsIn = false, on = false, me = null, birds = [], worms = new Map(), off = 0, balance = null, fx = [], target = null, raf = 0, pollT = 0, flySent = 0, flyWait = 0, corr = null, lastF = 0, frameMs = 16.7, zoomIn = null, extAt = 0, ang = -Math.PI / 2, angs = new Map(), asking = new Set(), seenTaken = new Set(), hintUntil = 0;
     const srv = () => Date.now() + off;
     // Server clock: on mobile data the round trip jitters, and taking each 2-second answer as-is nudged the bird (and so
     // the whole map) a few metres back or forward every time: the 'bounce'. Now the most trustworthy recent answer (the
@@ -1064,7 +1064,7 @@
     const css = c => `rgb(${c[0]},${c[1]},${c[2]})`, shade = c => c[0] + c[1] + c[2] > 600 ? [150, 150, 158] : c.map(x => Math.round(x * 0.55));
 
     function enter() {
-      if (on) return; on = true; birdsIn = false; landed = false; loadKit(() => {});
+      if (on) return; on = true; birdsIn = false; landed = false; started = false; loadKit(() => {});
       document.body.classList.add('hunting'); myBtn.classList.remove('in'); bar.classList.add('in');
       try { closeSheet(); focusPin(null); world.arcsData([]); world.ringsData([]); } catch (e) {}
       // the screen stays on your bird, so the map can't be dragged or pinch-zoomed during the hunt (leave with the ×)
@@ -1112,7 +1112,7 @@
       if (!on) return;
       if (r.s === 401) { leave(); toast('Sign in to play', true); return; }
       if (r.s === 200 && r.j.now) {
-        const t1 = Date.now(); clockSample(r.j.now - (t0 + t1) / 2, t1 - t0);
+        const t1 = Date.now(); clockSample(r.j.now - (t0 + t1) / 2, t1 - t0); started = true;
         if (sent > flySent && !flyWait && r.j.me && (!me || r.j.me.depart >= me.depart - 50)) { const q1 = me && posAt(me, srv()), q2 = posAt(r.j.me, srv()); if (!q1 || !q2 || km(q1, q2) > 0.04 || Math.abs((r.j.me.b1 ?? 0) - (me.b1 ?? 0)) > 0.01) setMe(r.j.me, 'poll'); }   // a flight you just set wins over an older answer; and the same flight (within 40 m) is left alone so your bird never slides
         if (r.j.balance != null) setBal(r.j.balance);
         if (r.j.st) { gSt = r.j.st; gStAt = r.j.now; } mealIn(r.j);
@@ -1654,7 +1654,7 @@
         world.pointOfView({ lat: la, lng: lo, altitude: al == null ? GAME_ALT : al }, 0); }
       if (pf > preAt) { preAt = pf + 400; preload(now); }
       // keep flying: a little before the far-ahead point is reached, carry on the same way
-      if (p && !landed && me.b1 != null && me.arrive - now < 12000 && performance.now() > extAt) { extAt = performance.now() + 5000; flyDir(headAt(me, now)); }
+      if (p && started && !landed && me.b1 != null && me.arrive - now < 12000 && performance.now() > extAt) { /* not before the server has answered the start, which claims the bird for this device */ extAt = performance.now() + 5000; flyDir(headAt(me, now)); }
       // the line under your worm count: day or night where your bird is
       const tEl = $('huntT'); if (tEl) { const hint = Date.now() < hintUntil; if (tEl.classList.contains('on') !== hint) tEl.classList.toggle('on', hint); }
       spritesEnd();
