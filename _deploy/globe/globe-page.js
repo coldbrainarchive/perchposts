@@ -1412,7 +1412,7 @@
       const x = c.getContext('2d'); x.translate(c.width / 2, c.height / 2); x.scale(sc, sc); paintNestSticks(x); nestPics.set(key, c); return c;
     }
     function drawNest(x, y, k, alpha) {
-      const s = k * 1.15, c = cx; c.save(); c.globalAlpha = alpha == null ? 1 : alpha; c.drawImage(nestPic(s), x - 20 * s, y - 20 * s, 40 * s, 40 * s); c.restore();
+      const s = k * 1.15 * .88, c = cx; c.save();   // .88: the stick ends poke out, so the pile is scaled to look the size the old nest did c.globalAlpha = alpha == null ? 1 : alpha; c.drawImage(nestPic(s), x - 20 * s, y - 20 * s, 40 * s, 40 * s); c.restore();
     }
     // a nest as a pile of sticks, seen from above. Drawn in nest units: centred on 0,0, about 16 across the rim (sticks poke out
     // to about 19). Always the same pile (fixed seed): sticks laid round the rim and crossing, each with its own shadow and a
