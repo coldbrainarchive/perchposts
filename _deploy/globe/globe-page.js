@@ -1404,20 +1404,47 @@
     // falling into it for depth. The bird is curled up in its own colour: round and fluffed, one wing folded over its
     // back, head turned and tucked onto its shoulder, breathing slowly, with little z's drifting up.
     const lift = (cl, f) => cl.map(v => Math.max(0, Math.min(255, Math.round(v * f))));
+    // the nest is a pile of sticks (about 100 of them), so it's drawn once per size into a small picture and reused
+    const nestPics = new Map();
+    function nestPic(s) {
+      const key = Math.max(1, Math.round(s * 8)); let v = nestPics.get(key); if (v) return v;
+      const sc = key / 8 * Math.min(3, Math.max(2, window.devicePixelRatio || 2)), c = document.createElement('canvas'); c.width = c.height = Math.ceil(40 * sc);
+      const x = c.getContext('2d'); x.translate(c.width / 2, c.height / 2); x.scale(sc, sc); paintNestSticks(x); nestPics.set(key, c); return c;
+    }
     function drawNest(x, y, k, alpha) {
-      const c = cx; c.save(); c.globalAlpha = alpha == null ? 1 : alpha; c.translate(x, y); c.scale(k * 1.15, k * 1.15); c.lineCap = 'round';
-      c.beginPath(); c.ellipse(1.5, 3.5, 15.5, 12.5, 0, 0, 7); c.fillStyle = 'rgba(0,0,0,.3)'; c.fill();                                        // shadow on the ground
-      let g = c.createRadialGradient(-4, -4, 2, 0, 0, 16); g.addColorStop(0, '#94653b'); g.addColorStop(1, '#6a4425');
-      c.beginPath(); c.ellipse(0, 0, 15, 12.5, 0, 0, 7); c.fillStyle = g; c.fill();                                                             // rim
-      // the bowl: the same woven twigs, darker the deeper they go
-      c.save(); c.beginPath(); c.ellipse(0, 0.6, 10.2, 8.2, 0, 0, 7); c.clip();
-      g = c.createRadialGradient(0, 1.5, 1, 0, 0.6, 10.5); g.addColorStop(0, '#6f4a28'); g.addColorStop(1, '#8a5f37'); c.fillStyle = g; c.fill();
-      for (let i = 0; i < 26; i++) { const r = 2 + (i % 5) * 1.8, a0 = i * 0.73 + (i % 4) * 0.5, l = 0.7 + (i % 3) * 0.3;
-        c.beginPath(); c.ellipse(0, 0.8, r, r * 0.8, 0, a0, a0 + l); c.strokeStyle = i % 2 ? 'rgba(170,122,78,.6)' : 'rgba(110,74,42,.55)'; c.lineWidth = 0.9 + (i % 3) * 0.25; c.stroke(); }
-      g = c.createLinearGradient(0, -8, 0, 4); g.addColorStop(0, 'rgba(0,0,0,.3)'); g.addColorStop(1, 'rgba(0,0,0,0)');                     // the rim's shadow inside
-      c.fillStyle = g; c.fillRect(-11, -9, 22, 14); c.restore();
-      for (let i = 0; i < 22; i++) { const a0 = i * 0.2856 + (i % 3) * 0.4, r = 11.2 + (i % 4) * 0.9, l = 0.5 + (i % 5) * 0.08;          // rim twigs
-        c.beginPath(); c.ellipse(0, 0, r, r * 0.83, 0, a0, a0 + l); c.strokeStyle = i % 2 ? '#b0814f' : '#8f6238'; c.lineWidth = 1.1 + (i % 3) * 0.35; c.stroke(); }
+      const s = k * 1.15, c = cx; c.save(); c.globalAlpha = alpha == null ? 1 : alpha; c.drawImage(nestPic(s), x - 20 * s, y - 20 * s, 40 * s, 40 * s); c.restore();
+    }
+    // a nest as a pile of sticks, seen from above. Drawn in nest units: centred on 0,0, about 16 across the rim (sticks poke out
+    // to about 19). Always the same pile (fixed seed): sticks laid round the rim and crossing, each with its own shadow and a
+    // light edge, a few forked; a darker hollow in the middle lined with fine twigs. (The species mock-up uses the same drawing.)
+    function paintNestSticks(c) {
+      let sd = 1234567; const rnd = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
+      const BARK = ['#7a5230', '#8f6238', '#a8794a', '#6b4526', '#b38a5a', '#5e3d22', '#94683d'];
+      c.save(); c.lineCap = 'round';
+      c.beginPath(); c.ellipse(1.6, 3.2, 17, 13.8, 0, 0, 7); c.fillStyle = 'rgba(0,0,0,.32)'; c.fill();                 // shadow on the ground
+      c.beginPath(); c.ellipse(0, 0, 15.2, 12.6, 0, 0, 7); c.fillStyle = '#4a311b'; c.fill();                         // packed base under the sticks
+      const stick = (x, y, a, L, w, col, fork) => {
+        const dx = Math.cos(a) * L / 2, dy = Math.sin(a) * L / 2, bend = (rnd() - .5) * L * .12;
+        const mx = x - Math.sin(a) * bend, my = y + Math.cos(a) * bend;
+        c.strokeStyle = 'rgba(25,14,5,.55)'; c.lineWidth = w + .7; c.beginPath(); c.moveTo(x - dx + .35, y - dy + .45); c.quadraticCurveTo(mx + .35, my + .45, x + dx + .35, y + dy + .45); c.stroke();   // its shadow
+        c.strokeStyle = col; c.lineWidth = w; c.beginPath(); c.moveTo(x - dx, y - dy); c.quadraticCurveTo(mx, my, x + dx, y + dy); c.stroke();
+        c.strokeStyle = 'rgba(255,226,180,.28)'; c.lineWidth = Math.max(.3, w * .3); c.beginPath(); c.moveTo(x - dx - .15, y - dy - .2); c.quadraticCurveTo(mx - .15, my - .2, x + dx - .15, y + dy - .2); c.stroke();   // light edge
+        if (fork) { const t = .2 + rnd() * .5, fx = x - dx + dx * 2 * t, fy = y - dy + dy * 2 * t, fa = a + (rnd() < .5 ? -1 : 1) * (.45 + rnd() * .4), fl = L * (.2 + rnd() * .2);
+          c.strokeStyle = col; c.lineWidth = w * .6; c.beginPath(); c.moveTo(fx, fy); c.lineTo(fx + Math.cos(fa) * fl, fy + Math.sin(fa) * fl); c.stroke(); }
+      };
+      for (const [n, r0, r1, Lmin, Lmax] of [[46, 11.5, 15.8, 7, 13], [40, 9.2, 12.6, 5.5, 10]]) {          // outer sticks, then the inner rim, at a slant so they cross
+        for (let i = 0; i < n; i++) { const th = rnd() * Math.PI * 2, r = r0 + rnd() * (r1 - r0), x = Math.cos(th) * r, y = Math.sin(th) * r * .83;
+          const a = th + Math.PI / 2 + (rnd() - .5) * 1.3, L = Lmin + rnd() * (Lmax - Lmin), w = .7 + rnd() * .9;
+          stick(x, y, a, L, w, BARK[Math.floor(rnd() * BARK.length)], rnd() < .18); } }
+      c.save(); c.beginPath(); c.ellipse(0, .6, 8.6, 6.9, 0, 0, 7); c.clip();                                         // the hollow
+      let g = c.createRadialGradient(0, 1.4, .5, 0, .6, 9); g.addColorStop(0, '#3e2915'); g.addColorStop(1, '#5a3c20'); c.fillStyle = g; c.fill();
+      for (let i = 0; i < 34; i++) { const th = rnd() * Math.PI * 2, r = rnd() * 7, x = Math.cos(th) * r, y = .6 + Math.sin(th) * r * .8, a = rnd() * Math.PI, L = 2.5 + rnd() * 4;
+        c.strokeStyle = rnd() < .5 ? 'rgba(150,108,66,.55)' : 'rgba(196,160,104,.4)'; c.lineWidth = .35 + rnd() * .35;
+        c.beginPath(); c.moveTo(x - Math.cos(a) * L / 2, y - Math.sin(a) * L / 2); c.quadraticCurveTo(x + (rnd() - .5), y + (rnd() - .5), x + Math.cos(a) * L / 2, y + Math.sin(a) * L / 2); c.stroke(); }
+      g = c.createLinearGradient(0, -6.5, 0, 4); g.addColorStop(0, 'rgba(0,0,0,.42)'); g.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = g; c.fillRect(-10, -8, 20, 13);
+      c.restore();
+      for (let i = 0; i < 12; i++) { const th = rnd() * Math.PI * 2, r = 8.2 + rnd() * 1.6, x = Math.cos(th) * r, y = Math.sin(th) * r * .83;   // sticks across the hollow's edge
+        stick(x, y, th + Math.PI / 2 + (rnd() - .5) * .8, 4 + rnd() * 4, .55 + rnd() * .5, BARK[Math.floor(rnd() * BARK.length)], false); }
       c.restore();
     }
     // each player's own logo bird with its eyes shut, for their sleeper (made once per player): the sign-up nest's eyelid
