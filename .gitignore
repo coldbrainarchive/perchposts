@@ -24,3 +24,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# species database: downloaded datasets and built output stay local
+species/raw/
+species/out/
+species/.venv/
