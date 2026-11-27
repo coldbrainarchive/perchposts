@@ -850,6 +850,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         const onYours = commentId && (post.username || "").toLowerCase() === who.toLowerCase();
         const msg = JSON.stringify({ text: `${by} tagged you in ${commentId ? (onYours ? "a chirp on your post" : "a chirp") : "a post"}`, postId, targetId: commentId || undefined, preview, icon: "AT" });
         await env.DB.prepare(`INSERT INTO system_notifications (id, user_id, message) VALUES (?, ?, ?)`).bind(crypto.randomUUID(), who, msg).run();
+        ctx.waitUntil(stampCheck(env, who, ["tagged"]));
       }
     } catch (e) { console.error("notifyMentions", e); }
   }
@@ -1635,6 +1636,10 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       if (checked) ctx.waitUntil(aiCheck({ kind: "post", id, postId: id, text: userText(body.title, body.content), uname: username, bid: body.browser_id }).catch(() => {}).then(() => checkAlerts(id)));
       else if (!isHuddle) ctx.waitUntil(checkAlerts(id));
       ctx.waitUntil(notifyMentions({ by: username, text: userText(body.title, body.content, first), postId: id }));
+      if (username && !isBot) ctx.waitUntil(stampCheck(env, username, ["posts"]).then(async () => {
+        try { const tz = request.cf && request.cf.timezone; if (!tz) return;
+          const hm = new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date()), h = +hm.slice(0, 2);
+          if (h >= 2 && h < 5) await stampAward(env, username, [{ k: "nightowl", at: new Date().toISOString(), d: { time: hm } }], false); } catch (e) {} }));
       const post = await env.DB.prepare(`SELECT * FROM posts WHERE id = ?`).bind(id).first();
       return json({ success: true, post: boolify(post, POST_BOOL_FIELDS) });
     } catch (err) {
@@ -2130,6 +2135,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       ).run();
       if (checked) ctx.waitUntil(aiCheck({ kind: "chirp", id, postId: body.post_id, text: userText(body.content), uname: username, bid: body.browser_id }));
       ctx.waitUntil(notifyMentions({ by: username, text: userText(body.content), postId: body.post_id, commentId: id }));
+      if (username && !isBot) ctx.waitUntil(stampCheck(env, username, ["chirps"]));
       await bumpPost(body.post_id);
       // Notify huddle members on new comment
       const huddlePost = await env.DB.prepare(`SELECT is_huddle, huddle_members, title, username AS post_username FROM posts WHERE id = ?`).bind(body.post_id).first();
@@ -2419,6 +2425,23 @@ async function handleRequest(request, env, ctx, corsHeaders) {
   // ── /hunt/dots ── every bird on the globe, for the birds and dots on the globe outside the game. Signed-out visitors
   // get colours only (no names, so nobody can see roughly where a player lives); signed-in players also get each bird's
   // name and role, so the globe can draw everyone's own logo bird asleep in its nest. Cached at the edge for 5 s.
+  // ── /passport?u=name ── a bird's passport: number (the order it joined in), date of issue, role and stamps. Opening
+  // one also checks that bird's stamps (at most once a minute; the first time fills in the past quietly).
+  if (url.pathname === "/passport" && request.method === "GET") {
+    try {
+      const u = String(url.searchParams.get("u") || "").slice(0, 80);
+      const acc = u && await env.DB.prepare(`SELECT username, role, created_at FROM mod_users WHERE LOWER(username) = LOWER(?) AND deleted_at IS NULL LIMIT 1`).bind(u).first();
+      if (!acc) return json({ error: "Not found" }, 404);
+      const name = acc.username;
+      const chk = await env.DB.prepare(`SELECT at FROM stamps WHERE username = ? AND k = '_chk'`).bind(name).first();
+      if (!chk || Date.now() - Date.parse(chk.at) > 60000) { await stampCheck(env, name, null); await env.DB.prepare(`INSERT OR REPLACE INTO stamps (username, k, at, d) VALUES (?, '_chk', ?, NULL)`).bind(name, new Date().toISOString()).run(); }
+      const [no, st] = await Promise.all([
+        env.DB.prepare(`SELECT COUNT(*) AS n FROM mod_users WHERE created_at <= ?`).bind(acc.created_at).first(),
+        env.DB.prepare(`SELECT k, at, d FROM stamps WHERE username = ? AND k != '_chk' ORDER BY at`).bind(name).all()]);
+      return json({ u: name, no: no ? no.n : 0, issued: acc.created_at, role: acc.role === "admin" || acc.role === "mod" ? acc.role : null,
+        stamps: (st.results || []).map(r => ({ k: r.k, at: r.at, d: r.d ? JSON.parse(r.d) : null, label: stampLabel(r.k) })) });
+    } catch (err) { return serverError(err); }
+  }
   // the live connection (see HuntHub at the bottom of this file)
   if (url.pathname === "/hunt/ws" && request.method === "GET") {
     if (!env.HUNT) return json({ error: "Not available" }, 404);
@@ -2730,6 +2753,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       const col = commentId ? "comment_id" : "post_id", id = commentId || postId;
       const r = await env.DB.prepare(`SELECT COUNT(*) AS n, SUM(CASE WHEN giver = ? THEN 1 ELSE 0 END) AS m FROM worms WHERE ${col} = ?`).bind(username, id).first();
       const pr = postId ? (await postResp([postId], username))[postId] : null;
+      ctx.waitUntil(Promise.all([stampCheck(env, username, ["worms"]), stampCheck(env, receiver, ["worms"])]));
       return json({ success: true, worms: r?.n || 0, mine: r?.m || 0, given: count, balance: have - count, ...(pr ? { score: pr.n, myVote: pr.m } : {}) });
     } catch (err) {
       return serverError(err);
@@ -2908,6 +2932,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
       }
       await bumpPost(body.post_id);
       const pr = (await postResp([body.post_id], username))[body.post_id];
+      if (body.value === 1 && votedPost?.username && pr.n >= 25) ctx.waitUntil(stampCheck(env, votedPost.username, ["posts", "popular"]));   // Popular: 25 flaps on a post
       return json({ success: true, score: pr.n, myVote: pr.m, voteCount: pr.n });
     } catch (err) {
       return serverError(err);
@@ -3202,6 +3227,7 @@ async function handleRequest(request, env, ctx, corsHeaders) {
         if (body.ip_hash)    await env.DB.prepare(`DELETE FROM bans WHERE ip_hash = ?`).bind(body.ip_hash).run();
         await env.DB.prepare(`INSERT OR IGNORE INTO jailed (id, browser_id, username, ip_hash, created_at) VALUES (?, ?, ?, ?, ?)`)
           .bind(crypto.randomUUID(), body.browser_id || null, body.username || null, body.ip_hash || null, now).run();
+        if (body.username) ctx.waitUntil(stampCheck(env, body.username, ["cage"]));
       }
       if (t === "unjail") {
         if (body.username)   await env.DB.prepare(`DELETE FROM jailed WHERE username = ?`).bind(body.username).run();
@@ -4561,4 +4587,84 @@ export class HuntHub {
       for (const ws of socks) { const a = ws.deserializeAttachment() || {}; if (a.u && a.game) try { ws.send(s); } catch (e) {} }
     }
   }
+}
+
+// ── Passport stamps (2026-11-27) ──────────────────────────────────────────────
+// Each bird's passport collects stamps for things done on the site. Earned stamps are kept in `stamps` (username, k,
+// at, d) the moment they're earned, so the date stays put. Every check reads only that bird's own rows through the
+// username indexes (never the whole posts table). The first time a bird is checked, everything it has already
+// earned is filled in quietly (row "_chk"); after that each new stamp sends a bell notification.
+// k: tag:<Tag>:1|50|100, post1, chirp1, huddle, generous, rewarded, tagged, popular, chatterbox, nightowl, streak,
+// globetrotter, cage, staff
+const STAMP_TAGS = ["General", "Sports", "Science", "Nature", "Entertainment", "Random", "Announcements"];
+const STAMP_NAMES = { post1: "First post", chirp1: "First chirp", huddle: "Huddle up", generous: "Generous", rewarded: "Rewarded", tagged: "Tagged",
+  popular: "Popular", chatterbox: "Chatterbox", nightowl: "Night owl", streak: "7-day streak", globetrotter: "Globetrotter", cage: "Detained", staff: "Staff" };
+const stampLabel = k => { const t = String(k).split(":"); return t[0] === "tag" ? `${t[1]} · ${t[2] === "1" ? "first post" : t[2] + " posts"}` : STAMP_NAMES[k] || k; };
+async function stampAward(env, name, list, quiet) {
+  list = list.filter(s => s && s.k && s.at); if (!name || !list.length) return [];
+  const rs = await env.DB.batch(list.map(s => env.DB.prepare(`INSERT OR IGNORE INTO stamps (username, k, at, d) VALUES (?, ?, ?, ?)`).bind(name, s.k, s.at, s.d ? JSON.stringify(s.d) : null)));
+  const fresh = list.filter((s, i) => rs[i] && rs[i].meta && rs[i].meta.changes);
+  if (!quiet) for (const s of fresh) await env.DB.prepare(`INSERT INTO system_notifications (id, user_id, message) VALUES (?, ?, ?)`).bind(crypto.randomUUID(), name,
+    JSON.stringify({ text: `${name} earned a passport stamp: ${stampLabel(s.k)}`, icon: "STAMP", link: `/?passport=${encodeURIComponent(s.k)}` })).run();
+  return fresh;
+}
+// work out which stamps a bird has earned, from its own posts / chirps / worms / notifications. parts: which checks
+async function stampFind(env, name, parts) {
+  const all = !parts, has = p => all || parts.includes(p), out = [];
+  if (has("posts")) {
+    const { results: ps = [] } = await env.DB.prepare(`SELECT id, board, country, created_at, is_huddle FROM posts WHERE username = ? AND deleted = 0 ORDER BY created_at LIMIT 5000`).bind(name).all();
+    const plain = ps.filter(p => !p.is_huddle);
+    if (plain.length) out.push({ k: "post1", at: plain[0].created_at });
+    const hud = ps.find(p => p.is_huddle); if (hud) out.push({ k: "huddle", at: hud.created_at });
+    const byTag = {}; for (const p of plain) { const t = STAMP_TAGS.find(x => x.toLowerCase() === String(p.board || "").toLowerCase()); if (t) (byTag[t] = byTag[t] || []).push(p); }
+    for (const t in byTag) for (const n of [1, 50, 100]) if (byTag[t].length >= n) out.push({ k: `tag:${t}:${n}`, at: byTag[t][n - 1].created_at });
+    // 7 days in a row (UTC days)
+    const days = [...new Set(plain.map(p => String(p.created_at).slice(0, 10)))].sort(); let run = 0, prev = null;
+    for (const d of days) { const t = Date.parse(d + "T00:00:00Z"); run = prev != null && t - prev === 864e5 ? run + 1 : 1; prev = t;
+      if (run === 7) { out.push({ k: "streak", at: plain.find(p => String(p.created_at).startsWith(d)).created_at }); break; } }
+    // tags from 5 different countries
+    const seen = new Set(); for (const p of plain) { const c = String(p.country || "").trim(); if (!c || seen.has(c)) continue; seen.add(c); if (seen.size === 5) { out.push({ k: "globetrotter", at: p.created_at }); break; } }
+    if (has("popular") && plain.length) {
+      for (let i = 0; i < plain.length; i += 80) { const ids = plain.slice(i, i + 80).map(p => p.id);
+        const { results: hot = [] } = await env.DB.prepare(`SELECT post_id FROM post_votes WHERE value > 0 AND post_id IN (${ids.map(() => "?").join(",")}) GROUP BY post_id HAVING COUNT(DISTINCT COALESCE(username, browser_id)) >= 25 LIMIT 1`).bind(...ids).all();
+        if (hot.length) { const v = await env.DB.prepare(`SELECT created_at FROM post_votes WHERE post_id = ? AND value > 0 ORDER BY created_at LIMIT 1 OFFSET 24`).bind(hot[0].post_id).first();
+          out.push({ k: "popular", at: v ? v.created_at : new Date().toISOString(), d: { post: hot[0].post_id } }); break; } }
+    }
+  }
+  if (has("huddle")) {   // joined someone else's huddle (date: when it started)
+    const h = await env.DB.prepare(`SELECT MIN(created_at) AS at FROM posts INDEXED BY idx_posts_huddles WHERE is_huddle = 1 AND deleted = 0 AND huddle_members LIKE ?`).bind(`%"${name}"%`).first();
+    if (h && h.at) out.push({ k: "huddle", at: h.at });
+  }
+  if (has("chirps")) {
+    const c = await env.DB.prepare(`SELECT COUNT(*) AS n, MIN(created_at) AS at FROM comments WHERE username = ? AND deleted = 0`).bind(name).first();
+    if (c && c.n) out.push({ k: "chirp1", at: c.at });
+    if (c && c.n >= 100) { const r = await env.DB.prepare(`SELECT created_at FROM comments WHERE username = ? AND deleted = 0 ORDER BY created_at LIMIT 1 OFFSET 99`).bind(name).first(); if (r) out.push({ k: "chatterbox", at: r.created_at }); }
+  }
+  if (has("worms")) {   // worms between birds (not the game's '__hunt__' ones)
+    const g = await env.DB.prepare(`SELECT MIN(created_at) AS at FROM worms WHERE giver = ? AND receiver != '__hunt__'`).bind(name).first(); if (g && g.at) out.push({ k: "generous", at: g.at });
+    const r = await env.DB.prepare(`SELECT MIN(created_at) AS at FROM worms WHERE receiver = ? AND giver != '__hunt__'`).bind(name).first(); if (r && r.at) out.push({ k: "rewarded", at: r.at });
+  }
+  if (has("tagged")) {
+    const t = await env.DB.prepare(`SELECT message, created_at FROM system_notifications WHERE user_id = ? AND message LIKE '%"icon":"AT"%' ORDER BY created_at LIMIT 1`).bind(name).first();
+    if (t) { let by = null; try { by = String(JSON.parse(t.message).text || "").split(" ")[0] || null; } catch (e) {} out.push({ k: "tagged", at: t.created_at, d: by ? { by } : null }); }
+  }
+  if (has("cage")) {
+    const a = await env.DB.prepare(`SELECT MIN(created_at) AS at FROM jailed WHERE username = ?`).bind(name).first();
+    const b = await env.DB.prepare(`SELECT MIN(created_at) AS at FROM ai_flags WHERE username = ? AND caged = 1`).bind(name).first();
+    const at = [a && a.at, b && b.at].filter(Boolean).sort()[0]; if (at) out.push({ k: "cage", at });
+  }
+  if (has("staff")) {
+    const m = await env.DB.prepare(`SELECT role, created_at FROM mod_users WHERE username = ? AND deleted_at IS NULL`).bind(name).first();
+    if (m && (m.role === "mod" || m.role === "admin")) out.push({ k: "staff", at: m.created_at, d: { role: m.role } });
+  }
+  return out;
+}
+// check a bird's stamps (a part, or everything); the very first check fills in the past quietly
+async function stampCheck(env, name, parts) {
+  if (!name || name === "__system__" || /Bot$/.test(name)) return [];
+  try {
+    const init = await env.DB.prepare(`SELECT at FROM stamps WHERE username = ? AND k = '_chk'`).bind(name).first();
+    if (!init) { await stampAward(env, name, await stampFind(env, name, null), true); await env.DB.prepare(`INSERT OR REPLACE INTO stamps (username, k, at, d) VALUES (?, '_chk', ?, NULL)`).bind(name, new Date().toISOString()).run(); if (!parts) return []; }
+    return await stampAward(env, name, await stampFind(env, name, parts), false);
+  } catch (e) { console.error("stamps", e.message); return []; }
 }
