@@ -32,8 +32,9 @@ def fetch(url, binary=False):
             if e.code == 429:
                 # too fast: wait at least as long as asked, doubling up to 5 minutes, and never give up (so a refusal
                 # is never saved as "no photo")
-                print("429", url.split("/")[2], time.strftime("%H:%M:%S"), "waiting", wait, flush=True)
-                time.sleep(max(wait, float(e.headers.get("Retry-After") or 1))); wait = min(wait * 2, 300); continue
+                ra = float(e.headers.get("Retry-After") or 1); w = max(wait, ra)
+                print("429", url.split("/")[2], time.strftime("%H:%M:%S"), "asked", ra, "waiting", w, flush=True)
+                time.sleep(w); wait = min(wait * 2, 300); continue
             tries += 1
         except Exception: tries += 1
         if tries >= 5: return None
